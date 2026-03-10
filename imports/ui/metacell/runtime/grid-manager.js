@@ -204,6 +204,7 @@ export class GridManager {
         var output = input.parentElement.querySelector(".cell-output");
         if (output) {
             output.classList.toggle("formula-value", !!hasFormula);
+            output.classList.toggle("error-value", !!(options && options.error));
             var opts = options || {};
             if (opts.attachment) {
                 output.innerHTML = this.renderAttachmentValue(opts.attachment);
@@ -217,10 +218,17 @@ export class GridManager {
         var meta = attachment || {};
         var pending = !!meta.pending;
         var name = this.escapeHtml(String(meta.name || ""));
+        var previewUrl = String(meta.previewUrl || "");
+        var isImage = String(meta.type || "").toLowerCase().indexOf("image/") === 0 && !!previewUrl;
         if (pending) {
             return "<div class='attachment-chip pending full'><button type='button' class='attachment-select'>Choose file</button></div>";
         }
-        return "<div class='attachment-chip' data-full-name='" + (name || "Attached file") + "'><button type='button' class='attachment-select'>" + (name || "Attached file") + "</button><button type='button' class='attachment-remove' title='Remove attachment'>×</button></div>";
+        return "<div class='attachment-chip" + (isImage ? " has-image-preview" : "") + "' data-full-name='" + (name || "Attached file") + "'>"
+            + "<button type='button' class='attachment-select'>" + (name || "Attached file") + "</button>"
+            + (isImage
+                ? "<div class='attachment-image-preview'><img src='" + this.escapeHtml(previewUrl) + "' alt='" + (name || "Attached image") + "' /></div>"
+                : "")
+            + "<button type='button' class='attachment-remove' title='Remove attachment'>×</button></div>";
     }
 
     renderMarkdown(value) {

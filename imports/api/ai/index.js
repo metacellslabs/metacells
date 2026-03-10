@@ -575,7 +575,15 @@ if (Meteor.isServer) {
         if (!response.ok) {
           const body = await response.text();
           log("method.ai.requestChat.error", { status: response.status, body: body.slice(0, 500) });
-          throw new Error(`HTTP ${response.status}`);
+          let details = body;
+          try {
+            const parsed = JSON.parse(body);
+            details = parsed && parsed.error && (parsed.error.message || parsed.error.code || parsed.error.type)
+              ? String(parsed.error.message || parsed.error.code || parsed.error.type)
+              : body;
+          } catch (e) {}
+          const message = String(details || "").trim();
+          throw new Error(message || `HTTP ${response.status}`);
         }
 
         const data = await response.json();

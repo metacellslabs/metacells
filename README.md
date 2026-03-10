@@ -98,6 +98,8 @@ Workbook data stores only populated state, including:
   - safe key encoding helpers
 - [imports/api/settings/index.js](/Users/zentelechia/playground/thinker/imports/api/settings/index.js)
   - AI provider and channel settings
+- [imports/api/settings/providers](/Users/zentelechia/playground/thinker/imports/api/settings/providers)
+  - file-based AI provider definitions and registry
 - [imports/api/ai/index.js](/Users/zentelechia/playground/thinker/imports/api/ai/index.js)
   - server-side AI requests, queueing, dependency refresh, provider selection
 - [imports/api/files/index.js](/Users/zentelechia/playground/thinker/imports/api/files/index.js)
@@ -139,6 +141,61 @@ Supported reference concepts:
 - `recalc(...)`
 - `update(...)`
 
+## Custom Formulas
+
+File-based formulas live in:
+- [imports/ui/metacell/runtime/formulas](/Users/zentelechia/playground/thinker/imports/ui/metacell/runtime/formulas)
+
+Format:
+- one formula per file
+- export a definition with `defineFormula(...)`
+- the definition is auto-discovered at startup through [imports/ui/metacell/runtime/formulas/index.js](/Users/zentelechia/playground/thinker/imports/ui/metacell/runtime/formulas/index.js)
+- Help reads the same registry, so registered formulas appear in Help automatically
+
+Definition shape:
+
+```js
+import { defineFormula } from "./definition.js";
+
+export default defineFormula({
+  name: "MYFORMULA",
+  aliases: ["MY_ALIAS"],
+  signature: "MYFORMULA(arg1, arg2)",
+  summary: "Explain what the formula does.",
+  examples: ["`=MYFORMULA(A1:A3, 2)`"],
+  execute: ({ args, helpers, engine, sheetId, cellId, stack, options }) => {
+    return "";
+  },
+});
+```
+
+Useful execution inputs:
+- `args`
+  - already evaluated formula arguments
+- `helpers`
+  - shared coercion and matrix helpers such as `toMatrix`, `flattenValues`, `toNumber`, `matchesCriteria`
+- `engine`
+  - current `FormulaEngine` instance if custom logic needs deeper access
+
+How to add a new formula:
+1. Create a new file in `imports/ui/metacell/runtime/formulas/`
+2. Export a formula definition with `defineFormula(...)`
+3. Restart the app
+4. Startup validation checks the file schema and registry coverage
+5. The formula becomes available in evaluation and in Help automatically
+
+Built-in formulas included now:
+- `SUM`
+- `AVERAGE`
+- `IF`
+- `VLOOKUP`
+- `XLOOKUP`
+- `COUNT`
+- `COUNTA`
+- `LEN`
+- `SUMIF`
+- `INDEX`
+
 ## Reports
 
 Report tabs support:
@@ -155,11 +212,56 @@ AI runs only on the server.
 Features:
 - provider selection from settings
 - DeepSeek and LM Studio support
+- provider definitions are file-based and auto-discovered at startup
 - queue with max 3 concurrent requests
 - dedupe for identical queued tasks
 - dependency-aware refresh for queued tasks
 - retry on failure
 - URL content fetching for AI prompt enrichment
+
+## Custom AI Providers
+
+File-based AI providers live in:
+- [imports/api/settings/providers](/Users/zentelechia/playground/thinker/imports/api/settings/providers)
+
+Format:
+- one provider per file
+- export a definition with `defineAIProvider(...)`
+- the definition is auto-discovered at startup through [imports/api/settings/providers/index.js](/Users/zentelechia/playground/thinker/imports/api/settings/providers/index.js)
+- the settings UI reads the same registry, so discovered providers show up there automatically
+
+Definition shape:
+
+```js
+import { defineAIProvider } from "./definition.js";
+
+export default defineAIProvider({
+  id: "my-provider",
+  name: "My Provider",
+  type: "my_provider",
+  baseUrl: "https://api.example.com/v1",
+  model: "default-model",
+  apiKey: "",
+  enabled: true,
+  availableModels: ["default-model", "fast-model"],
+  fields: [
+    { key: "baseUrl", label: "Base URL", type: "text", placeholder: "https://api.example.com/v1" },
+    { key: "model", label: "Model", type: "text", placeholder: "default-model" },
+    { key: "apiKey", label: "API key", type: "password", placeholder: "sk-..." },
+  ],
+});
+```
+
+How to add a new provider:
+1. Create a new file in `imports/api/settings/providers/`
+2. Export a provider definition with `defineAIProvider(...)`
+3. Restart the app
+4. Startup validation checks the file schema and registry coverage
+5. The provider appears in `/settings` automatically
+
+Built-in providers included now:
+- `DeepSeek`
+- `LM Studio`
 
 ## File Extraction
 

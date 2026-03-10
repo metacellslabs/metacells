@@ -168,6 +168,7 @@ export class SpreadsheetApp {
             name: String(payload && payload.name || ""),
             type: String(payload && payload.type || ""),
             content: String(payload && payload.content || ""),
+            previewUrl: String(payload && payload.previewUrl || ""),
             pending: !!(payload && payload.pending)
         });
     }
@@ -1482,11 +1483,16 @@ export class SpreadsheetApp {
                 }
 
                 try {
-                    var content = await this.readAttachedFileContent(file);
+                    var base64 = await file.arrayBuffer().then((buffer) => this.arrayBufferToBase64(buffer));
+                    var content = await this.readAttachedFileContent(file, base64);
+                    var previewUrl = String(file.type || "").toLowerCase().indexOf("image/") === 0
+                        ? ("data:" + String(file.type || "image/*") + ";base64," + base64)
+                        : "";
                     var attachmentSource = this.buildAttachmentSource({
                         name: file.name || "Attached file",
                         type: file.type || "",
                         content: content,
+                        previewUrl: previewUrl,
                         pending: false
                     });
                     this.captureHistorySnapshot("attachment:" + String(ctx.sheetId || "") + ":" + String(ctx.cellId || "").toUpperCase());
@@ -1513,15 +1519,15 @@ export class SpreadsheetApp {
         }
     }
 
-    readAttachedFileContent(file) {
+    readAttachedFileContent(file, preparedBase64) {
         if (!file || typeof file.arrayBuffer !== "function") {
             return Promise.reject(new Error("Failed to read file"));
         }
-        return file.arrayBuffer()
-            .then((buffer) => {
-                var base64 = this.arrayBufferToBase64(buffer);
-                return Meteor.callAsync("files.extractContent", String(file.name || "Attached file"), String(file.type || ""), base64);
-            })
+        var base64Promise = typeof preparedBase64 === "string" && preparedBase64
+            ? Promise.resolve(preparedBase64)
+            : file.arrayBuffer().then((buffer) => this.arrayBufferToBase64(buffer));
+        return base64Promise
+            .then((base64) => Meteor.callAsync("files.extractContent", String(file.name || "Attached file"), String(file.type || ""), base64))
             .then((result) => String(result && result.content != null ? result.content : ""));
     }
 
@@ -4148,6 +4154,7 @@ export class SpreadsheetApp {
                         var attachment = this.parseAttachmentSource(raw);
                         var isFormula = !!raw && (raw.charAt(0) === "=" || raw.charAt(0) === ">" || raw.charAt(0) === "#" || raw.charAt(0) === "'");
                         var storedDisplay = this.storage.getCellDisplayValue(this.activeSheetId, input.id);
+                        var errorHint = this.storage.getCellError(this.activeSheetId, input.id);
                         var value = isFormula && Object.prototype.hasOwnProperty.call(computedValues, input.id)
                             ? computedValues[input.id]
                             : raw;
@@ -4157,6 +4164,10 @@ export class SpreadsheetApp {
                         if (attachment) {
                             displayValue = String(attachment.name || (attachment.pending ? "Select file" : "Attached file"));
                         }
+                        if (String(displayValue || "").indexOf("#AI_ERROR:") === 0) {
+                            displayValue = String(displayValue).replace(/^#AI_ERROR:\s*/i, "") || "AI error";
+                            if (!errorHint) errorHint = String(displayValue || "");
+                        }
                         if (isFormula && String(displayValue == null ? "" : displayValue) === "" && storedDisplay) {
                             displayValue = storedDisplay;
                         }
@@ -4164,7 +4175,17 @@ export class SpreadsheetApp {
                         input.parentElement.classList.toggle("has-formula", isFormula);
                         input.parentElement.classList.toggle("has-display-value", String(displayValue == null ? "" : displayValue) !== "");
                         input.parentElement.classList.toggle("has-attachment", !!attachment);
-                        this.grid.renderCellValue(input, displayValue, isEditing, isFormula, { literal: literalDisplay, attachment: attachment });
+                        input.parentElement.classList.toggle("has-error", !!errorHint);
+                        if (errorHint) {
+                            input.parentElement.setAttribute("data-error-hint", errorHint);
+                        } else {
+                            input.parentElement.removeAttribute("data-error-hint");
+                        }
+                        this.grid.renderCellValue(input, displayValue, isEditing, isFormula, {
+                            literal: literalDisplay,
+                            attachment: attachment,
+                            error: !!errorHint
+                        });
                         if (isFormula) {
                             formulaDone++;
                             this.updateCalcProgress(formulaDone, formulaCount);
@@ -4174,6 +4195,8 @@ export class SpreadsheetApp {
                         input.parentElement.classList.remove("has-formula");
                         input.parentElement.classList.remove("has-display-value");
                         input.parentElement.classList.remove("has-attachment");
+                        input.parentElement.classList.remove("has-error");
+                        input.parentElement.removeAttribute("data-error-hint");
                     }
                 });
             };

@@ -18,8 +18,50 @@ function renderHelpItem(text) {
   });
 }
 
+function parseExampleItem(text) {
+  const lines = String(text || "").split("\n");
+  let title = "";
+  let formula = "";
+  let value = "";
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "");
+    if (line.indexOf("Title:") === 0) {
+      title = line.substring("Title:".length).trim();
+      continue;
+    }
+    if (line.indexOf("Formula:") === 0) {
+      formula = line.substring("Formula:".length).trim();
+      continue;
+    }
+    if (line.indexOf("Value:") === 0) {
+      value = line.substring("Value:".length).trim();
+    }
+  }
+
+  return { title, formula, value };
+}
+
+function renderExampleItem(text) {
+  const parsed = parseExampleItem(text);
+  return (
+    <div className="help-example-cell">
+      {parsed.title ? <div className="help-example-title">{parsed.title}</div> : null}
+      <div className="help-example-row help-example-formula">
+        <span className="help-example-label">Formula</span>
+        <div className="help-example-value">{renderHelpItem(parsed.formula)}</div>
+      </div>
+      <div className="help-example-row help-example-result">
+        <span className="help-example-label">Value</span>
+        <div className="help-example-value">{renderHelpItem(parsed.value)}</div>
+      </div>
+    </div>
+  );
+}
+
 export function HelpOverlay({ isOpen, onClose }) {
   const [query, setQuery] = useState("");
+  const [activeSectionTitle, setActiveSectionTitle] = useState("");
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -33,7 +75,10 @@ export function HelpOverlay({ isOpen, onClose }) {
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (!isOpen) setQuery("");
+    if (!isOpen) {
+      setQuery("");
+      setActiveSectionTitle("");
+    }
   }, [isOpen]);
 
   const filteredSections = useMemo(() => {
@@ -48,6 +93,20 @@ export function HelpOverlay({ isOpen, onClose }) {
       return { ...section, items };
     }).filter((section) => section.items.length > 0);
   }, [query]);
+
+  useEffect(() => {
+    if (!filteredSections.length) {
+      setActiveSectionTitle("");
+      return;
+    }
+
+    const hasActive = filteredSections.some((section) => section.title === activeSectionTitle);
+    if (!hasActive) {
+      setActiveSectionTitle(filteredSections[0].title);
+    }
+  }, [filteredSections, activeSectionTitle]);
+
+  const activeSection = filteredSections.find((section) => section.title === activeSectionTitle) || null;
 
   if (!isOpen) return null;
 
@@ -70,23 +129,40 @@ export function HelpOverlay({ isOpen, onClose }) {
             placeholder="Search formulas, mentions, reports, files..."
           />
         </div>
-        <div className="help-grid">
+        <div className="help-layout">
           {filteredSections.length ? (
-            filteredSections.map((section) => (
-              <section
-                key={section.title}
-                className={`help-card help-card-${section.title.toLowerCase().replace(/\s+/g, "-")}`}
-              >
-                <h3>{section.title}</h3>
-                <ul>
-                  {section.items.map((item) => (
-                    <li key={item}>{renderHelpItem(item)}</li>
+            <>
+              <aside className="help-sidebar" aria-label="Help sections">
+                <div className="help-tabs">
+                  {filteredSections.map((section) => (
+                    <button
+                      key={section.title}
+                      type="button"
+                      className={`help-tab${section.title === activeSectionTitle ? " active" : ""}`}
+                      onClick={() => setActiveSectionTitle(section.title)}
+                    >
+                      {section.title}
+                    </button>
                   ))}
-                </ul>
-              </section>
-            ))
+                </div>
+              </aside>
+              {activeSection ? (
+                <section
+                  className={`help-card help-panel help-card-${activeSection.title.toLowerCase().replace(/\s+/g, "-")}`}
+                >
+                  <h3>{activeSection.title}</h3>
+                  <ul>
+                    {activeSection.items.map((item) => (
+                      <li key={item}>
+                        {activeSection.title === "Examples" ? renderExampleItem(item) : renderHelpItem(item)}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+            </>
           ) : (
-            <section className="help-card help-card-empty">
+            <section className="help-card help-card-empty help-panel">
               <h3>No matches</h3>
               <p>Try a broader search like <strong>file</strong>, <strong>report</strong>, <strong>update</strong>, or <strong>@idea</strong>.</p>
             </section>

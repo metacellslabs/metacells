@@ -50,6 +50,7 @@ function normalizeCellRecord(source, previousCell) {
         sourceType: sourceType,
         value: sourceType === "formula" ? String(prev.value || "") : nextSource,
         state: sourceType === "formula" ? (String(prev.source || "") !== nextSource ? "stale" : String(prev.state || "stale")) : "resolved",
+        error: sourceType === "formula" ? String(prev.error || "") : "",
         generatedBy: String(prev.generatedBy || ""),
         version: version
     };
@@ -115,6 +116,12 @@ export class WorkbookStorageAdapter {
         return String(cell.state || "");
     }
 
+    getCellError(sheetId, cellId) {
+        var cell = this.getCellRecord(sheetId, cellId);
+        if (!cell) return "";
+        return String(cell.error || "");
+    }
+
     getCellSource(sheetId, cellId) {
         var cell = this.getCellRecord(sheetId, cellId);
         return cell ? String(cell.source || "") : "";
@@ -137,10 +144,11 @@ export class WorkbookStorageAdapter {
             return;
         }
 
+        next.error = "";
         sheet.cells[id] = next;
     }
 
-    setComputedCellValue(sheetId, cellId, value, state) {
+    setComputedCellValue(sheetId, cellId, value, state, errorMessage) {
         var sheet = this.ensureSheet(sheetId);
         if (!sheet) return;
         var id = String(cellId || "").toUpperCase();
@@ -148,6 +156,7 @@ export class WorkbookStorageAdapter {
         if (!cell) return;
         cell.value = String(value == null ? "" : value);
         cell.state = String(state || "resolved");
+        cell.error = String(errorMessage || "");
         sheet.cells[id] = cell;
     }
 

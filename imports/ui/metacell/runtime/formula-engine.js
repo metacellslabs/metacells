@@ -5,6 +5,7 @@ import { recalcMethods } from "./formula-engine/recalc-methods.js";
 import { parserMethods } from "./formula-engine/parser-methods.js";
 import { referenceMethods } from "./formula-engine/reference-methods.js";
 import { schedulerMethods } from "./formula-engine/scheduler-methods.js";
+import { buildFormulaContext } from "./formulas/index.js";
 
 export class FormulaEngine {
     constructor(storageService, aiService, getTabs, cellIds) {
@@ -124,6 +125,22 @@ export class FormulaEngine {
                 if (!refSheetId) throw new Error("Unknown sheet: " + sheetName);
                 return this.regionToCsv(refSheetId, startCellId, endCellId, stack);
             },
+            mentionRegionRef: (startCellId, endCellId) => {
+                return this.regionToCsv(sheetId, startCellId, endCellId, stack);
+            },
+            mentionRawRegionRef: (startCellId, endCellId) => {
+                return this.regionToRawCsv(sheetId, startCellId, endCellId);
+            },
+            mentionSheetRegionRef: (sheetName, startCellId, endCellId) => {
+                var refSheetId = this.findSheetIdByName(sheetName);
+                if (!refSheetId) throw new Error("Unknown sheet: " + sheetName);
+                return this.regionToCsv(refSheetId, startCellId, endCellId, stack);
+            },
+            mentionRawSheetRegionRef: (sheetName, startCellId, endCellId) => {
+                var refSheetId = this.findSheetIdByName(sheetName);
+                if (!refSheetId) throw new Error("Unknown sheet: " + sheetName);
+                return this.regionToRawCsv(refSheetId, startCellId, endCellId);
+            },
             namedRef: (cellName) => {
                 return this.getNamedOrSpecialValue(sheetId, cellName, stack, options);
             },
@@ -150,6 +167,13 @@ export class FormulaEngine {
                 return this.getNamedOrSpecialValue(sheetId, cellName, stack, options, true);
             }
         };
+
+        Object.assign(context, buildFormulaContext(this, {
+            sheetId,
+            cellId,
+            stack,
+            options
+        }));
 
         this.cellIds.forEach((id) => {
             Object.defineProperty(context, id, {

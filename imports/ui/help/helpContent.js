@@ -1,3 +1,5 @@
+import { buildFormulaHelpSection } from "../metacell/runtime/formulas/index.js";
+
 export const HELP_SECTIONS = [
   {
     title: "Cell Types",
@@ -16,6 +18,7 @@ export const HELP_SECTIONS = [
       "`update(cellRef, newValue)` changes another cell from a formula, useful for workflows and chained actions",
     ],
   },
+  buildFormulaHelpSection(),
   {
     title: "Mentioning",
     items: [
@@ -35,23 +38,23 @@ export const HELP_SECTIONS = [
   {
     title: "Examples",
     items: [
-      "Formula: `'Write 3 taglines for @idea`\nValue: `Smarter budgeting for every kid. | Watch savings grow in real time. | Money habits made playful.`",
-      "Formula: `>top 10 problems that @idea solves`\nValue: `low saving motivation | poor allowance visibility | weak parent-child money conversations | delayed reward feedback ...`",
-      "Formula: `#compare @idea with competitors;4;6`\nValue: `| Product | Strength | Weakness | Differentiator |`",
-      "Formula: `'Summarise https://example.com for @idea`\nValue: `fetches the page content, inserts it into the AI prompt, and returns a summary shaped around the idea`",
-      "Formula: `'Summarise @C1:B10`\nValue: `passes the full region values into the AI prompt and returns one summary for that block`",
-      "Formula: `=update(@target, \"#new prompt;4;6\")`\nValue: `rewrites the target cell so the new table prompt runs on next compute`",
-      "Formula: `=B1>5 && recalc(B1>5, @target)`\nValue: `reruns the target formula only after B1 becomes greater than 5`",
-      "Formula: `'Write with @@brief and @idea`\nValue: `uses the brief as hidden AI context and the idea in the visible prompt`",
-      "Formula: `'Audit _@A1`\nValue: `sends the raw source from A1, including its formula or shortcut, to the AI`",
-      "Formula: `Input:@case`\nValue: `renders an editable report input bound to the @case cell`",
-      "Formula: `Input:@case:[Enter your business case]`\nValue: `renders a report input with custom placeholder text and writes the typed value into @case`",
-      "Formula: `File:@policy:[Upload policy PDF]`\nValue: `renders a report file picker with hint text; after upload it shows the filename and stores extracted content in @policy`",
-      "Formula: `'Summarise @policy`\nValue: `if @policy is a file cell, sends the extracted file content to AI rather than the filename`",
-      "Formula: `Enter your business case: Input:@case`\nValue: `shows a report input; typing there updates the cell named case`",
-      "Formula: `!@idea`\nValue: `renders a clickable report link that jumps to the idea cell`",
-      "Formula: `=@idea`\nValue: `pulls the current computed value from the named cell into this cell`",
-      "Formula: `='(translate @idea to German)`\nValue: `runs an inline AI call inside a formula expression and returns the translated text`",
+      "Title: AI answer in one cell\nFormula: `'Write 3 taglines for @idea`\nValue: `Smarter budgeting for every kid. | Watch savings grow in real time. | Money habits made playful.`",
+      "Title: AI list spill\nFormula: `>top 10 problems that @idea solves`\nValue: `low saving motivation | poor allowance visibility | weak parent-child money conversations | delayed reward feedback ...`",
+      "Title: AI table spill\nFormula: `#compare @idea with competitors;4;6`\nValue: `| Product | Strength | Weakness | Differentiator |`",
+      "Title: URL enrichment\nFormula: `'Summarise https://example.com for @idea`\nValue: `fetches the page content, inserts it into the AI prompt, and returns a summary shaped around the idea`",
+      "Title: Region mention\nFormula: `'Summarise @C1:B10`\nValue: `passes the full region values into the AI prompt and returns one summary for that block`",
+      "Title: Workflow update\nFormula: `=update(@target, \"#new prompt;4;6\")`\nValue: `rewrites the target cell so the new table prompt runs on next compute`",
+      "Title: Conditional recalc\nFormula: `=B1>5 && recalc(B1>5, @target)`\nValue: `reruns the target formula only after B1 becomes greater than 5`",
+      "Title: Hidden AI context\nFormula: `'Write with @@brief and @idea`\nValue: `uses the brief as hidden AI context and the idea in the visible prompt`",
+      "Title: Raw source mention\nFormula: `'Audit _@A1`\nValue: `sends the raw source from A1, including its formula or shortcut, to the AI`",
+      "Title: Basic report input\nFormula: `Input:@case`\nValue: `renders an editable report input bound to the @case cell`",
+      "Title: Report input placeholder\nFormula: `Input:@case:[Enter your business case]`\nValue: `renders a report input with custom placeholder text and writes the typed value into @case`",
+      "Title: Report file picker\nFormula: `File:@policy:[Upload policy PDF]`\nValue: `renders a report file picker with hint text; after upload it shows the filename and stores extracted content in @policy`",
+      "Title: File content in AI\nFormula: `'Summarise @policy`\nValue: `if @policy is a file cell, sends the extracted file content to AI rather than the filename`",
+      "Title: Inline report input\nFormula: `Enter your business case: Input:@case`\nValue: `shows a report input; typing there updates the cell named case`",
+      "Title: Report link\nFormula: `!@idea`\nValue: `renders a clickable report link that jumps to the idea cell`",
+      "Title: Named reference formula\nFormula: `=@idea`\nValue: `pulls the current computed value from the named cell into this cell`",
+      "Title: Inline AI in formula\nFormula: `='(translate @idea to German)`\nValue: `runs an inline AI call inside a formula expression and returns the translated text`",
     ],
   },
   {

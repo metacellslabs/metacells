@@ -58,6 +58,7 @@ function inferComputedCellState(rawValue, computedValue) {
   const value = String(computedValue == null ? "" : computedValue);
 
   if (!raw) return "resolved";
+  if (value === "#REF!" || value === "#ERROR") return "error";
   if (value.indexOf("#AI_ERROR:") === 0) return "error";
   if (raw.charAt(0) === "'" || raw.charAt(0) === ">" || raw.charAt(0) === "#") {
     if (value === "..." || value === "(manual: click Update)") return "pending";
@@ -70,6 +71,25 @@ function inferComputedCellState(rawValue, computedValue) {
   return "resolved";
 }
 
+function normalizeComputeError(error) {
+  const message = error && error.message ? String(error.message) : String(error || "Formula error");
+  return message || "Formula error";
+}
+
+function classifyComputeFailure(error) {
+  const message = normalizeComputeError(error);
+  if (/^Unknown sheet:/i.test(message) || /^Unknown cell name:/i.test(message)) {
+    return {
+      value: "#REF!",
+      error: message,
+    };
+  }
+  return {
+    value: "#ERROR",
+    error: message,
+  };
+}
+
 export async function computeSheetSnapshot({
   sheetDocumentId,
   workbookData,
@@ -79,24 +99,70 @@ export async function computeSheetSnapshot({
 }) {
   const rawStorage = new MemoryWorkbookStorage(workbookData);
   const storageService = new StorageService(rawStorage);
-  const saveSnapshot = async (computedValues) => {
+  const tabs = storageService.readTabs();
+  const sheetTabIds = tabs
+    .filter((tab) => tab && tab.type === "sheet")
+    .map((tab) => String(tab.id || ""))
+    .filter(Boolean);
+  const orderedSheetIds = [];
+
+  if (activeSheetId && sheetTabIds.indexOf(activeSheetId) !== -1) {
+    orderedSheetIds.push(activeSheetId);
+  }
+  for (let i = 0; i < sheetTabIds.length; i += 1) {
+    if (orderedSheetIds.indexOf(sheetTabIds[i]) === -1) {
+      orderedSheetIds.push(sheetTabIds[i]);
+    }
+  }
+
+  const saveSnapshot = async (computedValues, computedErrors) => {
     if (typeof persistWorkbook !== "function") return;
-    if (computedValues && activeSheetId) {
-      Object.keys(computedValues).forEach((cellId) => {
-        const rawValue = storageService.getCellValue(activeSheetId, cellId);
-        storageService.setComputedCellValue(
-          activeSheetId,
-          cellId,
-          computedValues[cellId],
-          inferComputedCellState(rawValue, computedValues[cellId]),
-        );
+    if (computedValues && typeof computedValues === "object") {
+      Object.keys(computedValues).forEach((sheetId) => {
+        const sheetValues = computedValues[sheetId];
+        if (!sheetValues || typeof sheetValues !== "object") return;
+        Object.keys(sheetValues).forEach((cellId) => {
+          const rawValue = storageService.getCellValue(sheetId, cellId);
+          const errorMessage = computedErrors
+            && computedErrors[sheetId]
+            && Object.prototype.hasOwnProperty.call(computedErrors[sheetId], cellId)
+            ? computedErrors[sheetId][cellId]
+            : "";
+          storageService.setComputedCellValue(
+            sheetId,
+            cellId,
+            sheetValues[cellId],
+            inferComputedCellState(rawValue, sheetValues[cellId]),
+            errorMessage,
+          );
+        });
       });
     }
     await persistWorkbook(rawStorage.snapshot());
   };
 
   const aiService = new AIService(storageService, () => {
-    saveSnapshot().catch((error) => {
+    const asyncComputedValues = {};
+    const asyncComputedErrors = {};
+    for (let i = 0; i < orderedSheetIds.length; i += 1) {
+      const sheetId = orderedSheetIds[i];
+      const evaluationPlan = typeof formulaEngine.buildEvaluationPlan === "function"
+        ? formulaEngine.buildEvaluationPlan(sheetId)
+        : formulaEngine.cellIds;
+      asyncComputedValues[sheetId] = {};
+      asyncComputedErrors[sheetId] = {};
+      for (let cellIndex = 0; cellIndex < evaluationPlan.length; cellIndex += 1) {
+        const cellId = evaluationPlan[cellIndex];
+        try {
+          asyncComputedValues[sheetId][cellId] = formulaEngine.evaluateCell(sheetId, cellId, {}, { forceRefreshAI });
+        } catch (error) {
+          const failure = classifyComputeFailure(error);
+          asyncComputedValues[sheetId][cellId] = failure.value;
+          asyncComputedErrors[sheetId][cellId] = failure.error;
+        }
+      }
+    }
+    saveSnapshot(asyncComputedValues, asyncComputedErrors).catch((error) => {
       console.error("[sheet.compute] failed to persist async AI update", error);
     });
   }, {
@@ -111,20 +177,32 @@ export async function computeSheetSnapshot({
     buildCellIds(workbookData),
   );
 
-  const values = {};
-  const evaluationPlan = typeof formulaEngine.buildEvaluationPlan === "function"
-    ? formulaEngine.buildEvaluationPlan(activeSheetId)
-    : formulaEngine.cellIds;
+  const valuesBySheet = {};
+  const errorsBySheet = {};
 
-  for (let i = 0; i < evaluationPlan.length; i += 1) {
-    const cellId = evaluationPlan[i];
-    try {
-      values[cellId] = formulaEngine.evaluateCell(activeSheetId, cellId, {}, { forceRefreshAI });
-    } catch (error) {
-      values[cellId] = storageService.getCellValue(activeSheetId, cellId) || "";
+  for (let sheetIndex = 0; sheetIndex < orderedSheetIds.length; sheetIndex += 1) {
+    const sheetId = orderedSheetIds[sheetIndex];
+    const sheetValues = {};
+    const sheetErrors = {};
+    const evaluationPlan = typeof formulaEngine.buildEvaluationPlan === "function"
+      ? formulaEngine.buildEvaluationPlan(sheetId)
+      : formulaEngine.cellIds;
+
+    for (let i = 0; i < evaluationPlan.length; i += 1) {
+      const cellId = evaluationPlan[i];
+      try {
+        sheetValues[cellId] = formulaEngine.evaluateCell(sheetId, cellId, {}, { forceRefreshAI });
+      } catch (error) {
+        const failure = classifyComputeFailure(error);
+        sheetValues[cellId] = failure.value;
+        sheetErrors[cellId] = failure.error;
+      }
     }
+
+    valuesBySheet[sheetId] = sheetValues;
+    errorsBySheet[sheetId] = sheetErrors;
   }
 
-  await saveSnapshot(values);
-  return { values, workbook: rawStorage.snapshot() };
+  await saveSnapshot(valuesBySheet, errorsBySheet);
+  return { values: valuesBySheet[activeSheetId] || {}, valuesBySheet, workbook: rawStorage.snapshot() };
 }

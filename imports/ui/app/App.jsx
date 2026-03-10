@@ -5,13 +5,44 @@ import { mountSpreadsheetApp } from "../metacell/runtime/index.js";
 import { HelpOverlay } from "../help/HelpOverlay.jsx";
 import {
   AppSettings,
-  DEFAULT_DEEPSEEK_PROVIDER,
-  DEFAULT_LM_STUDIO_PROVIDER,
+  DEFAULT_AI_PROVIDERS,
   DEFAULT_SETTINGS_ID,
 } from "../../api/settings/index.js";
 import { decodeWorkbookDocument } from "../../api/sheets/workbook-codec.js";
 import { Sheets } from "../../api/sheets/index.js";
 import { createSheetDocStorage } from "../metacell/sheetDocStorage.js";
+
+function buildProviderDrafts(providers, savedProviders) {
+  const registered = Array.isArray(providers) ? providers : [];
+  const saved = Array.isArray(savedProviders) ? savedProviders : [];
+  const byId = new Map();
+  const byType = new Map();
+
+  for (let i = 0; i < saved.length; i += 1) {
+    const provider = saved[i];
+    if (!provider || typeof provider !== "object") continue;
+    if (provider.id) byId.set(String(provider.id), provider);
+    if (provider.type) byType.set(String(provider.type), provider);
+  }
+
+  return registered.reduce((acc, provider) => {
+    const persisted = byId.get(provider.id) || byType.get(provider.type) || {};
+    acc[provider.id] = {
+      ...provider,
+      ...persisted,
+      id: String(persisted.id || provider.id || ""),
+      name: String(persisted.name || provider.name || ""),
+      type: String(persisted.type || provider.type || ""),
+      baseUrl: String(persisted.baseUrl || provider.baseUrl || ""),
+      model: String(persisted.model || provider.model || ""),
+      apiKey: String(persisted.apiKey || ""),
+      enabled: persisted.enabled !== false,
+      availableModels: Array.isArray(provider.availableModels) ? provider.availableModels.slice() : [],
+      fields: Array.isArray(provider.fields) ? provider.fields.slice() : [],
+    };
+    return acc;
+  }, {});
+}
 
 function HomePage() {
   useEffect(() => {
@@ -139,14 +170,12 @@ function SettingsPage() {
     { id: "general", label: "General" },
     { id: "advanced", label: "Advanced" },
   ];
+  const registeredProviders = DEFAULT_AI_PROVIDERS;
+  const defaultProviderId = String(registeredProviders[0] && registeredProviders[0].id || "");
   const [activeSettingsTab, setActiveSettingsTab] = useState("ai");
-  const [activeProviderId, setActiveProviderId] = useState(DEFAULT_DEEPSEEK_PROVIDER.id);
-  const [deepseekUrl, setDeepseekUrl] = useState(DEFAULT_DEEPSEEK_PROVIDER.baseUrl);
-  const [deepseekModel, setDeepseekModel] = useState(DEFAULT_DEEPSEEK_PROVIDER.model);
-  const [deepseekApiKey, setDeepseekApiKey] = useState("");
-  const [lmStudioUrl, setLmStudioUrl] = useState(DEFAULT_LM_STUDIO_PROVIDER.baseUrl);
-  const [lmStudioModel, setLmStudioModel] = useState(DEFAULT_LM_STUDIO_PROVIDER.model);
-  const [isSavingProvider, setIsSavingProvider] = useState(false);
+  const [activeProviderId, setActiveProviderId] = useState(defaultProviderId);
+  const [providerDrafts, setProviderDrafts] = useState(() => buildProviderDrafts(registeredProviders));
+  const [savingProviderId, setSavingProviderId] = useState("");
   const [isSavingActiveProvider, setIsSavingActiveProvider] = useState(false);
   const [addingChannel, setAddingChannel] = useState("");
 
@@ -170,24 +199,38 @@ function SettingsPage() {
 
   useEffect(() => {
     const providers = Array.isArray(settings && settings.aiProviders) ? settings.aiProviders : [];
-    const deepseek = providers.find((item) => item && item.type === "deepseek");
-    const lmStudio = providers.find((item) => item && item.type === "lm_studio");
-    setActiveProviderId((settings && settings.activeAIProviderId) || DEFAULT_DEEPSEEK_PROVIDER.id);
-    setDeepseekUrl((deepseek && deepseek.baseUrl) || DEFAULT_DEEPSEEK_PROVIDER.baseUrl);
-    setDeepseekModel((deepseek && deepseek.model) || DEFAULT_DEEPSEEK_PROVIDER.model);
-    setDeepseekApiKey((deepseek && deepseek.apiKey) || "");
-    setLmStudioUrl((lmStudio && lmStudio.baseUrl) || DEFAULT_LM_STUDIO_PROVIDER.baseUrl);
-    setLmStudioModel((lmStudio && lmStudio.model) || DEFAULT_LM_STUDIO_PROVIDER.model);
+    setActiveProviderId((settings && settings.activeAIProviderId) || defaultProviderId);
+    setProviderDrafts(buildProviderDrafts(registeredProviders, providers));
   }, [settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() : 0]);
 
-  const handleSaveProvider = (provider) => {
-    if (isSavingProvider) return;
+  const handleProviderDraftChange = (providerId, fieldKey, value) => {
+    setProviderDrafts((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] || {}),
+        [fieldKey]: value,
+      },
+    }));
+  };
 
-    setIsSavingProvider(true);
-    Meteor.callAsync("settings.upsertAIProvider", provider)
-      .then(() => setIsSavingProvider(false))
+  const handleSaveProvider = (providerId) => {
+    if (savingProviderId) return;
+    const draft = providerDrafts[providerId];
+    if (!draft) return;
+
+    setSavingProviderId(providerId);
+    Meteor.callAsync("settings.upsertAIProvider", {
+      id: String(draft.id || "").trim(),
+      name: String(draft.name || "").trim(),
+      type: String(draft.type || "").trim(),
+      baseUrl: String(draft.baseUrl || "").trim(),
+      model: String(draft.model || "").trim(),
+      apiKey: String(draft.apiKey || "").trim(),
+      enabled: draft.enabled !== false,
+    })
+      .then(() => setSavingProviderId(""))
       .catch((error) => {
-        setIsSavingProvider(false);
+        setSavingProviderId("");
         window.alert(error.reason || error.message || "Failed to save AI provider");
       });
   };
@@ -218,9 +261,14 @@ function SettingsPage() {
   const communicationChannels = Array.isArray(settings && settings.communicationChannels)
     ? settings.communicationChannels
     : [];
-  const activeProviderLabel = activeProviderId === DEFAULT_LM_STUDIO_PROVIDER.id ? "LM Studio" : "DeepSeek";
+  const activeProviderLabel = (
+    aiProviders.find((provider) => provider && provider.id === activeProviderId)
+    || registeredProviders.find((provider) => provider && provider.id === activeProviderId)
+    || registeredProviders[0]
+    || { name: "None" }
+  ).name;
   const configuredChannelsCount = communicationChannels.length;
-  const deepseekConfigured = Boolean(String(deepseekApiKey || "").trim());
+  const configuredSecretsCount = Object.values(providerDrafts).filter((provider) => String(provider && provider.apiKey || "").trim()).length;
   const renderSettingsPanel = () => {
     if (activeSettingsTab === "channels") {
       return (
@@ -272,15 +320,15 @@ function SettingsPage() {
             </div>
             <div className="settings-kv-item">
               <span className="settings-label">Configured providers</span>
-              <strong>{aiProviders.length}</strong>
+              <strong>{registeredProviders.length}</strong>
             </div>
             <div className="settings-kv-item">
               <span className="settings-label">Connected channels</span>
               <strong>{configuredChannelsCount}</strong>
             </div>
             <div className="settings-kv-item">
-              <span className="settings-label">DeepSeek API key</span>
-              <strong>{deepseekConfigured ? "Configured" : "Missing"}</strong>
+              <span className="settings-label">Providers with API keys</span>
+              <strong>{configuredSecretsCount}</strong>
             </div>
           </div>
         </>
@@ -297,22 +345,15 @@ function SettingsPage() {
             <p>Raw provider diagnostics and saved endpoints for debugging server-side AI calls.</p>
           </div>
           <div className="settings-kv-list">
-            <div className="settings-kv-item">
-              <span className="settings-label">DeepSeek URL</span>
-              <strong>{deepseekUrl || "Not set"}</strong>
-            </div>
-            <div className="settings-kv-item">
-              <span className="settings-label">DeepSeek model</span>
-              <strong>{deepseekModel || "Not set"}</strong>
-            </div>
-            <div className="settings-kv-item">
-              <span className="settings-label">LM Studio URL</span>
-              <strong>{lmStudioUrl || "Not set"}</strong>
-            </div>
-            <div className="settings-kv-item">
-              <span className="settings-label">LM Studio model override</span>
-              <strong>{lmStudioModel || "Auto-detect"}</strong>
-            </div>
+            {registeredProviders.map((provider) => {
+              const draft = providerDrafts[provider.id] || provider;
+              return (
+                <div key={provider.id} className="settings-kv-item">
+                  <span className="settings-label">{provider.name}</span>
+                  <strong>{draft.baseUrl || draft.model || "Not configured"}</strong>
+                </div>
+              );
+            })}
           </div>
         </>
       );
@@ -339,8 +380,11 @@ function SettingsPage() {
             value={activeProviderId}
             onChange={(event) => setActiveProviderId(event.target.value)}
           >
-            <option value={DEFAULT_DEEPSEEK_PROVIDER.id}>DeepSeek</option>
-            <option value={DEFAULT_LM_STUDIO_PROVIDER.id}>LM Studio</option>
+            {registeredProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name}
+              </option>
+            ))}
           </select>
           <div className="settings-actions">
             <button type="button" onClick={handleSaveActiveProvider} disabled={isSavingActiveProvider || isLoading}>
@@ -350,100 +394,47 @@ function SettingsPage() {
           </div>
         </div>
 
-        <div className="settings-provider-card">
-          <div className="settings-provider-head">
-            <strong>DeepSeek</strong>
-            <span className="settings-status">
-              {activeProviderId === DEFAULT_DEEPSEEK_PROVIDER.id ? "Default" : "Available"}
-            </span>
-          </div>
-          <label className="settings-label" htmlFor="deepseek-url">Base URL</label>
-          <input
-            id="deepseek-url"
-            className="settings-input"
-            type="text"
-            value={deepseekUrl}
-            onChange={(event) => setDeepseekUrl(event.target.value)}
-            placeholder="https://api.deepseek.com"
-          />
-          <label className="settings-label" htmlFor="deepseek-model">Model</label>
-          <input
-            id="deepseek-model"
-            className="settings-input"
-            type="text"
-            value={deepseekModel}
-            onChange={(event) => setDeepseekModel(event.target.value)}
-            placeholder="deepseek-chat"
-          />
-          <label className="settings-label" htmlFor="deepseek-api-key">API key</label>
-          <input
-            id="deepseek-api-key"
-            className="settings-input"
-            type="password"
-            value={deepseekApiKey}
-            onChange={(event) => setDeepseekApiKey(event.target.value)}
-            placeholder="sk-..."
-          />
-          <div className="settings-actions">
-            <button
-              type="button"
-              onClick={() =>
-                handleSaveProvider({
-                  ...DEFAULT_DEEPSEEK_PROVIDER,
-                  baseUrl: String(deepseekUrl || "").trim(),
-                  model: String(deepseekModel || "").trim(),
-                  apiKey: String(deepseekApiKey || "").trim(),
-                })}
-              disabled={isSavingProvider || isLoading}
-            >
-              {isSavingProvider ? "Saving..." : "Save provider"}
-            </button>
-          </div>
-        </div>
-
-        <div className="settings-provider-card">
-          <div className="settings-provider-head">
-            <strong>LM Studio</strong>
-            <span className="settings-status">
-              {activeProviderId === DEFAULT_LM_STUDIO_PROVIDER.id ? "Default" : isLoading ? "Loading..." : "Saved in DB"}
-            </span>
-          </div>
-          <label className="settings-label" htmlFor="lm-studio-url">Base URL</label>
-          <input
-            id="lm-studio-url"
-            className="settings-input"
-            type="text"
-            value={lmStudioUrl}
-            onChange={(event) => setLmStudioUrl(event.target.value)}
-            placeholder="http://127.0.0.1:1234/v1"
-          />
-          <label className="settings-label" htmlFor="lm-studio-model">Model override</label>
-          <input
-            id="lm-studio-model"
-            className="settings-input"
-            type="text"
-            value={lmStudioModel}
-            onChange={(event) => setLmStudioModel(event.target.value)}
-            placeholder="Leave empty to auto-detect"
-          />
-          <div className="settings-actions">
-            <button
-              type="button"
-              onClick={() =>
-                handleSaveProvider({
-                  ...DEFAULT_LM_STUDIO_PROVIDER,
-                  baseUrl: String(lmStudioUrl || "").trim(),
-                  model: String(lmStudioModel || "").trim(),
-                })}
-              disabled={isSavingProvider || isLoading}
-            >
-              {isSavingProvider ? "Saving..." : "Save provider"}
-            </button>
-            <span className="settings-meta">
-              {aiProviders.length} provider{aiProviders.length === 1 ? "" : "s"}
-            </span>
-          </div>
-        </div>
+        {registeredProviders.map((provider) => {
+          const draft = providerDrafts[provider.id] || provider;
+          const isActive = activeProviderId === provider.id;
+          return (
+            <div key={provider.id} className="settings-provider-card">
+              <div className="settings-provider-head">
+                <strong>{provider.name}</strong>
+                <span className="settings-status">
+                  {isActive ? "Default" : isLoading ? "Loading..." : "Available"}
+                </span>
+              </div>
+              {Array.isArray(provider.fields) && provider.fields.map((field) => (
+                <div key={field.key} className="settings-field">
+                  <label className="settings-label" htmlFor={`${provider.id}-${field.key}`}>{field.label}</label>
+                  <input
+                    id={`${provider.id}-${field.key}`}
+                    className="settings-input"
+                    type={field.type || "text"}
+                    value={String(draft[field.key] || "")}
+                    onChange={(event) => handleProviderDraftChange(provider.id, field.key, event.target.value)}
+                    placeholder={field.placeholder || ""}
+                  />
+                </div>
+              ))}
+              {provider.availableModels && provider.availableModels.length ? (
+                <p className="settings-provider-note">
+                  Models: {provider.availableModels.join(", ")}
+                </p>
+              ) : null}
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  onClick={() => handleSaveProvider(provider.id)}
+                  disabled={Boolean(savingProviderId) || isLoading}
+                >
+                  {savingProviderId === provider.id ? "Saving..." : "Save provider"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </>
     );
   };
@@ -636,7 +627,7 @@ function SheetPage({ sheetId, initialTabId, onOpenHelp }) {
           <option value=""></option>
         </select>
         <label htmlFor="formula-input">fx</label>
-        <input id="formula-input" type="text" placeholder="Edit active cell formula/value" />
+        <input id="formula-input" type="text" placeholder="edit active cell formula/value" />
         <button id="attach-file" type="button" aria-label="Attach file" title="Attach file">📎</button>
         <input id="attach-file-input" type="file" hidden />
         <span id="calc-progress" className="calc-progress" aria-live="polite"></span>
@@ -669,9 +660,9 @@ function SheetPage({ sheetId, initialTabId, onOpenHelp }) {
         <div id="report-live" className="report-live"></div>
       </div>
       <div className="tabs-bar">
-        <div id="tabs"></div>
         <button id="add-tab" type="button"> + </button>
-        <button id="delete-tab" type="button">Delete tab</button>
+        <div id="tabs"></div>
+        <button id="delete-tab" type="button">delete</button>
       </div>
     </div>
   );

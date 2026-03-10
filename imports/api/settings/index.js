@@ -1,64 +1,63 @@
 import { Mongo } from "meteor/mongo";
 import { Meteor } from "meteor/meteor";
 import { check, Match } from "meteor/check";
+import {
+  getRegisteredAIProviders,
+  getRegisteredAIProviderById,
+} from "./providers/index.js";
 
 export const AppSettings = new Mongo.Collection("app_settings");
 
 export const DEFAULT_SETTINGS_ID = "default";
-export const DEFAULT_LM_STUDIO_PROVIDER = {
-  id: "lm-studio",
-  name: "LM Studio",
-  type: "lm_studio",
-  baseUrl: "http://127.0.0.1:1234/v1",
-  model: "",
-  apiKey: "",
-  enabled: true,
-};
-export const DEFAULT_DEEPSEEK_PROVIDER = {
-  id: "deepseek",
-  name: "DeepSeek",
-  type: "deepseek",
-  baseUrl: "https://api.deepseek.com",
-  model: "deepseek-chat",
-  apiKey: "",
-  enabled: true,
-};
+export const DEFAULT_AI_PROVIDERS = getRegisteredAIProviders();
+export const DEFAULT_DEEPSEEK_PROVIDER = getRegisteredAIProviderById("deepseek");
+export const DEFAULT_LM_STUDIO_PROVIDER = getRegisteredAIProviderById("lm-studio");
+
+function getDefaultProviderByType(type) {
+  const target = String(type || "");
+  return DEFAULT_AI_PROVIDERS.find((provider) => provider && provider.type === target) || DEFAULT_AI_PROVIDERS[0] || null;
+}
 
 function normalizeProvider(provider, fallback) {
   const source = provider && typeof provider === "object" ? provider : {};
-  const base = fallback || DEFAULT_LM_STUDIO_PROVIDER;
+  const base = fallback || DEFAULT_AI_PROVIDERS[0] || {};
   return {
-    id: String(source.id || base.id).trim(),
-    name: String(source.name || base.name).trim(),
-    type: String(source.type || base.type).trim(),
-    baseUrl: String(source.baseUrl || base.baseUrl).trim(),
+    id: String(source.id || base.id || "").trim(),
+    name: String(source.name || base.name || "").trim(),
+    type: String(source.type || base.type || "").trim(),
+    baseUrl: String(source.baseUrl || base.baseUrl || "").trim(),
     model: String(source.model || base.model || "").trim(),
     apiKey: String(source.apiKey || "").trim(),
     enabled: source.enabled !== false,
+    availableModels: Array.isArray(base.availableModels) ? base.availableModels.slice() : [],
+    fields: Array.isArray(base.fields) ? base.fields.slice() : [],
   };
 }
 
 function normalizeProviders(providers) {
   const input = Array.isArray(providers) ? providers : [];
+  const byId = new Map();
   const byType = new Map();
+
   for (let i = 0; i < input.length; i += 1) {
     const provider = input[i];
-    if (!provider || typeof provider !== "object" || !provider.type) continue;
-    byType.set(String(provider.type), provider);
+    if (!provider || typeof provider !== "object") continue;
+    if (provider.id) byId.set(String(provider.id), provider);
+    if (provider.type) byType.set(String(provider.type), provider);
   }
 
-  return [
-    normalizeProvider(byType.get("deepseek"), DEFAULT_DEEPSEEK_PROVIDER),
-    normalizeProvider(byType.get("lm_studio"), DEFAULT_LM_STUDIO_PROVIDER),
-  ];
+  return DEFAULT_AI_PROVIDERS.map((provider) => {
+    const matched = byId.get(provider.id) || byType.get(provider.type) || null;
+    return normalizeProvider(matched, provider);
+  });
 }
 
 function createDefaultSettingsDoc() {
   const now = new Date();
   return {
     _id: DEFAULT_SETTINGS_ID,
-    aiProviders: normalizeProviders([DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_LM_STUDIO_PROVIDER]),
-    activeAIProviderId: DEFAULT_DEEPSEEK_PROVIDER.id,
+    aiProviders: normalizeProviders(DEFAULT_AI_PROVIDERS),
+    activeAIProviderId: String(DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || ""),
     communicationChannels: [],
     createdAt: now,
     updatedAt: now,
@@ -70,8 +69,17 @@ export async function ensureDefaultSettings() {
   if (existing) return existing;
 
   const doc = createDefaultSettingsDoc();
-  await AppSettings.insertAsync(doc);
-  return doc;
+  try {
+    await AppSettings.insertAsync(doc);
+    return doc;
+  } catch (error) {
+    if (!error || String(error.code || "") !== "11000") {
+      throw error;
+    }
+    const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
+    if (current) return current;
+    throw error;
+  }
 }
 
 export async function resetLMStudioBaseUrlInDb() {
@@ -79,50 +87,51 @@ export async function resetLMStudioBaseUrlInDb() {
 
   const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
   const providers = normalizeProviders(current && current.aiProviders);
+  const lmStudioDefault = getDefaultProviderByType("lm_studio");
   const nextProviders = providers.map((provider) => {
-    if (provider.type !== "lm_studio") return provider;
+    if (provider.type !== "lm_studio" || !lmStudioDefault) return provider;
     return {
       ...provider,
-      id: DEFAULT_LM_STUDIO_PROVIDER.id,
-      name: DEFAULT_LM_STUDIO_PROVIDER.name,
-      type: DEFAULT_LM_STUDIO_PROVIDER.type,
-      baseUrl: DEFAULT_LM_STUDIO_PROVIDER.baseUrl,
-      model: DEFAULT_LM_STUDIO_PROVIDER.model,
+      id: lmStudioDefault.id,
+      name: lmStudioDefault.name,
+      type: lmStudioDefault.type,
+      baseUrl: lmStudioDefault.baseUrl,
+      model: lmStudioDefault.model,
+      availableModels: lmStudioDefault.availableModels || [],
+      fields: lmStudioDefault.fields || [],
     };
   });
 
+  const fallbackActiveId = String(DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || "");
   await AppSettings.updateAsync(
     { _id: DEFAULT_SETTINGS_ID },
     {
       $set: {
         aiProviders: nextProviders,
-        activeAIProviderId:
-          String(current && current.activeAIProviderId || "") || DEFAULT_DEEPSEEK_PROVIDER.id,
+        activeAIProviderId: String(current && current.activeAIProviderId || "") || fallbackActiveId,
         updatedAt: new Date(),
       },
     },
   );
 
-  return DEFAULT_LM_STUDIO_PROVIDER.baseUrl;
+  return String(lmStudioDefault?.baseUrl || "");
 }
 
 export async function getLMStudioBaseUrl() {
   const settings = await ensureDefaultSettings();
   const providers = normalizeProviders(settings.aiProviders);
   const provider = providers.find((item) => item && item.type === "lm_studio" && item.enabled !== false);
-  return (provider && provider.baseUrl) || DEFAULT_LM_STUDIO_PROVIDER.baseUrl;
+  return (provider && provider.baseUrl) || String(DEFAULT_LM_STUDIO_PROVIDER?.baseUrl || "");
 }
 
 export async function getActiveAIProvider() {
   const settings = await ensureDefaultSettings();
   const providers = normalizeProviders(settings.aiProviders);
-  const activeId = String(settings && settings.activeAIProviderId || DEFAULT_DEEPSEEK_PROVIDER.id);
+  const fallbackActiveId = String(DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || "");
+  const activeId = String(settings && settings.activeAIProviderId || fallbackActiveId);
   const activeProvider = providers.find((item) => item && item.id === activeId && item.enabled !== false);
   if (activeProvider) return activeProvider;
-  const deepseek = providers.find((item) => item && item.type === "deepseek" && item.enabled !== false);
-  if (deepseek) return deepseek;
-  const lmStudio = providers.find((item) => item && item.type === "lm_studio" && item.enabled !== false);
-  return lmStudio || normalizeProvider(DEFAULT_DEEPSEEK_PROVIDER, DEFAULT_DEEPSEEK_PROVIDER);
+  return providers.find((item) => item && item.enabled !== false) || normalizeProvider(DEFAULT_AI_PROVIDERS[0], DEFAULT_AI_PROVIDERS[0]);
 }
 
 if (Meteor.isServer) {
@@ -170,9 +179,8 @@ if (Meteor.isServer) {
 
       const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
       const nextProviders = normalizeProviders(current && current.aiProviders);
-      const nextProvider = normalizeProvider(provider, provider.type === "deepseek"
-        ? DEFAULT_DEEPSEEK_PROVIDER
-        : DEFAULT_LM_STUDIO_PROVIDER);
+      const fallback = getRegisteredAIProviderById(provider.id) || getDefaultProviderByType(provider.type);
+      const nextProvider = normalizeProvider(provider, fallback);
 
       const index = nextProviders.findIndex((item) => item && item.id === nextProvider.id);
       if (index === -1) {

@@ -81,13 +81,20 @@ export class StorageService {
         return "";
     }
 
+    getCellError(sheetId, cellId) {
+        if (typeof this.storage.getCellError === "function") {
+            return this.storage.getCellError(sheetId, cellId) || "";
+        }
+        return "";
+    }
+
     setCellValue(sheetId, cellId, value, meta) {
         this.storage.setCellSource(sheetId, cellId, value, meta);
     }
 
-    setComputedCellValue(sheetId, cellId, value, state) {
+    setComputedCellValue(sheetId, cellId, value, state, errorMessage) {
         if (typeof this.storage.setComputedCellValue === "function") {
-            this.storage.setComputedCellValue(sheetId, cellId, value, state);
+            this.storage.setComputedCellValue(sheetId, cellId, value, state, errorMessage);
         }
     }
 

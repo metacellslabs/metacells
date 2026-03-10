@@ -17,7 +17,27 @@ preprocessFormula(formula, sourceCellId) {
         var withInlineAsk = this.preprocessInlineAskCalls(formula);
         var withUpdateTargets = this.preprocessUpdateTargets(withInlineAsk, sourceCellId);
         var withRecalcTargets = this.preprocessRecalcTargets(withUpdateTargets, sourceCellId);
-        var withRawAtSheetRefs = withRecalcTargets.replace(/_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)/g, (_, quoted, plain, cellId) => {
+        var withRawAtSheetRegionRefs = withRecalcTargets.replace(
+            /_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+            (_, quoted, plain, startCellId, endCellId) => {
+                var sheetName = quoted || plain || "";
+                return "mentionRawSheetRegionRef(\"" + this.escapeForDoubleQuotedString(sheetName) + "\",\"" + startCellId.toUpperCase() + "\",\"" + endCellId.toUpperCase() + "\")";
+            }
+        );
+        var withAtSheetRegionRefs = withRawAtSheetRegionRefs.replace(
+            /@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+            (_, quoted, plain, startCellId, endCellId) => {
+                var sheetName = quoted || plain || "";
+                return "mentionSheetRegionRef(\"" + this.escapeForDoubleQuotedString(sheetName) + "\",\"" + startCellId.toUpperCase() + "\",\"" + endCellId.toUpperCase() + "\")";
+            }
+        );
+        var withRawAtRegionRefs = withAtSheetRegionRefs.replace(/_@([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g, (_, startCellId, endCellId) => {
+            return "mentionRawRegionRef(\"" + startCellId.toUpperCase() + "\",\"" + endCellId.toUpperCase() + "\")";
+        });
+        var withAtRegionRefs = withRawAtRegionRefs.replace(/@([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g, (_, startCellId, endCellId) => {
+            return "mentionRegionRef(\"" + startCellId.toUpperCase() + "\",\"" + endCellId.toUpperCase() + "\")";
+        });
+        var withRawAtSheetRefs = withAtRegionRefs.replace(/_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)/g, (_, quoted, plain, cellId) => {
             var sheetName = quoted || plain || "";
             return "mentionRawSheetRef(\"" + this.escapeForDoubleQuotedString(sheetName) + "\",\"" + cellId.toUpperCase() + "\")";
         });

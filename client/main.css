@@ -96,10 +96,45 @@ body {
     line-height: 1;
 }
 
-.help-grid {
+.help-layout {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 16px;
+    min-height: 0;
+}
+
+.help-sidebar {
+    min-width: 0;
+}
+
+.help-tabs {
+    display: grid;
+    gap: 8px;
+}
+
+.help-tab {
+    width: 100%;
+    min-height: 42px;
+    justify-content: flex-start;
+    padding: 0 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(199, 213, 207, 0.95);
+    background: #f7fbfa;
+    color: var(--text);
+    text-align: left;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.help-tab:hover {
+    background: #ffffff;
+    border-color: rgba(50, 113, 233, 0.28);
+}
+
+.help-tab.active {
+    background: rgba(178, 212, 255, 0.52);
+    border-color: rgba(50, 113, 233, 0.45);
+    color: #24468f;
 }
 
 .help-search-row {
@@ -127,6 +162,10 @@ body {
     border: 1px solid rgba(199, 213, 207, 0.95);
     border-radius: 16px;
     background: #fbfcfc;
+}
+
+.help-panel {
+    min-width: 0;
 }
 
 .help-card h3 {
@@ -168,18 +207,69 @@ body {
 }
 
 .help-card-examples li {
-    padding: 12px 14px;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+.help-example-cell {
     border: 1px solid rgba(199, 213, 207, 0.95);
     border-radius: 12px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.help-example-title {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(199, 213, 207, 0.95);
+    background: linear-gradient(180deg, #f7fbfa 0%, #eef6f4 100%);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.help-example-row {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: stretch;
+    min-height: 42px;
+}
+
+.help-example-row + .help-example-row {
+    border-top: 1px solid rgba(199, 213, 207, 0.95);
+}
+
+.help-example-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #4a5f57;
+    background: #f4f8f6;
+    border-right: 1px solid rgba(199, 213, 207, 0.95);
+}
+
+.help-example-value {
+    min-width: 0;
+    padding: 8px 10px;
+}
+
+.help-example-formula .help-example-value {
+    color: #5f6663;
+    background: #fbfcfc;
+}
+
+.help-example-result .help-example-value {
+    color: var(--text);
     background: #ffffff;
 }
 
 .help-card-meaning {
     background: #f7faf9;
-}
-
-.help-card-empty {
-    grid-column: 1 / -1;
 }
 
 .help-card-empty p {
@@ -207,13 +297,32 @@ body {
     top: 12px;
     margin-bottom: 0;
     z-index: 50;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 .tabs-bar {
     justify-content: space-between;
-    margin-top: 10px;
+    margin-top: 0;
     margin-bottom: 0;
+    padding-top: 0;
     flex: 0 0 auto;
+    margin-top: auto;
+    z-index: 9;
+    border-top: none;
+    box-shadow: inset 0 1px 0 rgba(166, 187, 178, 0.65), var(--shadow);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-top: -1px;
+}
+
+.tabs-bar #add-tab,
+.tabs-bar #delete-tab {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: 8px;
+    margin-top: 6px;
 }
 
 .add-tab-menu {
@@ -448,28 +557,26 @@ button:hover {
     border-color: #9eb3ab;
 }
 
-#update-ai,
-#add-tab {
+#update-ai {
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
 }
 
-#update-ai:hover,
-#add-tab:hover {
+#update-ai:hover {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
 }
 
 .tab-button {
     border: 1px solid var(--border);
-    border-bottom: none;
+    border-top: none;
     background: var(--panel-muted);
     color: var(--text-muted);
     padding: 0 12px;
     cursor: grab;
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -501,10 +608,19 @@ button:hover {
     border-radius: var(--radius-md);
     box-shadow: var(--shadow);
     background: var(--panel);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 .table-wrap {
     max-height: none;
+    margin-top: -1px;
+}
+
+.report-wrap {
+    margin-top: -1px;
 }
 
 table {
@@ -613,6 +729,45 @@ td.has-formula::before {
     color: #5f6663;
 }
 
+.cell-output.error-value {
+    color: #c53a52;
+    font-weight: 700;
+}
+
+td.has-error {
+    position: relative;
+}
+
+td.has-error::after {
+    content: attr(data-error-hint);
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    max-width: min(320px, 55vw);
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(39, 48, 73, 0.96);
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: normal;
+    word-break: break-word;
+    box-shadow: 0 10px 24px rgba(18, 25, 45, 0.22);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 21;
+    transition: opacity 120ms ease;
+    transition-delay: 0s;
+}
+
+td.has-error:hover::after,
+td.has-error:focus-within::after {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0.35s;
+}
+
 td.has-attachment .cell-output {
     position: absolute;
     inset: 0;
@@ -672,6 +827,40 @@ td.has-attachment::before {
 
 .attachment-chip[data-full-name]:hover::after,
 .attachment-chip[data-full-name]:focus-within::after {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0.5s;
+}
+
+.attachment-image-preview {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    width: min(280px, 40vw);
+    max-height: 220px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid rgba(39, 48, 73, 0.16);
+    box-shadow: 0 10px 24px rgba(18, 25, 45, 0.22);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 22;
+    transition: opacity 120ms ease;
+    transition-delay: 0s;
+}
+
+.attachment-image-preview img {
+    display: block;
+    width: 100%;
+    max-height: 204px;
+    object-fit: contain;
+    border-radius: 6px;
+}
+
+.attachment-chip.has-image-preview:hover .attachment-image-preview,
+.attachment-chip.has-image-preview:focus-within .attachment-image-preview {
     opacity: 1;
     visibility: visible;
     transition-delay: 0.5s;
@@ -1221,8 +1410,17 @@ body.report-active .report-wrap {
         padding: 18px;
     }
 
-    .help-grid {
+    .help-layout {
         grid-template-columns: 1fr;
+    }
+
+    .help-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .help-tab {
+        justify-content: center;
+        text-align: center;
     }
 
     .formula-bar,
@@ -1276,6 +1474,10 @@ body.route-home {
 
 body.route-home #react-target {
     min-height: 100vh;
+}
+
+body.route-sheet {
+    padding-top: 70px;
 }
 
 .home-page {
@@ -1593,6 +1795,11 @@ body.route-home #react-target {
     gap: 12px;
 }
 
+.settings-field {
+    display: grid;
+    gap: 6px;
+}
+
 .settings-provider-head,
 .settings-channel-item {
     display: flex;
@@ -1665,18 +1872,29 @@ body.route-home #react-target {
     font-weight: 700;
 }
 
+.settings-provider-note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
 .sheet-page-shell {
-    height: calc(100vh - 102px);
+    height: calc(100vh - 86px);
     display: flex;
     flex-direction: column;
+    gap: 0;
+    overflow: hidden;
     min-width: 0;
     min-height: 0;
 }
 
 body.route-sheet #react-target {
-    height: calc(100vh - 102px);
+    height: calc(100vh - 86px);
     display: flex;
     flex-direction: column;
+    gap: 0;
+    overflow: hidden;
     min-width: 0;
     min-height: 0;
 }
@@ -1734,7 +1952,7 @@ body.route-sheet .report-wrap {
 
     .sheet-page-shell,
     body.route-sheet #react-target {
-        height: calc(100vh - 106px);
+        height: calc(100vh - 90px);
         min-height: 0;
     }
 
