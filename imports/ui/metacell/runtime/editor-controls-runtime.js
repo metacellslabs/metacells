@@ -1,6 +1,46 @@
 import { AI_MODE } from './constants.js';
 
 var BG_COLOR_RECENT_CACHE_KEY = 'UI_RECENT_BG_COLORS';
+function getAIModeIconMarkup(mode) {
+  var normalized = String(mode || AI_MODE.manual);
+  if (normalized === AI_MODE.auto) {
+    return (
+      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z'></path>" +
+      "<path d='M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z'></path>" +
+      "<path d='M5 14l.8 2.2L8 17l-2.2.8L5 20l-.8-2.2L2 17l2.2-.8L5 14Z'></path>" +
+      '</svg>'
+    );
+  }
+  return (
+    "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+    "<path d='M9 11V5a3 3 0 0 1 6 0v6'></path>" +
+    "<path d='M6 11h12'></path>" +
+    "<path d='M8 11v4a4 4 0 0 0 8 0v-4'></path>" +
+    "<path d='M12 19v2'></path>" +
+    '</svg>'
+  );
+}
+
+function getDisplayModeIconMarkup(mode) {
+  var normalized = String(mode || 'values');
+  if (normalized === 'formulas') {
+    return (
+      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='M8 5h8'></path>" +
+      "<path d='M8 19h8'></path>" +
+      "<path d='M14 5 10 19'></path>" +
+      '</svg>'
+    );
+  }
+  return (
+    "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+    "<path d='M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z'></path>" +
+    "<circle cx='12' cy='12' r='2.5'></circle>" +
+    '</svg>'
+  );
+}
+
 function isManualAIFormulaRaw(rawValue) {
   var raw = String(rawValue == null ? '' : rawValue).trim();
   if (!raw) return false;
@@ -262,7 +302,8 @@ function openDisplayModePicker(app) {
 function syncDisplayModeControl(app) {
   if (!app || !app.displayModeButton) return;
   var mode = app.displayMode === 'formulas' ? 'formulas' : 'values';
-  app.displayModeButton.textContent = mode === 'formulas' ? 'Formulas' : 'Values';
+  app.displayModeButton.innerHTML = getDisplayModeIconMarkup(mode);
+  app.displayModeButton.setAttribute('data-display-mode-current', mode);
   if (app.displayModeOptions && app.displayModeOptions.length) {
     app.displayModeOptions.forEach(function (option) {
       var optionValue = String(
@@ -506,7 +547,8 @@ function tryNavigateFromCellNameInput(app) {
 function syncAIModeControl(app) {
   if (!app || !app.aiModeButton) return;
   var mode = String(app.aiService.getMode() || AI_MODE.manual);
-  app.aiModeButton.textContent = mode === AI_MODE.auto ? 'Auto AI' : 'Manual AI';
+  app.aiModeButton.innerHTML = getAIModeIconMarkup(mode);
+  app.aiModeButton.setAttribute('data-ai-mode-current', mode);
   if (app.aiModeOptions && app.aiModeOptions.length) {
     app.aiModeOptions.forEach(function (option) {
       var optionValue = String(option.getAttribute('data-ai-mode') || 'manual');

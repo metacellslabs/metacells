@@ -408,8 +408,9 @@ export class SpreadsheetApp {
     this.currentServerEditLockKey = '';
     this.displayMode =
       this.displayModeButton &&
-      String(this.displayModeButton.textContent || '').trim().toLowerCase() ===
-        'formulas'
+      String(
+        this.displayModeButton.getAttribute('data-display-mode-current') || '',
+      ).trim().toLowerCase() === 'formulas'
         ? 'formulas'
         : 'values';
     this.editLockOwnerId =
@@ -459,8 +460,10 @@ export class SpreadsheetApp {
   setDisplayMode(mode) {
     this.displayMode = mode === 'formulas' ? 'formulas' : 'values';
     if (this.displayModeButton) {
-      this.displayModeButton.textContent =
-        this.displayMode === 'formulas' ? 'Formulas' : 'Values';
+      this.displayModeButton.setAttribute(
+        'data-display-mode-current',
+        this.displayMode,
+      );
     }
     this.renderCurrentSheetFromStorage();
   }

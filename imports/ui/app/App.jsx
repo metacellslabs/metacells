@@ -340,12 +340,9 @@ function HomePage() {
                     <span className="sheet-list-name">{sheet.name}</span>
                   </div>
                   <div className="sheet-list-meta">
-                    <span className="sheet-list-date">
-                      {sheet.updatedAt
-                        ? new Date(sheet.updatedAt).toLocaleString()
-                        : ''}
+                    <span className="sheet-list-arrow" aria-hidden="true">
+                      →
                     </span>
-                    <span className="sheet-list-arrow">Open</span>
                   </div>
                 </a>
                 <button
@@ -1855,8 +1852,14 @@ function SheetPage({
                   title="AI mode"
                   aria-haspopup="menu"
                   aria-expanded="false"
+                  data-ai-mode-current="manual"
                 >
-                  Manual AI
+                  <LucideIcon size={16}>
+                    <path d="M9 11V5a3 3 0 0 1 6 0v6" />
+                    <path d="M6 11h12" />
+                    <path d="M8 11v4a4 4 0 0 0 8 0v-4" />
+                    <path d="M12 19v2" />
+                  </LucideIcon>
                 </button>
                 <div id="ai-mode-popover" className="ai-mode-popover" hidden>
                   <button
@@ -1885,8 +1888,12 @@ function SheetPage({
                   title="Display mode"
                   aria-haspopup="menu"
                   aria-expanded="false"
+                  data-display-mode-current="values"
                 >
-                  Values
+                  <LucideIcon size={16}>
+                    <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" />
+                    <circle cx="12" cy="12" r="2.5" />
+                  </LucideIcon>
                 </button>
                 <div
                   id="display-mode-popover"
