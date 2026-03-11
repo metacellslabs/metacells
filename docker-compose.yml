@@ -1,0 +1,63 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    ports:
+      - "3400:3400"
+    environment:
+      METACELLS_ROLE: web
+      ROOT_URL: http://localhost:3400
+      BIND_IP: 0.0.0.0
+      METACELLS_CONTAINER_HOST_ALIAS: host.docker.internal
+      METEOR_ALLOW_SUPERUSER: "true"
+      METEOR_WATCH_FORCE_POLLING: "true"
+      METEOR_DISABLE_OPTIMISTIC_CACHING: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - meteor_local:/app/.meteor/local
+    command: >
+      bash -lc '
+        npm install &&
+        meteor run --allow-superuser --port 3400 --exclude-archs web.browser.legacy --no-lint
+      '
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    network_mode: "service:app"
+    depends_on:
+      - app
+    environment:
+      METACELLS_ROLE: worker
+      ROOT_URL: http://localhost:3410
+      BIND_IP: 0.0.0.0
+      METACELLS_CONTAINER_HOST_ALIAS: host.docker.internal
+      METEOR_ALLOW_SUPERUSER: "true"
+      METEOR_WATCH_FORCE_POLLING: "true"
+      METEOR_DISABLE_OPTIMISTIC_CACHING: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - meteor_local:/app/.meteor/local
+    command: >
+      bash -lc '
+        npm install &&
+        MONGO_PORT=$$(cat .meteor/local/db/METEOR-PORT) &&
+        MONGO_URL=mongodb://127.0.0.1:$${MONGO_PORT}/meteor \
+        ROOT_URL=http://127.0.0.1:3410 \
+        METACELLS_ROLE=worker \
+        meteor run --allow-superuser --port 3410 --exclude-archs web.browser.legacy --no-lint
+      '
+
+volumes:
+  node_modules:
+  meteor_local:
