@@ -2022,6 +2022,58 @@ td.has-formula::before {
   color: #5f6663;
 }
 
+.cell-output.ai-skeleton-value {
+  display: flex;
+  align-items: center;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow: hidden;
+}
+
+.cell-ai-skeleton {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.cell-ai-skeleton-line {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background-color: #dfe8e4;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(214, 224, 220, 0.2) 0%,
+      rgba(214, 224, 220, 0.78) 22%,
+      rgba(255, 255, 255, 0.98) 50%,
+      rgba(214, 224, 220, 0.78) 78%,
+      rgba(214, 224, 220, 0.2) 100%
+    );
+  background-size: 260% 100%;
+  animation: cell-ai-skeleton-shimmer 1.1s linear infinite;
+  will-change: background-position;
+}
+
+.cell-ai-skeleton-line.is-long {
+  width: 82%;
+}
+
+.cell-ai-skeleton-line.is-short {
+  width: 56%;
+}
+
+@keyframes cell-ai-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
+}
+
 td.display-numeric .cell-output,
 td.display-numeric input {
   text-align: right;
@@ -2380,11 +2432,12 @@ td.active-cell::after {
 
 .cell-actions {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 3px;
+  right: 3px;
   bottom: auto;
   display: inline-flex;
-  gap: 3px;
+  align-items: center;
+  gap: 2px;
   z-index: 5;
   opacity: 0;
   visibility: hidden;
@@ -2412,17 +2465,32 @@ td.editing .cell-actions {
   border: none;
   background: transparent;
   color: #2e5748;
-  border-radius: 3px;
+  border-radius: 5px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 11px;
   line-height: 1;
-  padding: 1px 2px;
-  min-width: 16px;
-  min-height: 16px;
+  padding: 0;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.cell-action svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .cell-action:hover {
-  background: rgba(15, 106, 78, 0.12);
+  background: rgba(15, 106, 78, 0.08);
 }
 
 .cell-action[data-action='run'] {

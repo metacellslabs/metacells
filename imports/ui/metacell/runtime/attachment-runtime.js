@@ -1,5 +1,24 @@
 import { Meteor } from 'meteor/meteor';
 
+function getAttachmentDisplayValue(app, rawValue) {
+  var raw = String(rawValue == null ? '' : rawValue);
+  var attachment = app.parseAttachmentSource(raw);
+  if (!attachment) return raw;
+  return String(
+    attachment.name ||
+      (attachment.pending ? 'Select file' : 'Attached file'),
+  );
+}
+
+function syncActiveAttachmentValue(app, cellId, rawValue) {
+  if (!app.activeInput || app.activeInput.id !== String(cellId || '').toUpperCase()) {
+    return;
+  }
+  var displayValue = getAttachmentDisplayValue(app, rawValue);
+  app.activeInput.value = displayValue;
+  app.formulaInput.value = displayValue;
+}
+
 export function setupAttachmentControls(app) {
   app.syncAttachButtonState();
   if (app.attachFileButton) {
@@ -19,8 +38,7 @@ export function setupAttachmentControls(app) {
       };
       var pendingSource = app.buildAttachmentSource({ pending: true });
       app.setRawCellValue(cellId, pendingSource);
-      app.activeInput.value = pendingSource;
-      app.formulaInput.value = pendingSource;
+      syncActiveAttachmentValue(app, cellId, pendingSource);
       app.computeAll();
     });
   }
@@ -50,8 +68,7 @@ export function setupAttachmentControls(app) {
         );
         var pendingSource = app.buildAttachmentSource({ pending: true });
         app.setRawCellValue(input.id, pendingSource);
-        input.value = pendingSource;
-        if (app.activeInput === input) app.formulaInput.value = '';
+        syncActiveAttachmentValue(app, input.id, pendingSource);
         app.computeAll();
         return;
       }
@@ -74,10 +91,7 @@ export function setupAttachmentControls(app) {
       var file = app.attachFileInput.files && app.attachFileInput.files[0];
       if (!file) {
         app.storage.setCellValue(ctx.sheetId, ctx.cellId, ctx.previousValue);
-        if (app.activeInput && app.activeInput.id === ctx.cellId) {
-          app.activeInput.value = ctx.previousValue;
-          app.formulaInput.value = ctx.previousValue;
-        }
+        syncActiveAttachmentValue(app, ctx.cellId, ctx.previousValue);
         app.computeAll();
         return;
       }
@@ -104,10 +118,7 @@ export function setupAttachmentControls(app) {
             String(ctx.cellId || '').toUpperCase(),
         );
         app.storage.setCellValue(ctx.sheetId, ctx.cellId, attachmentSource);
-        if (app.activeInput && app.activeInput.id === ctx.cellId) {
-          app.activeInput.value = attachmentSource;
-          app.formulaInput.value = attachmentSource;
-        }
+        syncActiveAttachmentValue(app, ctx.cellId, attachmentSource);
         if (app.isReportActive()) {
           app.renderReportLiveValues(true);
         }
@@ -115,10 +126,7 @@ export function setupAttachmentControls(app) {
         app.computeAll();
       } catch (error) {
         app.storage.setCellValue(ctx.sheetId, ctx.cellId, ctx.previousValue);
-        if (app.activeInput && app.activeInput.id === ctx.cellId) {
-          app.activeInput.value = ctx.previousValue;
-          app.formulaInput.value = ctx.previousValue;
-        }
+        syncActiveAttachmentValue(app, ctx.cellId, ctx.previousValue);
         window.alert(
           error && error.message ? error.message : 'Failed to read file',
         );

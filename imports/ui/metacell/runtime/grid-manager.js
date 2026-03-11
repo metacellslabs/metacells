@@ -35,7 +35,7 @@ export class GridManager {
             ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><input id='" +
               letter +
               i +
-              "'/><div class='cell-actions'><button type='button' class='cell-action' data-action='copy' title='Copy value'>⧉</button><button type='button' class='cell-action' data-action='fullscreen' title='Fullscreen'>⤢</button><button type='button' class='cell-action' data-action='run' title='Run formula'>▶</button></div><div class='fill-handle'></div>"
+              "'/><div class='cell-actions'><button type='button' class='cell-action' data-action='copy' title='Copy value' aria-label='Copy value'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='10' height='10' rx='2'></rect><path d='M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1'></path></svg></button><button type='button' class='cell-action' data-action='fullscreen' title='Fullscreen' aria-label='Fullscreen'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M8 3H5a2 2 0 0 0-2 2v3'></path><path d='M16 3h3a2 2 0 0 1 2 2v3'></path><path d='M8 21H5a2 2 0 0 1-2-2v-3'></path><path d='M16 21h3a2 2 0 0 0 2-2v-3'></path></svg></button><button type='button' class='cell-action' data-action='run' title='Run formula'>▶</button></div><div class='fill-handle'></div>"
             : i || letter;
       }
     }
@@ -361,10 +361,12 @@ export class GridManager {
     var output = input.parentElement.querySelector('.cell-output');
     var statusNode = input.parentElement.querySelector('.cell-status');
     var opts = options || {};
+    input.parentElement.classList.toggle('has-ai-skeleton', !!opts.aiSkeleton);
     if (output) {
       output.classList.toggle('formula-value', !!hasFormula);
       output.classList.toggle('error-value', !!opts.error);
       output.classList.toggle('numeric-value', !!opts.alignRight);
+      output.classList.toggle('ai-skeleton-value', !!opts.aiSkeleton);
       output.style.backgroundColor = opts.backgroundColor
         ? String(opts.backgroundColor)
         : '';
@@ -372,6 +374,12 @@ export class GridManager {
       output.style.fontFamily = getFontFamilyCssValue(opts.fontFamily);
       if (opts.attachment) {
         output.innerHTML = this.renderAttachmentValue(opts.attachment);
+      } else if (opts.aiSkeleton) {
+        output.innerHTML =
+          "<span class='cell-ai-skeleton' aria-hidden='true'>" +
+          "<span class='cell-ai-skeleton-line is-long'></span>" +
+          "<span class='cell-ai-skeleton-line is-short'></span>" +
+          '</span>';
       } else {
         output.innerHTML = opts.literal
           ? this.escapeHtml(value == null ? '' : value).replace(
@@ -422,20 +430,16 @@ export class GridManager {
     );
     if (statusNode) {
       var nextState = hasFormula ? String(opts.state || '') : '';
+      var showStatusBadge = !(opts.aiSkeleton && (nextState === 'pending' || nextState === 'stale'));
       var title = '';
-      if (nextState === 'pending' || nextState === 'stale') {
+      if (showStatusBadge && (nextState === 'pending' || nextState === 'stale')) {
         title = nextState === 'stale' ? 'Waiting for recompute' : 'Computing';
-      } else if (nextState === 'resolved') {
-        title = 'Computed';
       } else if (nextState === 'error') {
         title = 'Error';
       }
-      if (nextState === 'pending' || nextState === 'stale') {
+      if (showStatusBadge && (nextState === 'pending' || nextState === 'stale')) {
         statusNode.innerHTML =
           "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10' stroke-dasharray='3 3' /><path d='M12 6v6l4 2' /></svg>";
-      } else if (nextState === 'resolved') {
-        statusNode.innerHTML =
-          "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5' /></svg>";
       } else if (nextState === 'error') {
         statusNode.innerHTML =
           "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z' /><path d='M12 9v4' /><path d='M12 17h.01' /></svg>";
@@ -443,7 +447,7 @@ export class GridManager {
         statusNode.innerHTML = '';
       }
       statusNode.className =
-        'cell-status' + (nextState ? ' is-' + nextState : '');
+        'cell-status' + (showStatusBadge && nextState ? ' is-' + nextState : '');
       if (title) statusNode.setAttribute('title', title);
       else statusNode.removeAttribute('title');
     }

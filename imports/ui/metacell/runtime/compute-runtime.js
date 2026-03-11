@@ -167,6 +167,39 @@ export function renderCurrentSheetFromStorage(app) {
   }
   var formulaDone = 0;
   app.updateCalcProgress(0, formulaCount);
+  var syncFormulaBarWithActiveCell = () => {
+    if (!app.activeInput || app.hasPendingLocalEdit()) return;
+    var rawValue = app.getRawCellValue(app.activeInput.id);
+    var attachment = app.parseAttachmentSource(rawValue);
+    app.formulaInput.value = attachment
+      ? String(
+          attachment.name ||
+            (attachment.pending ? 'Select file' : 'Attached file'),
+        )
+      : rawValue;
+  };
+  var isAISpillSourceRaw = (rawValue) =>
+    /\b(?:listAI|tableAI)\s*\(/i.test(String(rawValue || ''));
+  var isAIFormulaRaw = (rawValue) => {
+    var text = String(rawValue || '');
+    if (!text) return false;
+    if (
+      text.charAt(0) === "'" ||
+      text.charAt(0) === '>' ||
+      text.charAt(0) === '#'
+    ) {
+      return true;
+    }
+    return /\b(?:askAI|listAI|tableAI)\s*\(/i.test(text);
+  };
+  var shouldShowGeneratedAISkeleton = (generatedBy, showFormulas, attachment, errorHint) => {
+    var sourceCellId = String(generatedBy || '').toUpperCase();
+    if (showFormulas || attachment || errorHint || !sourceCellId) return false;
+    var sourceRaw = app.getRawCellValue(sourceCellId);
+    if (!isAISpillSourceRaw(sourceRaw)) return false;
+    var sourceState = app.storage.getCellState(app.activeSheetId, sourceCellId);
+    return sourceState === 'pending' || sourceState === 'stale';
+  };
 
   app.inputs.forEach((input) => {
     try {
@@ -220,6 +253,24 @@ export function renderCurrentSheetFromStorage(app) {
       ) {
         displayValue = raw;
       }
+      var showAISkeleton =
+        !showFormulas &&
+        isAIFormulaRaw(raw) &&
+        !attachment &&
+        !errorHint &&
+        (cellState === 'pending' || cellState === 'stale') &&
+        String(displayValue == null ? '' : displayValue).trim() === '...';
+      if (
+        !showAISkeleton &&
+        shouldShowGeneratedAISkeleton(
+          generatedBy,
+          showFormulas,
+          attachment,
+          errorHint,
+        )
+      ) {
+        showAISkeleton = true;
+      }
       displayValue = formatCellDisplay(
         app,
         app.activeSheetId,
@@ -252,6 +303,7 @@ export function renderCurrentSheetFromStorage(app) {
       app.grid.renderCellValue(input, displayValue, isEditing, isFormula, {
         literal: showFormulas ? true : literalDisplay,
         attachment: attachment,
+        aiSkeleton: showAISkeleton,
         error: !!errorHint,
         state: cellState,
         alignRight: !showFormulas && formatMeta.isNumeric,
@@ -281,9 +333,7 @@ export function renderCurrentSheetFromStorage(app) {
   updateWrappedRowHeights(app);
   applyRightOverflowText(app);
   app.applyDependencyHighlight();
-  if (app.activeInput && !app.hasPendingLocalEdit()) {
-    app.formulaInput.value = app.getRawCellValue(app.activeInput.id);
-  }
+  syncFormulaBarWithActiveCell();
   app.syncAIModeUI();
   app.renderReportLiveValues(true);
   app.finishCalcProgress(formulaCount);
@@ -470,6 +520,24 @@ export function computeAll(app) {
             ) {
               displayValue = storedDisplay;
             }
+            var showAISkeleton =
+              !showFormulas &&
+              isAIFormulaRaw(raw) &&
+              !attachment &&
+              !errorHint &&
+              (cellState === 'pending' || cellState === 'stale') &&
+              String(displayValue == null ? '' : displayValue).trim() === '...';
+            if (
+              !showAISkeleton &&
+              shouldShowGeneratedAISkeleton(
+                generatedBy,
+                showFormulas,
+                attachment,
+                errorHint,
+              )
+            ) {
+              showAISkeleton = true;
+            }
             displayValue = formatCellDisplay(
               app,
               app.activeSheetId,
@@ -513,6 +581,7 @@ export function computeAll(app) {
               {
                 literal: showFormulas ? true : literalDisplay,
                 attachment: attachment,
+                aiSkeleton: showAISkeleton,
                 error: !!errorHint,
                 state: cellState,
                 alignRight: !showFormulas && formatMeta.isNumeric,
@@ -549,8 +618,15 @@ export function computeAll(app) {
         applyRightOverflowText(app);
       }
 
-      if (app.activeInput && !app.hasPendingLocalEdit()) {
-        app.formulaInput.value = app.getRawCellValue(app.activeInput.id);
+      if (!app.hasPendingLocalEdit() && app.activeInput) {
+        var rawValue = app.getRawCellValue(app.activeInput.id);
+        var attachment = app.parseAttachmentSource(rawValue);
+        app.formulaInput.value = attachment
+          ? String(
+              attachment.name ||
+                (attachment.pending ? 'Select file' : 'Attached file'),
+            )
+          : rawValue;
       }
 
       app.syncAIModeUI();
