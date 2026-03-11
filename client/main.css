@@ -322,14 +322,13 @@ body {
   flex-wrap: nowrap;
   margin-top: 0;
   margin-bottom: 0;
+  padding: 8px;
   padding-top: 0;
   flex: 0 0 auto;
   margin-top: auto;
   z-index: 9;
   border-top: none;
-  box-shadow:
-    inset 0 1px 0 rgba(166, 187, 178, 0.65),
-    var(--shadow);
+  box-shadow: none;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   margin-top: -1px;
@@ -343,7 +342,7 @@ body {
   padding: 0 8px;
   font-size: 12px;
   border-radius: 8px;
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .tabs-bar #tabs {
@@ -703,6 +702,23 @@ body {
   box-shadow: none;
 }
 
+#formula-input:focus,
+#cell-name-input:focus {
+  outline: none;
+  box-shadow: none;
+  background: #f3f5f4;
+}
+
+.formula-input-combo #formula-input:focus {
+  border-top-right-radius: calc(var(--radius-sm) - 1px);
+  border-bottom-right-radius: calc(var(--radius-sm) - 1px);
+}
+
+.cell-name-combo #cell-name-input:focus {
+  border-top-left-radius: calc(var(--radius-sm) - 1px);
+  border-bottom-left-radius: calc(var(--radius-sm) - 1px);
+}
+
 #workbook-name-input {
   width: 180px;
   min-width: 120px;
@@ -714,8 +730,8 @@ body {
 }
 
 .workbook-name-combo:focus-within {
-  border-color: #8fb0f1;
-  box-shadow: 0 0 0 3px rgba(50, 113, 233, 0.12);
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 .calc-progress {
@@ -754,6 +770,9 @@ body {
   border-radius: var(--radius-sm);
   background: #ffffff;
   overflow: visible;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 .cell-name-combo #cell-name-input {
@@ -775,8 +794,13 @@ body {
   cursor: pointer;
   border: 0;
   border-left: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
+  background: transparent;
   box-shadow: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-left-color 120ms ease;
 }
 
 #named-cell-jump svg {
@@ -822,8 +846,21 @@ body {
   color: var(--text);
 }
 
+#cell-name-input:hover,
+.cell-name-combo:hover #cell-name-input {
+  background: #f7f9f8;
+}
+
+.cell-name-combo:hover {
+  border-color: var(--border-strong);
+}
+
+.cell-name-combo:hover #named-cell-jump {
+  border-left-color: var(--border-strong);
+}
+
 #named-cell-jump:hover {
-  background-color: transparent;
+  background-color: rgba(82, 99, 93, 0.08);
   color: var(--text);
 }
 
@@ -910,8 +947,12 @@ body {
 }
 
 .cell-name-combo:focus-within {
-  border-color: #8fb0f1;
-  box-shadow: 0 0 0 3px rgba(50, 113, 233, 0.12);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+.cell-name-combo:focus-within #named-cell-jump {
+  border-left-color: var(--border-strong);
 }
 
 #display-mode,
@@ -1081,10 +1122,10 @@ body {
 }
 
 #display-mode {
-  min-width: 86px;
+  min-width: 78px;
   width: auto;
   height: auto;
-  padding: 0;
+  padding: 0 2px;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -1834,6 +1875,7 @@ button:hover {
   width: 100%;
   max-width: 100%;
   overflow: auto;
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
@@ -1874,6 +1916,14 @@ td:first-child {
   color: #1f5d52;
   font-weight: 700;
   text-align: center;
+}
+
+tr:first-child td {
+  border-top-color: transparent;
+}
+
+td:first-child {
+  border-left-color: transparent;
 }
 
 tr:first-child td {
@@ -2697,10 +2747,10 @@ body.is-column-resizing .col-resize-handle::after {
   position: fixed;
   top: 0;
   bottom: 0;
-  width: 2px;
-  margin-left: -1px;
+  width: 1px;
+  margin-left: 0;
   background: rgba(50, 113, 233, 0.9);
-  box-shadow: 0 0 0 1px rgba(50, 113, 233, 0.18);
+  box-shadow: none;
   pointer-events: none;
   z-index: 9999;
   display: none;
@@ -3178,6 +3228,7 @@ body.route-home #react-target {
 
 body.route-sheet {
   padding: calc(var(--toolbar-offset) - 12px) 16px 16px;
+  background: #ffffff;
 }
 
 body.route-sheet .formula-bar {
@@ -3730,6 +3781,7 @@ body.route-sheet .formula-bar {
   min-height: 0;
   width: 100%;
   margin-top: -1px;
+  padding: 0;
   background: #ffffff;
   border-radius: 0;
   overflow: hidden;
@@ -3747,22 +3799,43 @@ body.route-sheet #react-target {
   width: 100%;
 }
 
+body.route-sheet .sheet-page-shell {
+  box-shadow: none;
+}
+
 body.route-sheet .table-wrap,
 body.route-sheet .report-wrap {
   flex: 1 1 auto;
   min-height: 0;
   background: #ffffff;
+  border-top: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  border-left: 0;
-  border-right: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding-left: 8px;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+body.route-sheet .table-wrap::before,
+body.route-sheet .report-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 8px;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 18;
 }
 
 body.route-sheet .tabs-bar {
   border-bottom-left-radius: 16px;
   border-bottom-right-radius: 16px;
-  border-left: 0;
-  border-right: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 body.route-published-report {
