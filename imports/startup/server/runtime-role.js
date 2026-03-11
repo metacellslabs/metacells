@@ -1,7 +1,9 @@
 function normalizeRole(value) {
-  const role = String(value || "").trim().toLowerCase();
-  if (role === "worker") return "worker";
-  return "web";
+  const role = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (role === 'worker') return 'worker';
+  return 'web';
 }
 
 export function getRuntimeRole() {
@@ -9,9 +11,9 @@ export function getRuntimeRole() {
 }
 
 export function isWorkerRuntime() {
-  return getRuntimeRole() === "worker";
+  return getRuntimeRole() === 'worker';
 }
 
 export function isWebRuntime() {
-  return getRuntimeRole() !== "worker";
+  return getRuntimeRole() !== 'worker';
 }

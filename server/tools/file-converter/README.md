@@ -5,6 +5,7 @@ A Swift library and CLI tool for converting documents and images to Markdown for
 ## Features
 
 ### Document Conversion
+
 - **Excel (.xlsx)**
 - **Word (.docx)**
 - **OpenDocument (.odt)**
@@ -18,6 +19,7 @@ A Swift library and CLI tool for converting documents and images to Markdown for
 - **EPUB**
 
 ### Image Analysis (Apple Vision)
+
 - **Supported formats:** PNG, JPEG, HEIC, HEIF, TIFF, BMP, GIF, WebP
 - **Object detection:** Classifies images and detects charts, graphs, tables, text, faces, barcodes
 - **Smart extraction:** Automatically exports important images (matching specified tags) to temp folder
@@ -79,11 +81,11 @@ for image in result.images {
     print("  Dimensions: \(image.width ?? 0) × \(image.height ?? 0)")
     print("  Objects: \(image.detectedObjects.joined(separator: ", "))")
     print("  Is Important: \(image.isImportant)")
-    
+
     if image.isImportant, let path = image.exportedPath {
         print("  Exported to: \(path)")
     }
-    
+
     if let metadata = image.metadata {
         print("  Metadata: \(metadata.toDictionary())")
     }
@@ -175,7 +177,7 @@ let (result, debug) = try await converter.convertWithDebug(url: fileURL)
 if let debugInfo = debug {
     print("Sheets: \(debugInfo.sheets.count)")
     print("Total rows: \(debugInfo.totalInputRows)")
-    
+
     for sheet in debugInfo.sheets {
         print("\(sheet.name): \(sheet.rowCount) rows, \(sheet.cellCount) cells")
     }
@@ -218,15 +220,18 @@ file-converter formats --all
 The Vision analyzer detects various objects and features in images:
 
 ### Classification
+
 - General object classification (animals, plants, objects, scenes)
 - Confidence threshold: 0.3
 
 ### Structure Detection
+
 - **Rectangles:** Charts, tables, documents (when multiple rectangles detected)
 - **Text:** Documents with text content
 - **Data:** Numeric content (potential charts/graphs)
 
 ### Special Detection
+
 - **Faces:** Person detection, group photos
 - **Barcodes:** QR codes, various barcode formats
 
@@ -234,30 +239,30 @@ The Vision analyzer detects various objects and features in images:
 
 Each image in the response includes:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `objects` | `[String]` | List of detected objects/labels |
-| `isImportant` | `Bool` | Whether image matches any of the specified tags |
-| `width` | `Int` | Image width in pixels |
-| `height` | `Int` | Image height in pixels |
-| `format` | `String` | Image format name (e.g., "JPEG", "PNG") |
-| `file` | `String?` | Path to exported temp file (only if important) |
-| `metadata` | `Object?` | Additional image metadata (if available) |
+| Field         | Type       | Description                                     |
+| ------------- | ---------- | ----------------------------------------------- |
+| `objects`     | `[String]` | List of detected objects/labels                 |
+| `isImportant` | `Bool`     | Whether image matches any of the specified tags |
+| `width`       | `Int`      | Image width in pixels                           |
+| `height`      | `Int`      | Image height in pixels                          |
+| `format`      | `String`   | Image format name (e.g., "JPEG", "PNG")         |
+| `file`        | `String?`  | Path to exported temp file (only if important)  |
+| `metadata`    | `Object?`  | Additional image metadata (if available)        |
 
 ### Metadata Fields
 
 When available, metadata includes:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `colorSpace` | `String` | Color model (e.g., "RGB", "Gray") |
-| `hasAlpha` | `Bool` | Whether image has alpha channel |
-| `dpi` | `Double` | Image resolution in DPI |
-| `orientation` | `Int` | EXIF orientation value |
-| `creationDate` | `String` | Original creation date |
-| `modificationDate` | `String` | Last modification date |
-| `camera` | `String` | Camera make and model |
-| `software` | `String` | Software used to create/edit |
+| Field              | Type     | Description                       |
+| ------------------ | -------- | --------------------------------- |
+| `colorSpace`       | `String` | Color model (e.g., "RGB", "Gray") |
+| `hasAlpha`         | `Bool`   | Whether image has alpha channel   |
+| `dpi`              | `Double` | Image resolution in DPI           |
+| `orientation`      | `Int`    | EXIF orientation value            |
+| `creationDate`     | `String` | Original creation date            |
+| `modificationDate` | `String` | Last modification date            |
+| `camera`           | `String` | Camera make and model             |
+| `software`         | `String` | Software used to create/edit      |
 
 ### Example Output
 

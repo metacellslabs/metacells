@@ -5,6 +5,7 @@ meteor/local
 npm-debug.log
 _build/
 .tmp-ci/
+.vscode/
 
 # Meteor Modern-Tools build context directories
 _build

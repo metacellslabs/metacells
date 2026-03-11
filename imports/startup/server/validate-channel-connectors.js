@@ -1,25 +1,25 @@
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import { getRegisteredChannelConnectorManifest } from "../../api/channels/connectors/index.js";
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { getRegisteredChannelConnectorManifest } from '../../api/channels/connectors/index.js';
 
 function getAppRoot() {
   const pwd = process.env.PWD;
   if (pwd) return pwd;
-  return path.resolve(process.cwd(), "../../../../..");
+  return path.resolve(process.cwd(), '../../../../..');
 }
 
 function getConnectorDirectory() {
-  return path.join(getAppRoot(), "imports", "api", "channels", "connectors");
+  return path.join(getAppRoot(), 'imports', 'api', 'channels', 'connectors');
 }
 
 function shouldIgnoreConnectorFile(fileName) {
-  return /^(?:index|definition)\.js$/i.test(String(fileName || ""));
+  return /^(?:index|definition)\.js$/i.test(String(fileName || ''));
 }
 
 function hashFile(filePath) {
   const buffer = fs.readFileSync(filePath);
-  return crypto.createHash("sha256").update(buffer).digest("hex");
+  return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
 export function validateDiscoveredChannelConnectorsOnServer() {
@@ -31,10 +31,11 @@ export function validateDiscoveredChannelConnectorsOnServer() {
   const manifest = getRegisteredChannelConnectorManifest();
   const manifestByFile = new Map();
   for (let i = 0; i < manifest.length; i += 1) {
-    manifestByFile.set(String(manifest[i].file || ""), manifest[i]);
+    manifestByFile.set(String(manifest[i].file || ''), manifest[i]);
   }
 
-  const discoveredFiles = fs.readdirSync(connectorsDir)
+  const discoveredFiles = fs
+    .readdirSync(connectorsDir)
     .filter((fileName) => /\.js$/i.test(fileName))
     .filter((fileName) => !shouldIgnoreConnectorFile(fileName))
     .sort();
@@ -44,7 +45,9 @@ export function validateDiscoveredChannelConnectorsOnServer() {
     const fileName = discoveredFiles[i];
     const manifestEntry = manifestByFile.get(fileName);
     if (!manifestEntry) {
-      throw new Error(`Channel connector file ${fileName} exists on disk but was not registered by auto-discovery`);
+      throw new Error(
+        `Channel connector file ${fileName} exists on disk but was not registered by auto-discovery`,
+      );
     }
     fileHashes.push({
       file: fileName,
@@ -54,7 +57,9 @@ export function validateDiscoveredChannelConnectorsOnServer() {
   }
 
   if (manifest.length !== discoveredFiles.length) {
-    throw new Error("Channel connector auto-discovery manifest does not match files on disk");
+    throw new Error(
+      'Channel connector auto-discovery manifest does not match files on disk',
+    );
   }
 
   return fileHashes;

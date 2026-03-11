@@ -1,19 +1,56 @@
-import { AppSettings, DEFAULT_SETTINGS_ID, ensureDefaultSettings } from "../settings/index.js";
-import { normalizeChannelLabel } from "./mentioning.js";
+import {
+  AppSettings,
+  DEFAULT_SETTINGS_ID,
+  ensureDefaultSettings,
+} from '../settings/index.js';
+import { buildChannelAttachmentPath, ChannelEvents } from './events.js';
+import { normalizeChannelLabel } from './mentioning.js';
+import { getArtifactText } from '../artifacts/index.js';
 
-function buildChannelPayloadMapFromChannels(channels) {
+async function buildChannelPayloadMapFromChannelsAndEvents(
+  channels,
+  eventDocsById,
+) {
   const map = {};
   const source = Array.isArray(channels) ? channels : [];
   for (let i = 0; i < source.length; i += 1) {
     const channel = source[i];
-    if (!channel || typeof channel !== "object") continue;
+    if (!channel || typeof channel !== 'object') continue;
     const label = normalizeChannelLabel(channel.label);
-    if (!label || !channel.lastEvent || typeof channel.lastEvent !== "object") continue;
+    const eventId = String(channel.lastEventId || '');
+    const eventDoc = eventId ? eventDocsById[eventId] : null;
+    if (!label || !eventDoc || typeof eventDoc !== 'object') continue;
+    const attachments = Array.isArray(eventDoc.attachments)
+      ? await Promise.all(
+          eventDoc.attachments.map(async (item, index) => {
+            const attachmentId = String(
+              item && (item.id || item.attachmentId)
+                ? item.id || item.attachmentId
+                : `legacy-${index}`,
+            );
+            const content =
+              item && item.contentArtifactId
+                ? await getArtifactText(String(item.contentArtifactId || ''))
+                : String((item && item.content) || '');
+            return {
+              ...(item && typeof item === 'object' ? item : {}),
+              id: attachmentId,
+              downloadUrl: buildChannelAttachmentPath(
+                eventDoc._id || eventId,
+                attachmentId,
+              ),
+              content: content,
+            };
+          }),
+        )
+      : [];
     map[label] = {
-      ...channel.lastEvent,
-      label: String(channel.label || ""),
-      channelId: String(channel.id || ""),
-      connectorId: String(channel.connectorId || channel.type || ""),
+      ...eventDoc,
+      attachments,
+      eventId: String(eventDoc._id || eventId),
+      label: String(channel.label || ''),
+      channelId: String(channel.id || ''),
+      connectorId: String(channel.connectorId || channel.type || ''),
     };
   }
   return map;
@@ -22,6 +59,21 @@ function buildChannelPayloadMapFromChannels(channels) {
 export async function getActiveChannelPayloadMap() {
   await ensureDefaultSettings();
   const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
-  return buildChannelPayloadMapFromChannels(current && current.communicationChannels);
+  const channels = Array.isArray(current && current.communicationChannels)
+    ? current.communicationChannels
+    : [];
+  const eventIds = channels
+    .map((channel) => String((channel && channel.lastEventId) || ''))
+    .filter(Boolean);
+  const eventDocsById = {};
+  if (eventIds.length) {
+    const docs = await ChannelEvents.find({
+      _id: { $in: eventIds },
+    }).fetchAsync();
+    docs.forEach((doc) => {
+      if (!doc || !doc._id) return;
+      eventDocsById[String(doc._id)] = doc;
+    });
+  }
+  return buildChannelPayloadMapFromChannelsAndEvents(channels, eventDocsById);
 }
-

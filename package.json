@@ -7,7 +7,8 @@
     "start:worker": "MONGO_PORT=$(cat .meteor/local/db/METEOR-PORT) && MONGO_URL=mongodb://127.0.0.1:${MONGO_PORT}/meteor ROOT_URL=http://127.0.0.1:3410 METACELLS_ROLE=worker meteor run --port 3410 --exclude-archs web.browser.legacy",
     "test": "meteor test --once --driver-package meteortesting:mocha",
     "test-app": "TEST_WATCH=1 meteor test --full-app --driver-package meteortesting:mocha",
-    "visualize": "meteor --production --extra-packages bundle-visualizer"
+    "visualize": "meteor --production --extra-packages bundle-visualizer",
+    "format": "npx prettier --write ."
   },
   "dependencies": {
     "@babel/runtime": "^7.23.5",

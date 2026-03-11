@@ -1,16 +1,16 @@
-import { validateChannelConnectorDefinition } from "./definition.js";
+import { validateChannelConnectorDefinition } from './definition.js';
 
 function shouldIgnoreConnectorFile(key) {
-  return /(?:^|\/)(?:index|definition)\.js$/i.test(String(key || ""));
+  return /(?:^|\/)(?:index|definition)\.js$/i.test(String(key || ''));
 }
 
 function buildDiscoveryHash(key, definition) {
   const input = JSON.stringify({
-    key: String(key || ""),
-    id: String(definition.id || ""),
-    name: String(definition.name || ""),
-    type: String(definition.type || ""),
-    packageName: String(definition.packageName || ""),
+    key: String(key || ''),
+    id: String(definition.id || ''),
+    name: String(definition.name || ''),
+    type: String(definition.type || ''),
+    packageName: String(definition.packageName || ''),
   });
 
   let hash = 2166136261;
@@ -18,11 +18,11 @@ function buildDiscoveryHash(key, definition) {
     hash ^= input.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function discoverChannelConnectors() {
-  const context = import.meta.webpackContext("./", {
+  const context = import.meta.webpackContext('./', {
     recursive: false,
     regExp: /\.js$/,
   });
@@ -30,24 +30,32 @@ function discoverChannelConnectors() {
   const manifest = [];
   const seenIds = {};
 
-  context.keys().sort().forEach((key) => {
-    if (shouldIgnoreConnectorFile(key)) return;
-    const moduleExports = context(key);
-    const definition = validateChannelConnectorDefinition(moduleExports && moduleExports.default, key);
-    const connectorId = String(definition.id || "");
+  context
+    .keys()
+    .sort()
+    .forEach((key) => {
+      if (shouldIgnoreConnectorFile(key)) return;
+      const moduleExports = context(key);
+      const definition = validateChannelConnectorDefinition(
+        moduleExports && moduleExports.default,
+        key,
+      );
+      const connectorId = String(definition.id || '');
 
-    if (seenIds[connectorId]) {
-      throw new Error(`Duplicate channel connector id "${connectorId}" in ${key} and ${seenIds[connectorId]}`);
-    }
+      if (seenIds[connectorId]) {
+        throw new Error(
+          `Duplicate channel connector id "${connectorId}" in ${key} and ${seenIds[connectorId]}`,
+        );
+      }
 
-    seenIds[connectorId] = key;
-    connectors.push(definition);
-    manifest.push({
-      file: key.replace(/^\.\//, ""),
-      id: connectorId,
-      discoveryHash: buildDiscoveryHash(key, definition),
+      seenIds[connectorId] = key;
+      connectors.push(definition);
+      manifest.push({
+        file: key.replace(/^\.\//, ''),
+        id: connectorId,
+        discoveryHash: buildDiscoveryHash(key, definition),
+      });
     });
-  });
 
   return { connectors, manifest };
 }
@@ -65,18 +73,22 @@ export function getRegisteredChannelConnectorManifest() {
 }
 
 export function getRegisteredChannelConnectorById(connectorId) {
-  const target = String(connectorId || "");
+  const target = String(connectorId || '');
   return CONNECTORS.find((item) => item && item.id === target) || null;
 }
 
 export function buildChannelHelpSection() {
   return {
-    title: "Channels",
+    title: 'Channels',
     items: CONNECTORS.flatMap((connector) => {
       const lines = [];
-      lines.push(`\`${connector.name}\` uses package \`${connector.packageName || "custom"}\``);
+      lines.push(
+        `\`${connector.name}\` uses package \`${connector.packageName || 'custom'}\``,
+      );
       connector.help.forEach((item) => lines.push(item));
-      connector.mentioningFormulas.forEach((item) => lines.push(`Example: \`${item}\``));
+      connector.mentioningFormulas.forEach((item) =>
+        lines.push(`Example: \`${item}\``),
+      );
       return lines;
     }),
   };

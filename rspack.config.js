@@ -1,4 +1,4 @@
-const { defineConfig } = require("@meteorjs/rspack");
+const { defineConfig } = require('@meteorjs/rspack');
 
 /**
  * Rspack configuration for Meteor projects.
@@ -11,7 +11,10 @@ const { defineConfig } = require("@meteorjs/rspack");
  * Use these flags to adjust your build settings based on environment.
  */
 module.exports = defineConfig((Meteor) => {
-  const isWorkerRuntime = String(process.env.METACELLS_ROLE || "").trim().toLowerCase() === "worker";
+  const isWorkerRuntime =
+    String(process.env.METACELLS_ROLE || '')
+      .trim()
+      .toLowerCase() === 'worker';
   return {
     cache: Meteor.isDevelopment ? false : undefined,
     ...(Meteor.isDevelopment
@@ -27,7 +30,7 @@ module.exports = defineConfig((Meteor) => {
         {
           test: /\.svg$/i,
           issuer: /\.[jt]sx?$/,
-          use: ["@svgr/webpack"],
+          use: ['@svgr/webpack'],
         },
       ],
     },

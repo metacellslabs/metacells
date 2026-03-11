@@ -1,25 +1,32 @@
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import { getRegisteredFormulaManifest } from "../../ui/metacell/runtime/formulas/index.js";
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { getRegisteredFormulaManifest } from '../../ui/metacell/runtime/formulas/index.js';
 
 function getAppRoot() {
   const pwd = process.env.PWD;
   if (pwd) return pwd;
-  return path.resolve(process.cwd(), "../../../../..");
+  return path.resolve(process.cwd(), '../../../../..');
 }
 
 function getFormulaDirectory() {
-  return path.join(getAppRoot(), "imports", "ui", "metacell", "runtime", "formulas");
+  return path.join(
+    getAppRoot(),
+    'imports',
+    'ui',
+    'metacell',
+    'runtime',
+    'formulas',
+  );
 }
 
 function shouldIgnoreFormulaFile(fileName) {
-  return /^(?:index|definition|helpers)\.js$/i.test(String(fileName || ""));
+  return /^(?:index|definition|helpers)\.js$/i.test(String(fileName || ''));
 }
 
 function hashFile(filePath) {
   const buffer = fs.readFileSync(filePath);
-  return crypto.createHash("sha256").update(buffer).digest("hex");
+  return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
 export function validateDiscoveredFormulasOnServer() {
@@ -33,10 +40,11 @@ export function validateDiscoveredFormulasOnServer() {
 
   for (let i = 0; i < manifest.length; i += 1) {
     const item = manifest[i];
-    manifestByFile.set(String(item.file || ""), item);
+    manifestByFile.set(String(item.file || ''), item);
   }
 
-  const discoveredFiles = fs.readdirSync(formulasDir)
+  const discoveredFiles = fs
+    .readdirSync(formulasDir)
     .filter((fileName) => /\.js$/i.test(fileName))
     .filter((fileName) => !shouldIgnoreFormulaFile(fileName))
     .sort();
@@ -46,7 +54,9 @@ export function validateDiscoveredFormulasOnServer() {
     const fileName = discoveredFiles[i];
     const manifestEntry = manifestByFile.get(fileName);
     if (!manifestEntry) {
-      throw new Error(`Formula file ${fileName} exists on disk but was not registered by auto-discovery`);
+      throw new Error(
+        `Formula file ${fileName} exists on disk but was not registered by auto-discovery`,
+      );
     }
 
     fileHashes.push({
@@ -57,7 +67,9 @@ export function validateDiscoveredFormulasOnServer() {
   }
 
   if (manifest.length !== discoveredFiles.length) {
-    throw new Error("Formula auto-discovery manifest does not match files on disk");
+    throw new Error(
+      'Formula auto-discovery manifest does not match files on disk',
+    );
   }
 
   return fileHashes;

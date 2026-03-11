@@ -1,5 +1,5 @@
-import { Meteor } from "meteor/meteor";
-import { WorkbookStorageAdapter } from "./runtime/workbook-storage-adapter.js";
+import { Meteor } from 'meteor/meteor';
+import { WorkbookStorageAdapter } from './runtime/workbook-storage-adapter.js';
 
 class SheetDocStorageCore extends WorkbookStorageAdapter {
   constructor(sheetId, initialWorkbook) {
@@ -7,23 +7,53 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
     this.sheetId = sheetId;
     this.flushTimer = null;
     this.flushDelayMs = 250;
+    this.localRevision = 0;
+    this.persistedRevision = 0;
+    this.saveInFlight = false;
   }
 
   scheduleFlush() {
+    this.localRevision += 1;
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
     }
 
+    const targetRevision = this.localRevision;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      Meteor.callAsync("sheets.saveWorkbook", this.sheetId, this.snapshot()).catch((error) => {
-        console.error("Failed to save workbook", error);
-      });
+      this.saveInFlight = true;
+      Meteor.callAsync('sheets.saveWorkbook', this.sheetId, this.snapshot())
+        .then(() => {
+          this.persistedRevision = Math.max(
+            this.persistedRevision,
+            targetRevision,
+          );
+        })
+        .catch((error) => {
+          console.error('Failed to save workbook', error);
+        })
+        .finally(() => {
+          this.saveInFlight = false;
+        });
     }, this.flushDelayMs);
   }
 
   replaceAll(nextWorkbook) {
     super.replaceAll(nextWorkbook);
+    this.persistedRevision = this.localRevision;
+    this.saveInFlight = false;
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+  }
+
+  hasPendingPersistence() {
+    return (
+      !!this.flushTimer ||
+      this.saveInFlight ||
+      this.persistedRevision < this.localRevision
+    );
   }
 
   setCellSource(sheetId, cellId, value, meta) {
@@ -38,6 +68,16 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
 
   setCellRuntimeState(sheetId, cellId, updates) {
     super.setCellRuntimeState(sheetId, cellId, updates);
+    this.scheduleFlush();
+  }
+
+  setCellFormat(sheetId, cellId, format) {
+    super.setCellFormat(sheetId, cellId, format);
+    this.scheduleFlush();
+  }
+
+  setCellPresentation(sheetId, cellId, presentation) {
+    super.setCellPresentation(sheetId, cellId, presentation);
     this.scheduleFlush();
   }
 
