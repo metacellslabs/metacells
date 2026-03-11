@@ -284,6 +284,7 @@ export function renderCurrentSheetFromStorage(app) {
   if (app.activeInput && !app.hasPendingLocalEdit()) {
     app.formulaInput.value = app.getRawCellValue(app.activeInput.id);
   }
+  app.syncAIModeUI();
   app.renderReportLiveValues(true);
   app.finishCalcProgress(formulaCount);
 }
@@ -313,6 +314,7 @@ export function computeAll(app) {
     options && options.trace && typeof options.trace === 'object'
       ? options.trace
       : null;
+  var isManualTrigger = !!(options && options.manualTriggerAI);
   app.backgroundComputeEnabled = true;
   if (app.isReportActive()) {
     app.renderReportLiveValues();
@@ -345,12 +347,26 @@ export function computeAll(app) {
   var didResort = app.applyAutoResort();
   var requestToken = ++app.computeRequestToken;
   var activeSheetId = app.activeSheetId;
+  if (isManualTrigger) {
+    app.isManualAIUpdating = true;
+    app.manualUpdateRequestToken = requestToken;
+    app.syncAIModeUI();
+  }
+  var finishManualUpdate = function () {
+    if (!isManualTrigger) return;
+    if (app.manualUpdateRequestToken !== requestToken) return;
+    app.isManualAIUpdating = false;
+    app.manualUpdateRequestToken = 0;
+    app.syncAIModeUI();
+  };
   traceCellUpdateClient(trace, 'compute_call.start', {
     activeSheetId: activeSheetId,
     forceRefreshAI: !!options.forceRefreshAI,
+    manualTriggerAI: isManualTrigger,
   });
   Meteor.callAsync('sheets.computeGrid', app.sheetDocumentId, activeSheetId, {
     forceRefreshAI: !!options.forceRefreshAI,
+    manualTriggerAI: isManualTrigger,
     traceId: trace && trace.id ? trace.id : '',
     workbookSnapshot:
       app.storage &&
@@ -365,8 +381,14 @@ export function computeAll(app) {
           result && result.values ? Object.keys(result.values).length : 0,
         hasWorkbook: !!(result && result.workbook),
       });
-      if (requestToken !== app.computeRequestToken) return;
-      if (activeSheetId !== app.activeSheetId) return;
+      if (requestToken !== app.computeRequestToken) {
+        finishManualUpdate();
+        return;
+      }
+      if (activeSheetId !== app.activeSheetId) {
+        finishManualUpdate();
+        return;
+      }
 
       if (
         result &&
@@ -531,9 +553,11 @@ export function computeAll(app) {
         app.formulaInput.value = app.getRawCellValue(app.activeInput.id);
       }
 
+      app.syncAIModeUI();
       app.applyDependencyHighlight();
       app.renderReportLiveValues();
       app.finishCalcProgress(formulaCount);
+      finishManualUpdate();
       traceCellUpdateClient(trace, 'render.done', {
         renderTargets: renderTargets.length,
         didResort: !!didResort,
@@ -541,6 +565,8 @@ export function computeAll(app) {
     })
     .catch((error) => {
       console.error('[sheet] computeAll failed', error);
+      finishManualUpdate();
+      app.syncAIModeUI();
       app.finishCalcProgress(formulaCount);
       traceCellUpdateClient(trace, 'compute_call.failed', {
         message: String(error && error.message ? error.message : error || ''),

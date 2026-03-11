@@ -617,6 +617,7 @@ export async function computeSheetSnapshot({
   persistWorkbook,
   channelPayloads = {},
   forceRefreshAI = false,
+  manualTriggerAI = false,
   changedSignals = [],
 }) {
   const invalidatedWorkbook = invalidateWorkbookDependencies(
@@ -961,128 +962,133 @@ export async function computeSheetSnapshot({
     ? null
     : buildTargetCellMap(workbookData, changedSignals);
 
-  for (
-    let sheetIndex = 0;
-    sheetIndex < orderedSheetIds.length;
-    sheetIndex += 1
-  ) {
-    const sheetId = orderedSheetIds[sheetIndex];
-    const sheetValues = {};
-    const sheetErrors = {};
-    const sheetDependencies = {};
-    const sheetProcessedEventIds = {};
-    const evaluationPlan =
-      typeof formulaEngine.buildEvaluationPlan === 'function'
-        ? formulaEngine.buildEvaluationPlan(sheetId)
-        : formulaEngine.cellIds;
-    const targetCells =
-      targetCellMap && targetCellMap[sheetId] ? targetCellMap[sheetId] : null;
+  const evaluateWorkbook = () => {
+    for (
+      let sheetIndex = 0;
+      sheetIndex < orderedSheetIds.length;
+      sheetIndex += 1
+    ) {
+      const sheetId = orderedSheetIds[sheetIndex];
+      const sheetValues = {};
+      const sheetErrors = {};
+      const sheetDependencies = {};
+      const sheetProcessedEventIds = {};
+      const evaluationPlan =
+        typeof formulaEngine.buildEvaluationPlan === 'function'
+          ? formulaEngine.buildEvaluationPlan(sheetId)
+          : formulaEngine.cellIds;
+      const targetCells =
+        targetCellMap && targetCellMap[sheetId] ? targetCellMap[sheetId] : null;
 
-    for (let i = 0; i < evaluationPlan.length; i += 1) {
-      const cellId = evaluationPlan[i];
-      if (targetCellMap && !targetCells?.[cellId]) {
-        continue;
-      }
-      const storedDependencies = storageService.getCellDependencies(
-        sheetId,
-        cellId,
-      );
-      const storedDependencySignature = buildDependencySignature(
-        storageService,
-        storedDependencies,
-        channelPayloads,
-      );
-      if (
-        canReuseComputedCell(
-          storageService,
-          sheetId,
-          cellId,
-          storageService.getCellValue(sheetId, cellId),
-          storedDependencySignature,
-          forceRefreshAI,
-        )
-      ) {
-        sheetValues[cellId] = storageService.getCellDisplayValue(
+      for (let i = 0; i < evaluationPlan.length; i += 1) {
+        const cellId = evaluationPlan[i];
+        if (targetCellMap && !targetCells?.[cellId]) {
+          continue;
+        }
+        const storedDependencies = storageService.getCellDependencies(
           sheetId,
           cellId,
         );
-        sheetDependencies[cellId] = storedDependencies;
-        sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
+        const storedDependencySignature = buildDependencySignature(
+          storageService,
           storedDependencies,
           channelPayloads,
         );
-        continue;
-      }
-      const dependencyCollector = createDependencyCollector();
-      try {
-        const computedValue = formulaEngine.evaluateCell(
-          sheetId,
-          cellId,
-          {},
-          {
-            forceRefreshAI,
-            channelPayloads,
-            dependencyCollector,
-          },
-        );
-        sheetValues[cellId] = computedValue;
-        sheetDependencies[cellId] = dependencyCollector.snapshot();
-        sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
-          sheetDependencies[cellId],
-          channelPayloads,
-        );
-        const dependencySignature = buildDependencySignature(
-          storageService,
-          sheetDependencies[cellId],
-          channelPayloads,
-        );
-        storageService.setComputedCellValue(
-          sheetId,
-          cellId,
-          computedValue,
-          inferComputedCellState(
+        if (
+          canReuseComputedCell(
+            storageService,
+            sheetId,
+            cellId,
             storageService.getCellValue(sheetId, cellId),
+            storedDependencySignature,
+            forceRefreshAI,
+          )
+        ) {
+          sheetValues[cellId] = storageService.getCellDisplayValue(
+            sheetId,
+            cellId,
+          );
+          sheetDependencies[cellId] = storedDependencies;
+          sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
+            storedDependencies,
+            channelPayloads,
+          );
+          continue;
+        }
+        const dependencyCollector = createDependencyCollector();
+        try {
+          const computedValue = formulaEngine.evaluateCell(
+            sheetId,
+            cellId,
+            {},
+            {
+              forceRefreshAI,
+              channelPayloads,
+              dependencyCollector,
+            },
+          );
+          sheetValues[cellId] = computedValue;
+          sheetDependencies[cellId] = dependencyCollector.snapshot();
+          sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
+            sheetDependencies[cellId],
+            channelPayloads,
+          );
+          const dependencySignature = buildDependencySignature(
+            storageService,
+            sheetDependencies[cellId],
+            channelPayloads,
+          );
+          storageService.setComputedCellValue(
+            sheetId,
+            cellId,
             computedValue,
-          ),
-          '',
-          { dependencySignature },
-        );
-        storageService.setCellRuntimeState(sheetId, cellId, {
-          lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],
-        });
-      } catch (error) {
-        const failure = classifyComputeFailure(error);
-        sheetValues[cellId] = failure.value;
-        sheetErrors[cellId] = failure.error;
-        sheetDependencies[cellId] = dependencyCollector.snapshot();
-        sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
-          sheetDependencies[cellId],
-          channelPayloads,
-        );
-        const dependencySignature = buildDependencySignature(
-          storageService,
-          sheetDependencies[cellId],
-          channelPayloads,
-        );
-        storageService.setComputedCellValue(
-          sheetId,
-          cellId,
-          failure.value,
-          'error',
-          failure.error,
-          { dependencySignature },
-        );
-        storageService.setCellRuntimeState(sheetId, cellId, {
-          lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],
-        });
+            inferComputedCellState(
+              storageService.getCellValue(sheetId, cellId),
+              computedValue,
+            ),
+            '',
+            { dependencySignature },
+          );
+          storageService.setCellRuntimeState(sheetId, cellId, {
+            lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],
+          });
+        } catch (error) {
+          const failure = classifyComputeFailure(error);
+          sheetValues[cellId] = failure.value;
+          sheetErrors[cellId] = failure.error;
+          sheetDependencies[cellId] = dependencyCollector.snapshot();
+          sheetProcessedEventIds[cellId] = buildProcessedChannelEventIds(
+            sheetDependencies[cellId],
+            channelPayloads,
+          );
+          const dependencySignature = buildDependencySignature(
+            storageService,
+            sheetDependencies[cellId],
+            channelPayloads,
+          );
+          storageService.setComputedCellValue(
+            sheetId,
+            cellId,
+            failure.value,
+            'error',
+            failure.error,
+            { dependencySignature },
+          );
+          storageService.setCellRuntimeState(sheetId, cellId, {
+            lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],
+          });
+        }
       }
-    }
 
-    valuesBySheet[sheetId] = sheetValues;
-    errorsBySheet[sheetId] = sheetErrors;
-    dependenciesBySheet[sheetId] = sheetDependencies;
-    processedEventIdsBySheet[sheetId] = sheetProcessedEventIds;
-  }
+      valuesBySheet[sheetId] = sheetValues;
+      errorsBySheet[sheetId] = sheetErrors;
+      dependenciesBySheet[sheetId] = sheetDependencies;
+      processedEventIdsBySheet[sheetId] = sheetProcessedEventIds;
+    }
+  };
+
+  if (manualTriggerAI) aiService.withManualTrigger(evaluateWorkbook);
+  else evaluateWorkbook();
 
   if (Object.keys(valuesBySheet).length) {
     Object.keys(dependenciesBySheet).forEach((sheetId) => {

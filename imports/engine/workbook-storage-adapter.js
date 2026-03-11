@@ -30,7 +30,8 @@ function normalizeWorkbook(input) {
     tabs: normalizeTabs(workbook.tabs),
     activeTabId:
       typeof workbook.activeTabId === 'string' ? workbook.activeTabId : '',
-    aiMode: workbook.aiMode === AI_MODE.manual ? AI_MODE.manual : AI_MODE.auto,
+    aiMode:
+      workbook.aiMode === AI_MODE.auto ? AI_MODE.auto : AI_MODE.manual,
     namedCells: isPlainObject(workbook.namedCells)
       ? deepClone(workbook.namedCells)
       : {},
@@ -764,14 +765,14 @@ export class WorkbookStorageAdapter {
   }
 
   getAIMode() {
-    return this.workbook.aiMode === AI_MODE.manual
-      ? AI_MODE.manual
-      : AI_MODE.auto;
+    return this.workbook.aiMode === AI_MODE.auto
+      ? AI_MODE.auto
+      : AI_MODE.manual;
   }
 
   setAIMode(mode) {
     this.workbook.aiMode =
-      mode === AI_MODE.manual ? AI_MODE.manual : AI_MODE.auto;
+      mode === AI_MODE.auto ? AI_MODE.auto : AI_MODE.manual;
   }
 
   getReportContent(tabId) {

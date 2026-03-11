@@ -1,6 +1,17 @@
 // Description: Grid/table rendering, resizing, keyboard navigation, fill-handle support, and markdown cell display.
 import { MIN_COL_WIDTH } from './constants.js';
 
+function columnIndexToLabel(index) {
+  var n = Number(index) || 0;
+  var label = '';
+  while (n > 0) {
+    var rem = (n - 1) % 26;
+    label = String.fromCharCode(65 + rem) + label;
+    n = Math.floor((n - 1) / 26);
+  }
+  return label;
+}
+
 export class GridManager {
   constructor(tableElement, rows, cols, defaultColWidth, defaultRowHeight) {
     this.table = tableElement;
@@ -15,10 +26,10 @@ export class GridManager {
   }
 
   buildGrid() {
-    for (var i = 0; i < this.rows; i++) {
+    for (var i = 0; i <= this.rows; i++) {
       var row = this.table.insertRow(-1);
-      for (var j = 0; j < this.cols; j++) {
-        var letter = String.fromCharCode('A'.charCodeAt(0) + j - 1);
+      for (var j = 0; j <= this.cols; j++) {
+        var letter = columnIndexToLabel(j);
         row.insertCell(-1).innerHTML =
           i && j
             ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><input id='" +
@@ -36,7 +47,7 @@ export class GridManager {
 
   fitRowHeaderColumnWidth() {
     if (!this.table || !this.table.rows || !this.table.rows.length) return;
-    var maxLabel = String(Math.max(1, this.rows - 1));
+    var maxLabel = String(Math.max(1, this.rows));
     var digits = maxLabel.length;
     var width = Math.max(28, 10 + digits * 8);
 
@@ -111,16 +122,18 @@ export class GridManager {
       ((index) => {
         colHandle.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          var startX = e.clientX;
+          document.body.classList.add('is-column-resizing');
+          var startGuideX =
+            this.table.rows[0].cells[index].getBoundingClientRect().right - 1;
           var startWidth = this.table.rows[0].cells[index].offsetWidth;
           var startTableWidth =
             this.table.offsetWidth || this.table.scrollWidth || 0;
           var didResize = false;
           var rafId = 0;
-          var pendingClientX = startX;
+          var pendingGuideX = e.clientX;
           var flushResize = () => {
             rafId = 0;
-            var deltaX = pendingClientX - startX;
+            var deltaX = pendingGuideX - startGuideX;
             var finalWidth = this.setColumnWidth(index, startWidth + deltaX);
             onColumnResize(index, finalWidth);
             this.table.style.width =
@@ -130,7 +143,7 @@ export class GridManager {
           this.showColumnResizeGuide(e.clientX);
 
           var onMove = (moveEvent) => {
-            pendingClientX = moveEvent.clientX;
+            pendingGuideX = moveEvent.clientX;
             this.moveColumnResizeGuide(moveEvent.clientX);
             if (!rafId) {
               rafId = requestAnimationFrame(flushResize);
@@ -140,6 +153,7 @@ export class GridManager {
           var onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            document.body.classList.remove('is-column-resizing');
             if (rafId) {
               cancelAnimationFrame(rafId);
               flushResize();

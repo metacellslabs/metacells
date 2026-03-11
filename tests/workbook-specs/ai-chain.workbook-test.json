@@ -1,0 +1,67 @@
+{
+  "name": "AI Chain Workbook",
+  "workbook": {
+    "activeTabId": "sheet-1",
+    "tabs": [
+      {
+        "id": "sheet-1",
+        "name": "Chain",
+        "type": "sheet",
+        "cells": [
+          { "address": "A1", "name": "seed", "value": "2" },
+          { "address": "B1", "name": "joke", "formula": "'шутка на тему @seed" },
+          { "address": "C3", "name": "joke_type", "formula": "'какого типа шутка @joke" },
+          { "address": "B4", "formula": "'еще такого плана: @joke_type" }
+        ]
+      }
+    ]
+  },
+  "aiMocks": [
+    {
+      "match": { "prompt": "шутка на тему 2" },
+      "response": "шутка-2",
+      "delayMs": 25
+    },
+    {
+      "match": { "prompt": "какого типа шутка шутка-2" },
+      "response": "тип-2",
+      "delayMs": 25
+    },
+    {
+      "match": { "prompt": "еще такого плана: тип-2" },
+      "response": "еще-2",
+      "delayMs": 25
+    },
+    {
+      "match": { "prompt": "шутка на тему 3" },
+      "response": "шутка-3",
+      "delayMs": 25
+    },
+    {
+      "match": { "prompt": "какого типа шутка шутка-3" },
+      "response": "тип-3",
+      "delayMs": 25
+    },
+    {
+      "match": { "prompt": "еще такого плана: тип-3" },
+      "response": "еще-3",
+      "delayMs": 25
+    }
+  ],
+  "tests": [
+    {
+      "name": "recomputes a chained AI pipeline after an upstream change",
+      "steps": [
+        { "waitMs": 250 },
+        { "expect": { "target": "B1", "value": "шутка-2", "state": "resolved" } },
+        { "expect": { "target": "C3", "value": "тип-2", "state": "resolved" } },
+        { "expect": { "target": "B4", "value": "еще-2", "state": "resolved" } },
+        { "set": { "target": "seed", "value": "3" } },
+        { "waitMs": 250 },
+        { "expect": { "target": "B1", "value": "шутка-3", "state": "resolved" } },
+        { "expect": { "target": "C3", "value": "тип-3", "state": "resolved" } },
+        { "expect": { "target": "B4", "value": "еще-3", "state": "resolved" } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "Basic Recalc Workbook",
+  "workbook": {
+    "activeTabId": "sheet-1",
+    "tabs": [
+      {
+        "id": "sheet-1",
+        "name": "Main",
+        "type": "sheet",
+        "cells": [
+          { "address": "A1", "name": "input_value", "value": "2" },
+          { "address": "B1", "formula": "=@input_value+3" },
+          { "address": "C1", "formula": "=SUM(A1:B1)" }
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "recomputes formulas after changing a named input cell",
+      "steps": [
+        { "expect": { "target": "B1", "value": "5", "state": "resolved" } },
+        { "expect": { "target": "C1", "value": "7", "state": "resolved" } },
+        { "set": { "target": "input_value", "value": "7" } },
+        { "expect": { "target": "B1", "value": "10", "state": "resolved" } },
+        { "expect": { "target": "C1", "value": "17", "state": "resolved" } }
+      ]
+    }
+  ]
+}

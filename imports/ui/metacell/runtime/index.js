@@ -279,15 +279,49 @@ export class SpreadsheetApp {
     this.nameBar = document.querySelector('.name-bar');
     this.cellNameInput = document.querySelector('#cell-name-input');
     this.namedCellJump = document.querySelector('#named-cell-jump');
+    this.namedCellJumpPopover = document.querySelector(
+      '#named-cell-jump-popover',
+    );
     this.attachFileButton = document.querySelector('#attach-file');
     this.attachFileInput = document.querySelector('#attach-file-input');
-    this.aiModeSelect = document.querySelector('#ai-mode');
-    this.displayModeSelect = document.querySelector('#display-mode');
-    this.cellFormatSelect = document.querySelector('#cell-format');
-    this.cellAlignSelect = document.querySelector('#cell-align');
-    this.cellBordersSelect = document.querySelector('#cell-borders');
-    this.cellBgColorSelect = document.querySelector('#cell-bg-color');
-    this.cellFontFamilySelect = document.querySelector('#cell-font-family');
+    this.aiModeButton = document.querySelector('#ai-mode');
+    this.aiModePopover = document.querySelector('#ai-mode-popover');
+    this.aiModeOptions = Array.prototype.slice.call(
+      document.querySelectorAll('.ai-mode-option'),
+    );
+    this.displayModeButton = document.querySelector('#display-mode');
+    this.displayModePopover = document.querySelector('#display-mode-popover');
+    this.displayModeOptions = Array.prototype.slice.call(
+      document.querySelectorAll('.display-mode-option'),
+    );
+    this.cellFormatButton = document.querySelector('#cell-format');
+    this.cellFormatPopover = document.querySelector('#cell-format-popover');
+    this.cellFormatOptions = Array.prototype.slice.call(
+      document.querySelectorAll('.cell-format-option'),
+    );
+    this.cellAlignGroup = document.querySelector('#cell-align');
+    this.cellAlignButtons = Array.prototype.slice.call(
+      document.querySelectorAll('.cell-align-button'),
+    );
+    this.cellBordersButton = document.querySelector('#cell-borders');
+    this.cellBordersPopover = document.querySelector('#cell-borders-popover');
+    this.cellBordersOptions = Array.prototype.slice.call(
+      document.querySelectorAll('.cell-borders-option'),
+    );
+    this.cellBgColorButton = document.querySelector('#cell-bg-color');
+    this.cellBgColorSwatch = document.querySelector('#cell-bg-color-swatch');
+    this.cellBgColorPopover = document.querySelector('#cell-bg-color-popover');
+    this.cellBgColorRecent = document.querySelector('#cell-bg-color-recent');
+    this.cellBgColorCustomInput = document.querySelector(
+      '#cell-bg-color-custom',
+    );
+    this.cellFontFamilyButton = document.querySelector('#cell-font-family');
+    this.cellFontFamilyPopover = document.querySelector(
+      '#cell-font-family-popover',
+    );
+    this.cellFontFamilyOptions = Array.prototype.slice.call(
+      document.querySelectorAll('.cell-font-family-option'),
+    );
     this.cellWrapButton = document.querySelector('#cell-wrap');
     this.cellDecimalsDecreaseButton = document.querySelector(
       '#cell-decimals-decrease',
@@ -369,9 +403,13 @@ export class SpreadsheetApp {
     this.suppressBlurCommitOnce = false;
     this.computedValuesBySheet = {};
     this.computeRequestToken = 0;
+    this.manualUpdateRequestToken = 0;
+    this.isManualAIUpdating = false;
     this.currentServerEditLockKey = '';
     this.displayMode =
-      this.displayModeSelect && this.displayModeSelect.value === 'formulas'
+      this.displayModeButton &&
+      String(this.displayModeButton.textContent || '').trim().toLowerCase() ===
+        'formulas'
         ? 'formulas'
         : 'values';
     this.editLockOwnerId =
@@ -420,11 +458,9 @@ export class SpreadsheetApp {
 
   setDisplayMode(mode) {
     this.displayMode = mode === 'formulas' ? 'formulas' : 'values';
-    if (
-      this.displayModeSelect &&
-      this.displayModeSelect.value !== this.displayMode
-    ) {
-      this.displayModeSelect.value = this.displayMode;
+    if (this.displayModeButton) {
+      this.displayModeButton.textContent =
+        this.displayMode === 'formulas' ? 'Formulas' : 'Values';
     }
     this.renderCurrentSheetFromStorage();
   }
@@ -1566,16 +1602,24 @@ export class SpreadsheetApp {
       return;
     }
 
-    if (action === 'insert-row') {
-      this.insertRowsAtContext();
+    if (action === 'insert-row-before') {
+      this.insertRowsAtContext('before');
+      return;
+    }
+    if (action === 'insert-row-after') {
+      this.insertRowsAtContext('after');
       return;
     }
     if (action === 'delete-row') {
       this.deleteRowsAtContext();
       return;
     }
-    if (action === 'insert-col') {
-      this.insertColumnsAtContext();
+    if (action === 'insert-col-before') {
+      this.insertColumnsAtContext('before');
+      return;
+    }
+    if (action === 'insert-col-after') {
+      this.insertColumnsAtContext('after');
       return;
     }
     if (action === 'delete-col') {
@@ -1603,9 +1647,20 @@ export class SpreadsheetApp {
     }
     this.setActiveInput(input);
     input.focus();
-    this.aiService.withManualTrigger(() =>
-      this.computeAll({ forceRefreshAI: true }),
-    );
+    this.runManualAIUpdate({ forceRefreshAI: true });
+  }
+
+  runManualAIUpdate(options) {
+    var opts = options && typeof options === 'object' ? options : {};
+    if (!this.aiService || this.aiService.getMode() !== AI_MODE.manual) return;
+    if (this.hasPendingLocalEdit()) {
+      this.commitFormulaBarValue();
+    }
+    this.computeAll({
+      bypassPendingEdit: true,
+      manualTriggerAI: true,
+      forceRefreshAI: !!opts.forceRefreshAI,
+    });
   }
 
   setupAIModeControls() {
@@ -1912,16 +1967,16 @@ export class SpreadsheetApp {
     return getSelectedColumnBoundsRuntime(this);
   }
 
-  insertRowsAtContext() {
-    insertRowsAtContextRuntime(this);
+  insertRowsAtContext(position) {
+    insertRowsAtContextRuntime(this, position);
   }
 
   deleteRowsAtContext() {
     deleteRowsAtContextRuntime(this);
   }
 
-  insertColumnsAtContext() {
-    insertColumnsAtContextRuntime(this);
+  insertColumnsAtContext(position) {
+    insertColumnsAtContextRuntime(this, position);
   }
 
   deleteColumnsAtContext() {

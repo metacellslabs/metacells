@@ -1,4 +1,5 @@
 import assert from 'assert';
+import { registerWorkbookSpecTests } from './workbook-spec-framework.js';
 
 describe('metacells', function () {
   it('package.json has correct name', async function () {
@@ -1248,6 +1249,114 @@ describe('metacells', function () {
       assert.strictEqual(affected['sheet-2:C1'], true);
     });
 
+    it('relinks named cells when rows and columns are inserted or deleted', async function () {
+      const { remapNamedCellsForStructureEdit } = await import(
+        '../imports/ui/metacell/runtime/structure-runtime.js'
+      );
+
+      const parseCellId = (cellId) => {
+        const match = /^([A-Za-z]+)([0-9]+)$/.exec(
+          String(cellId || '').toUpperCase(),
+        );
+        if (!match) return null;
+        let col = 0;
+        for (let i = 0; i < match[1].length; i += 1) {
+          col = col * 26 + (match[1].charCodeAt(i) - 64);
+        }
+        return {
+          col,
+          row: parseInt(match[2], 10),
+        };
+      };
+      const formatCellId = (col, row) => {
+        let n = Number(col) || 0;
+        let label = '';
+        while (n > 0) {
+          const rem = (n - 1) % 26;
+          label = String.fromCharCode(65 + rem) + label;
+          n = Math.floor((n - 1) / 26);
+        }
+        return label + String(row);
+      };
+      const helpers = { parseCellId, formatCellId };
+      const namedCells = {
+        idea: { sheetId: 'sheet-1', cellId: 'J7' },
+        plans: { sheetId: 'sheet-1', startCellId: 'B2', endCellId: 'D4' },
+      };
+
+      const insertRow = remapNamedCellsForStructureEdit(
+        namedCells,
+        'row',
+        3,
+        1,
+        'insert',
+        helpers,
+      );
+      assert.deepStrictEqual(insertRow.idea, {
+        sheetId: 'sheet-1',
+        cellId: 'J8',
+      });
+      assert.deepStrictEqual(insertRow.plans, {
+        sheetId: 'sheet-1',
+        startCellId: 'B2',
+        endCellId: 'D5',
+      });
+
+      const deleteRow = remapNamedCellsForStructureEdit(
+        namedCells,
+        'row',
+        3,
+        1,
+        'delete',
+        helpers,
+      );
+      assert.deepStrictEqual(deleteRow.idea, {
+        sheetId: 'sheet-1',
+        cellId: 'J6',
+      });
+      assert.deepStrictEqual(deleteRow.plans, {
+        sheetId: 'sheet-1',
+        startCellId: 'B2',
+        endCellId: 'D3',
+      });
+
+      const insertCol = remapNamedCellsForStructureEdit(
+        namedCells,
+        'col',
+        4,
+        1,
+        'insert',
+        helpers,
+      );
+      assert.deepStrictEqual(insertCol.idea, {
+        sheetId: 'sheet-1',
+        cellId: 'K7',
+      });
+      assert.deepStrictEqual(insertCol.plans, {
+        sheetId: 'sheet-1',
+        startCellId: 'B2',
+        endCellId: 'E4',
+      });
+
+      const deleteCol = remapNamedCellsForStructureEdit(
+        namedCells,
+        'col',
+        3,
+        1,
+        'delete',
+        helpers,
+      );
+      assert.deepStrictEqual(deleteCol.idea, {
+        sheetId: 'sheet-1',
+        cellId: 'I7',
+      });
+      assert.deepStrictEqual(deleteCol.plans, {
+        sheetId: 'sheet-1',
+        startCellId: 'B2',
+        endCellId: 'C4',
+      });
+    });
+
     it('marks only downstream dependent formulas stale during incremental invalidation', async function () {
       const { invalidateWorkbookDependencies } =
         await import('../imports/api/sheets/server/compute.js');
@@ -2047,3 +2156,5 @@ describe('metacells', function () {
     });
   }
 });
+
+registerWorkbookSpecTests();

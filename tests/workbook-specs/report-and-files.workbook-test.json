@@ -1,0 +1,59 @@
+{
+  "name": "Report and Files Workbook",
+  "workbook": {
+    "activeTabId": "sheet-1",
+    "tabs": [
+      {
+        "id": "sheet-1",
+        "name": "Docs",
+        "type": "sheet",
+        "cells": [
+          {
+            "address": "A1",
+            "name": "policy_file",
+            "file": "./fixtures/policy.txt",
+            "mimeType": "text/plain"
+          },
+          {
+            "address": "B1",
+            "formula": "'дай короткое summary файла @policy_file"
+          }
+        ]
+      },
+      {
+        "id": "report-1",
+        "name": "Report",
+        "type": "report",
+        "reportContent": "# Policy report\n\nSource file is attached in the workbook."
+      }
+    ]
+  },
+  "aiMocks": [
+    {
+      "match": { "includes": "дай короткое summary файла Company policy" },
+      "response": "Policy summary ready",
+      "delayMs": 20
+    }
+  ],
+  "tests": [
+    {
+      "name": "supports report tabs and file-backed AI prompts",
+      "steps": [
+        {
+          "expectReport": {
+            "reportTabId": "report-1",
+            "contains": "Policy report"
+          }
+        },
+        { "waitMs": 180 },
+        {
+          "expect": {
+            "target": "B1",
+            "value": "Policy summary ready",
+            "state": "resolved"
+          }
+        }
+      ]
+    }
+  ]
+}

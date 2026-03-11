@@ -1749,6 +1749,12 @@ function SheetPage({
     appRef.current.publishCurrentReport();
   };
 
+  const handleUpdateAI = () => {
+    if (!appRef.current || typeof appRef.current.runManualAIUpdate !== 'function')
+      return;
+    appRef.current.runManualAIUpdate();
+  };
+
   const handleExportPdf = () => {
     if (
       !appRef.current ||
@@ -1765,63 +1771,73 @@ function SheetPage({
       <div className="formula-bar">
         <div className="formula-bar-row formula-bar-row-main">
           <div className="formula-cluster formula-cluster-brand">
-            <a className="formula-home-link" href="/" aria-label="Home">
-              <LucideIcon>
-                <path d="M3 9.5 12 3l9 6.5" />
-                <path d="M5 10v10a1 1 0 0 0 1 1h4v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6h4a1 1 0 0 0 1 -1V10" />
-              </LucideIcon>
-            </a>
-            <input
-              id="workbook-name-input"
-              type="text"
-              value={workbookName}
-              onChange={(event) => setWorkbookName(event.target.value)}
-              onBlur={commitWorkbookRename}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-                if (event.key === 'Escape') {
-                  setWorkbookName(String(sheet.name || ''));
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder="Metacell name"
-              disabled={isRenaming}
-            />
+            <div className="workbook-name-combo">
+              <a className="formula-home-link" href="/" aria-label="Home">
+                <LucideIcon>
+                  <path d="M3 9.5 12 3l9 6.5" />
+                  <path d="M5 10v10a1 1 0 0 0 1 1h4v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6h4a1 1 0 0 0 1 -1V10" />
+                </LucideIcon>
+              </a>
+              <input
+                id="workbook-name-input"
+                type="text"
+                value={workbookName}
+                onChange={(event) => setWorkbookName(event.target.value)}
+                onBlur={commitWorkbookRename}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                  if (event.key === 'Escape') {
+                    setWorkbookName(String(sheet.name || ''));
+                    event.currentTarget.blur();
+                  }
+                }}
+                placeholder="Metacell name"
+                disabled={isRenaming}
+              />
+            </div>
           </div>
           <div className="formula-cluster formula-cluster-address">
-            <input id="cell-name-input" type="text" placeholder="A1 or @name" />
-            <select id="named-cell-jump" defaultValue="">
-              <option value=""></option>
-            </select>
+            <div className="cell-name-combo">
+              <input
+                id="cell-name-input"
+                type="text"
+                placeholder="A1 or @name"
+              />
+              <div className="named-cell-jump-picker">
+                <button
+                  id="named-cell-jump"
+                  type="button"
+                  aria-label="Jump to named cell"
+                  title="Jump to named cell"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  <LucideIcon size={14}>
+                    <path d="M6 9l6 6 6-6" />
+                  </LucideIcon>
+                </button>
+                <div
+                  id="named-cell-jump-popover"
+                  className="named-cell-jump-popover"
+                  hidden
+                ></div>
+              </div>
+            </div>
           </div>
           <div className="formula-cluster formula-cluster-editor">
-            <span className="formula-toolbar-icon" aria-hidden="true">
-              <LucideIcon size={16}>
-                <path d="M4 7h16" />
-                <path d="M9 7v10" />
-                <path d="M15 7v10" />
-                <path d="M7 17h10" />
-                <path d="M12 17v3" />
-              </LucideIcon>
-            </span>
-            <input
-              id="formula-input"
-              type="text"
-              placeholder="edit active cell formula/value"
-            />
-            <button
-              id="attach-file"
-              type="button"
-              aria-label="Attach file"
-              title="Attach file"
-            >
-              <LucideIcon size={16}>
-                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L8.76 18.07a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </LucideIcon>
-            </button>
+            <div className="formula-input-combo">
+              <span className="formula-input-prefix" aria-hidden="true">
+                Fx
+              </span>
+              <input
+                id="formula-input"
+                type="text"
+                placeholder="edit active cell formula/value"
+              />
+            </div>
             <input id="attach-file-input" type="file" hidden />
             <span
               id="calc-progress"
@@ -1831,29 +1847,81 @@ function SheetPage({
           </div>
           <div className="formula-cluster formula-cluster-modes">
             <div className="formula-icon-select">
-              <select
-                id="ai-mode"
-                defaultValue="auto"
-                aria-label="AI mode"
-                title="AI mode"
-              >
-                <option value="auto">Auto AI</option>
-                <option value="manual">Manual AI</option>
-              </select>
+              <div className="ai-mode-picker">
+                <button
+                  id="ai-mode"
+                  type="button"
+                  aria-label="AI mode"
+                  title="AI mode"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  Manual AI
+                </button>
+                <div id="ai-mode-popover" className="ai-mode-popover" hidden>
+                  <button
+                    type="button"
+                    className="ai-mode-option"
+                    data-ai-mode="auto"
+                  >
+                    Auto AI
+                  </button>
+                  <button
+                    type="button"
+                    className="ai-mode-option"
+                    data-ai-mode="manual"
+                  >
+                    Manual AI
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="formula-icon-select">
-              <select
-                id="display-mode"
-                defaultValue="values"
-                aria-label="Display mode"
-                title="Display mode"
-              >
-                <option value="values">Values</option>
-                <option value="formulas">Formulas</option>
-              </select>
+              <div className="display-mode-picker">
+                <button
+                  id="display-mode"
+                  type="button"
+                  aria-label="Display mode"
+                  title="Display mode"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  Values
+                </button>
+                <div
+                  id="display-mode-popover"
+                  className="display-mode-popover"
+                  hidden
+                >
+                  <button
+                    type="button"
+                    className="display-mode-option"
+                    data-display-mode="values"
+                  >
+                    Values
+                  </button>
+                  <button
+                    type="button"
+                    className="display-mode-option"
+                    data-display-mode="formulas"
+                  >
+                    Formulas
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div className="formula-cluster formula-cluster-actions">
+            <button id="update-ai" type="button" onClick={handleUpdateAI}>
+              Update
+            </button>
+            <button type="button" className="help-button" onClick={onOpenHelp}>
+              ?
+            </button>
+          </div>
+        </div>
+        <div className="formula-bar-row formula-bar-row-format">
+          <div className="formula-cluster formula-cluster-format">
             <button
               id="undo-action"
               type="button"
@@ -1876,34 +1944,37 @@ function SheetPage({
                 <path d="M20 9H9a4 4 0 1 0 0 8h1" />
               </LucideIcon>
             </button>
-            <button id="update-ai" type="button">
-              Update
-            </button>
-            <button type="button" className="help-button" onClick={onOpenHelp}>
-              Help
-            </button>
           </div>
-        </div>
-        <div className="formula-bar-row formula-bar-row-format">
           <div className="formula-cluster formula-cluster-format">
             <div className="formula-icon-select">
-              <select
-                id="cell-format"
-                defaultValue="text"
-                aria-label="Cell format"
-                title="Cell format"
-              >
-                <option value="text">Text</option>
-                <option value="number">Number</option>
-                <option value="number_0">Number 0</option>
-                <option value="number_2">Number 0.00</option>
-                <option value="percent">Percent</option>
-                <option value="percent_2">Percent 0.00%</option>
-                <option value="date">Date</option>
-                <option value="currency_usd">USD</option>
-                <option value="currency_eur">EUR</option>
-                <option value="currency_gbp">GBP</option>
-              </select>
+              <div className="cell-format-picker">
+                <button
+                  id="cell-format"
+                  type="button"
+                  aria-label="Cell format"
+                  title="Cell format"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                >
+                  123
+                </button>
+                <div
+                  id="cell-format-popover"
+                  className="cell-format-popover"
+                  hidden
+                >
+                  <button type="button" className="cell-format-option" data-format="text">Text</button>
+                  <button type="button" className="cell-format-option" data-format="number">Number</button>
+                  <button type="button" className="cell-format-option" data-format="number_0">Number 0</button>
+                  <button type="button" className="cell-format-option" data-format="number_2">Number 0.00</button>
+                  <button type="button" className="cell-format-option" data-format="percent">Percent</button>
+                  <button type="button" className="cell-format-option" data-format="percent_2">Percent 0.00%</button>
+                  <button type="button" className="cell-format-option" data-format="date">Date</button>
+                  <button type="button" className="cell-format-option" data-format="currency_usd">USD</button>
+                  <button type="button" className="cell-format-option" data-format="currency_eur">EUR</button>
+                  <button type="button" className="cell-format-option" data-format="currency_gbp">GBP</button>
+                </div>
+              </div>
             </div>
             <button
               id="cell-decimals-decrease"
@@ -1912,12 +1983,11 @@ function SheetPage({
               title="Decrease decimals"
             >
               <LucideIcon size={16}>
-                <path d="M5 7h10" />
-                <path d="M5 17h6" />
-                <path d="M17 17h2" />
-                <path d="M5 12h2" />
-                <path d="M13 12v6" />
-                <path d="M16 12v6" />
+                <path d="M4.5 8h8" />
+                <path d="M4.5 16h5" />
+                <path d="M13.5 9.5v7" />
+                <path d="M16.5 12.5v4" />
+                <path d="M19 14.5h-5" />
               </LucideIcon>
             </button>
             <button
@@ -1927,78 +1997,391 @@ function SheetPage({
               title="Increase decimals"
             >
               <LucideIcon size={16}>
-                <path d="M5 7h10" />
-                <path d="M5 17h6" />
-                <path d="M18 14v6" />
-                <path d="M15 17h6" />
-                <path d="M5 12h2" />
-                <path d="M13 12v6" />
-                <path d="M16 12v6" />
+                <path d="M4.5 8h8" />
+                <path d="M4.5 16h5" />
+                <path d="M13.5 9.5v7" />
+                <path d="M16.5 12.5v4" />
+                <path d="M19 14.5h-5" />
+                <path d="M16.5 17.5v-6" />
               </LucideIcon>
             </button>
           </div>
           <div className="formula-cluster formula-cluster-format">
             <div className="formula-icon-select">
-              <select
+              <div
                 id="cell-align"
-                defaultValue="left"
+                className="cell-align-group"
+                role="group"
                 aria-label="Cell align"
-                title="Cell align"
               >
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-              </select>
+                <button
+                  type="button"
+                  className="cell-align-button"
+                  data-align="left"
+                  aria-label="Align left"
+                  title="Align left"
+                >
+                  <LucideIcon size={16}>
+                    <path d="M5 7h14" />
+                    <path d="M5 12h10" />
+                    <path d="M5 17h14" />
+                  </LucideIcon>
+                </button>
+                <button
+                  type="button"
+                  className="cell-align-button"
+                  data-align="center"
+                  aria-label="Align center"
+                  title="Align center"
+                >
+                  <LucideIcon size={16}>
+                    <path d="M5 7h14" />
+                    <path d="M7 12h10" />
+                    <path d="M5 17h14" />
+                  </LucideIcon>
+                </button>
+                <button
+                  type="button"
+                  className="cell-align-button"
+                  data-align="right"
+                  aria-label="Align right"
+                  title="Align right"
+                >
+                  <LucideIcon size={16}>
+                    <path d="M5 7h14" />
+                    <path d="M9 12h10" />
+                    <path d="M5 17h14" />
+                  </LucideIcon>
+                </button>
+              </div>
             </div>
             <div className="formula-icon-select">
-              <select
-                id="cell-borders"
-                defaultValue="none"
-                aria-label="Cell borders"
-                title="Cell borders"
-              >
-                <option value="none">None</option>
-                <option value="all">All</option>
-                <option value="outer">Outer</option>
-                <option value="inner">Inner</option>
-                <option value="top">Top</option>
-                <option value="bottom">Bottom</option>
-                <option value="left">Left</option>
-                <option value="right">Right</option>
-                <option value="mixed">Mixed</option>
-              </select>
+              <div className="cell-borders-picker">
+                <button
+                  id="cell-borders"
+                  type="button"
+                  aria-label="Cell borders"
+                  title="Cell borders"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  <LucideIcon size={18}>
+                    <rect x="5" y="5" width="14" height="14" rx="1.5" />
+                    <path d="M12 5v14" />
+                    <path d="M5 12h14" />
+                  </LucideIcon>
+                </button>
+                <div
+                  id="cell-borders-popover"
+                  className="cell-borders-popover"
+                  hidden
+                >
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="none"
+                    aria-label="No borders"
+                    title="No borders"
+                  >
+                    <LucideIcon size={16}>
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+                      <path d="M7 17L17 7" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="all"
+                    aria-label="All borders"
+                    title="All borders"
+                  >
+                    <LucideIcon size={16}>
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="outer"
+                    aria-label="Outer borders"
+                    title="Outer borders"
+                  >
+                    <LucideIcon size={16}>
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="inner"
+                    aria-label="Inner borders"
+                    title="Inner borders"
+                  >
+                    <LucideIcon size={16}>
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" opacity="0.28" />
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="top"
+                    aria-label="Top border"
+                    title="Top border"
+                  >
+                    <LucideIcon size={16}>
+                      <path d="M5 7h14" />
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" opacity="0.18" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="bottom"
+                    aria-label="Bottom border"
+                    title="Bottom border"
+                  >
+                    <LucideIcon size={16}>
+                      <path d="M5 17h14" />
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" opacity="0.18" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="left"
+                    aria-label="Left border"
+                    title="Left border"
+                  >
+                    <LucideIcon size={16}>
+                      <path d="M7 5v14" />
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" opacity="0.18" />
+                    </LucideIcon>
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-borders-option"
+                    data-preset="right"
+                    aria-label="Right border"
+                    title="Right border"
+                  >
+                    <LucideIcon size={16}>
+                      <path d="M17 5v14" />
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" opacity="0.18" />
+                    </LucideIcon>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div className="formula-cluster formula-cluster-format">
             <div className="formula-icon-select">
-              <select
-                id="cell-bg-color"
-                defaultValue=""
-                aria-label="Cell background color"
-                title="Cell background color"
-              >
-                <option value="">None</option>
-                <option value="#fff7cc">Yellow</option>
-                <option value="#e6f4f1">Mint</option>
-                <option value="#dce9ff">Blue</option>
-                <option value="#fde2e4">Rose</option>
-                <option value="#f1e7ff">Lavender</option>
-                <option value="#f4f1ea">Sand</option>
-              </select>
+              <div className="cell-bg-color-picker">
+                <button
+                  id="cell-bg-color"
+                  type="button"
+                  aria-label="Cell background color"
+                  title="Cell background color"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                >
+                  <span
+                    id="cell-bg-color-swatch"
+                    className="cell-bg-color-swatch"
+                  aria-hidden="true"
+                  ></span>
+                </button>
+                <div
+                  id="cell-bg-color-popover"
+                  className="cell-bg-color-popover"
+                  hidden
+                >
+                  <div className="cell-bg-color-section">
+                    <span className="cell-bg-color-heading">Standard</span>
+                    <div className="cell-bg-color-grid">
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip is-none"
+                        data-color=""
+                        title="No fill"
+                      >
+                        <span className="cell-bg-color-chip-label">None</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#fff7cc"
+                        title="Soft yellow"
+                        style={{ '--chip-color': '#fff7cc' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#e6f4f1"
+                        title="Mint"
+                        style={{ '--chip-color': '#e6f4f1' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#dce9ff"
+                        title="Blue"
+                        style={{ '--chip-color': '#dce9ff' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#fde2e4"
+                        title="Rose"
+                        style={{ '--chip-color': '#fde2e4' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#f1e7ff"
+                        title="Lavender"
+                        style={{ '--chip-color': '#f1e7ff' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#f4f1ea"
+                        title="Sand"
+                        style={{ '--chip-color': '#f4f1ea' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#ffd9b8"
+                        title="Peach"
+                        style={{ '--chip-color': '#ffd9b8' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#d9f0d2"
+                        title="Green"
+                        style={{ '--chip-color': '#d9f0d2' }}
+                      ></button>
+                      <button
+                        type="button"
+                        className="cell-bg-color-chip"
+                        data-color="#d7ebff"
+                        title="Sky"
+                        style={{ '--chip-color': '#d7ebff' }}
+                      ></button>
+                    </div>
+                  </div>
+                  <div className="cell-bg-color-section">
+                    <span className="cell-bg-color-heading">Recent</span>
+                    <div
+                      id="cell-bg-color-recent"
+                      className="cell-bg-color-grid cell-bg-color-grid-recent"
+                    ></div>
+                  </div>
+                  <label
+                    className="cell-bg-color-custom"
+                    htmlFor="cell-bg-color-custom"
+                  >
+                    <span className="cell-bg-color-heading">Custom</span>
+                    <input
+                      id="cell-bg-color-custom"
+                      type="color"
+                      defaultValue="#fff7cc"
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="formula-icon-select">
-              <select
-                id="cell-font-family"
-                defaultValue="default"
-                aria-label="Cell font family"
-                title="Cell font family"
+              <button
+                id="cell-font-size-decrease"
+                type="button"
+                aria-label="Decrease font size"
+                title="Decrease font size"
               >
-                <option value="default">Default</option>
-                <option value="sans">Sans</option>
-                <option value="serif">Serif</option>
-                <option value="mono">Mono</option>
-                <option value="display">Display</option>
-              </select>
+                <LucideIcon size={16}>
+                  <path d="M6 12h12" />
+                </LucideIcon>
+              </button>
+              <div className="cell-font-family-picker">
+                <button
+                  id="cell-font-family"
+                  type="button"
+                  aria-label="Cell font family"
+                  title="Cell font family"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  System UI
+                </button>
+                <div
+                  id="cell-font-family-popover"
+                  className="cell-font-family-popover"
+                  hidden
+                >
+                  <button
+                    type="button"
+                    className="cell-font-family-option"
+                    data-font-family="default"
+                    style={{ fontFamily: 'inherit' }}
+                  >
+                    System UI
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-font-family-option"
+                    data-font-family="sans"
+                    style={{ fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif' }}
+                  >
+                    Trebuchet MS
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-font-family-option"
+                    data-font-family="serif"
+                    style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+                  >
+                    Georgia
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-font-family-option"
+                    data-font-family="mono"
+                    style={{
+                      fontFamily:
+                        '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+                    }}
+                  >
+                    SF Mono
+                  </button>
+                  <button
+                    type="button"
+                    className="cell-font-family-option"
+                    data-font-family="display"
+                    style={{
+                      fontFamily:
+                        '"Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif',
+                    }}
+                  >
+                    Avenir Next
+                  </button>
+                </div>
+              </div>
+              <button
+                id="cell-font-size-increase"
+                type="button"
+                aria-label="Increase font size"
+                title="Increase font size"
+              >
+                <LucideIcon size={16}>
+                  <path d="M6 12h12" />
+                  <path d="M12 6v12" />
+                </LucideIcon>
+              </button>
             </div>
             <button
               id="cell-wrap"
@@ -2012,33 +2395,11 @@ function SheetPage({
                 <path d="M4 10h8" />
               </LucideIcon>
             </button>
-            <button
-              id="cell-font-size-decrease"
-              type="button"
-              aria-label="Decrease font size"
-              title="Decrease font size"
-            >
-              <LucideIcon size={16}>
-                <path d="M5 19l4 -10l4 10" />
-                <path d="M6.5 15h5" />
-                <path d="M16 17h4" />
-              </LucideIcon>
-            </button>
-            <button
-              id="cell-font-size-increase"
-              type="button"
-              aria-label="Increase font size"
-              title="Increase font size"
-            >
-              <LucideIcon size={16}>
-                <path d="M5 19l4 -10l4 10" />
-                <path d="M6.5 15h5" />
-                <path d="M18 14v6" />
-                <path d="M15 17h6" />
-              </LucideIcon>
-            </button>
             <button id="cell-bold" type="button" aria-label="Bold" title="Bold">
-              <strong>B</strong>
+              <LucideIcon size={18}>
+                <path d="M8 6h5a3 3 0 0 1 0 6H8z" />
+                <path d="M8 12h6a3 3 0 0 1 0 6H8z" />
+              </LucideIcon>
             </button>
             <button
               id="cell-italic"
@@ -2046,7 +2407,23 @@ function SheetPage({
               aria-label="Italic"
               title="Italic"
             >
-              <em>I</em>
+              <LucideIcon size={18}>
+                <path d="M14 6h-4" />
+                <path d="M14 18h-4" />
+                <path d="M14 6 10 18" />
+              </LucideIcon>
+            </button>
+          </div>
+          <div className="formula-cluster formula-cluster-format">
+            <button
+              id="attach-file"
+              type="button"
+              aria-label="Attach file"
+              title="Attach file"
+            >
+              <LucideIcon size={16}>
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L8.76 18.07a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </LucideIcon>
             </button>
           </div>
         </div>

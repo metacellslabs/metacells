@@ -376,7 +376,7 @@ export function decodeWorkbookDocument(workbookValue) {
     tabs: cloneTabs(workbook.tabs),
     activeTabId:
       typeof workbook.activeTabId === 'string' ? workbook.activeTabId : '',
-    aiMode: workbook.aiMode === AI_MODE.manual ? AI_MODE.manual : AI_MODE.auto,
+    aiMode: workbook.aiMode === AI_MODE.auto ? AI_MODE.auto : AI_MODE.manual,
     namedCells: isPlainObject(workbook.namedCells)
       ? { ...workbook.namedCells }
       : {},
@@ -413,9 +413,9 @@ export function buildWorkbookFromFlatStorage(
       '',
   );
   workbook.aiMode =
-    source[STORAGE_KEYS.aiMode] === AI_MODE.manual
-      ? AI_MODE.manual
-      : AI_MODE.auto;
+    source[STORAGE_KEYS.aiMode] === AI_MODE.auto
+      ? AI_MODE.auto
+      : AI_MODE.manual;
   workbook.namedCells = namedCells;
   workbook.sheets = {};
   workbook.dependencyGraph =
@@ -582,7 +582,7 @@ export function flattenWorkbook(workbookValue) {
     storage[STORAGE_KEYS.activeTab] = workbook.activeTabId;
   }
   storage[STORAGE_KEYS.aiMode] =
-    workbook.aiMode === AI_MODE.manual ? AI_MODE.manual : AI_MODE.auto;
+    workbook.aiMode === AI_MODE.auto ? AI_MODE.auto : AI_MODE.manual;
   if (Object.keys(workbook.namedCells).length) {
     storage[STORAGE_KEYS.namedCells] = JSON.stringify(workbook.namedCells);
   }

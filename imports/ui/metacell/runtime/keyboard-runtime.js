@@ -57,6 +57,13 @@ export function setupButtons(app) {
         );
         return;
       }
+      if (!isReportEditing && key === 'k' && !app.isReportActive()) {
+        e.preventDefault();
+        if (typeof app.runManualAIUpdate === 'function') {
+          app.runManualAIUpdate();
+        }
+        return;
+      }
       if (
         !isReportEditing &&
         key === 'b' &&
@@ -177,8 +184,10 @@ export function ensureContextMenu(app) {
   menu.style.display = 'none';
   menu.innerHTML =
     '' +
-    "<button type='button' class='sheet-context-item' data-action='insert-row'>Insert row</button>" +
-    "<button type='button' class='sheet-context-item' data-action='insert-col'>Insert column</button>" +
+    "<button type='button' class='sheet-context-item' data-action='insert-row-before'>Insert row before</button>" +
+    "<button type='button' class='sheet-context-item' data-action='insert-row-after'>Insert row after</button>" +
+    "<button type='button' class='sheet-context-item' data-action='insert-col-before'>Insert column before</button>" +
+    "<button type='button' class='sheet-context-item' data-action='insert-col-after'>Insert column after</button>" +
     "<button type='button' class='sheet-context-item' data-action='delete-row'>Delete row</button>" +
     "<button type='button' class='sheet-context-item' data-action='delete-col'>Delete column</button>" +
     "<div class='sheet-context-sep'></div>" +

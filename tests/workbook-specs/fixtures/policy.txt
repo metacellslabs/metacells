@@ -1,0 +1,5 @@
+Company policy
+
+1. Keep customer data private.
+2. Escalate incidents within 15 minutes.
+3. Store audit logs for 90 days.

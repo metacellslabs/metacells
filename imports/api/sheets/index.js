@@ -972,6 +972,7 @@ if (Meteor.isServer) {
         activeSheetId,
         channelPayloads,
         forceRefreshAI: !!(options && options.forceRefreshAI),
+        manualTriggerAI: !!(options && options.manualTriggerAI),
         changedSignals,
         persistWorkbook: async (nextWorkbook) => {
           const normalizedNextWorkbook = decodeWorkbookDocument(nextWorkbook);

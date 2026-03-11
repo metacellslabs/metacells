@@ -356,7 +356,7 @@ export class StorageService {
   }
 
   getAIMode() {
-    return this.storage.getAIMode ? this.storage.getAIMode() : AI_MODE.auto;
+    return this.storage.getAIMode ? this.storage.getAIMode() : AI_MODE.manual;
   }
 
   setAIMode(mode) {
