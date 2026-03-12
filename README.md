@@ -1,59 +1,257 @@
-# Metacells
+# MetaCells
 
-Metacells is a spreadsheet-style workspace with formulas, AI prompts, reports, file cells, and channel integrations.
+**MetaCells** is an open-source spreadsheet runtime for AI workflows, automations, files, and integrations.
 
-## Channel Sends
+Instead of hiding logic in scripts, prompts, and backend glue code, **everything lives in cells**:
 
-Channel sends run once when you commit a cell containing a send command.
+- formulas
+- AI prompts
+- files
+- reports
+- connectors
+- actions
 
-### Telegram
+Your entire workflow becomes **visible, editable, and composable inside a spreadsheet**.
 
-Use either form:
+Think:
 
-- `/tg hello from Metacells`
-- `/tg:send:hello from Metacells`
+**Spreadsheets + AI agents + automations, in one open system.**
 
-If the message references workbook attachment cells, Telegram sends the real files. Any remaining text is sent as the caption or follow-up message.
+---
 
-Examples:
+## Why MetaCells exists
+
+AI workflows today are fragmented.
+
+Logic lives across:
+
+- prompts
+- scripts
+- cron jobs
+- automation tools
+- connectors
+- backend glue code
+
+MetaCells turns this into something simpler:
+
+**a programmable spreadsheet where cells can think, compute, and act.**
+
+---
+
+## Example
+
+A simple workbook might look like this:
 
 ```text
-/tg hello
-/tg @policy uploaded
-/tg:send:@logo done
+Input:@idea:[Describe your startup idea]
+'Summarize the idea in one sentence: @idea
+>top 10 user complaints about products like @idea
+#compare @idea with competitors;4;6
+/tg Launch update is live
+/sf:send:{"to":"team@example.com","subj":"Status","body":"See @report"}
 ```
 
-### Email (IMAP + SMTP)
+Each cell can:
 
-Email sends require a structured payload so the sender has `to`, and usually `subj` and `body`.
+- generate text
+- produce lists
+- create tables
+- trigger actions
+- feed other cells
 
-Use:
+Everything updates reactively.
+
+---
+
+## What you can build
+
+MetaCells is a **runtime for AI-native workflows**.
+
+### AI research notebooks
+
+- summarize PDFs
+- compare competitors
+- generate structured insights
+
+### Internal AI tools
+
+- AI reports
+- document processing
+- automated analysis
+
+### Automation workspaces
+
+- process email
+- react to Telegram messages
+- generate reports
+- trigger actions
+
+### AI agents in spreadsheets
+
+Cells can call AI, generate outputs, and pass results to other cells.
+
+No hidden pipelines.
+
+---
+
+## Why developers fork MetaCells
+
+MetaCells is designed to be **forkable infrastructure**.
+
+You can extend it with:
+
+- new formulas
+- new AI providers
+- new connectors
+- custom workflow primitives
+
+Developers fork MetaCells to build:
+
+- internal AI tools
+- automation systems
+- research environments
+- AI notebook platforms
+
+If you ever wanted to build something like:
+
+- Airtable for AI
+- AI-native spreadsheets
+- automation workbooks
+
+MetaCells gives you the base runtime.
+
+---
+
+## Core ideas
+
+### Cells are programmable
+
+Cells are not just data.
+
+They can be:
+
+- prompts
+- formulas
+- reports
+- file inputs
+- integrations
+- actions
+
+### AI is a native cell operation
+
+Example:
 
 ```text
-/sf:send:{"to":"user@example.com","subj":"Hi","body":"hello"}
+'Write 3 launch taglines for @idea
 ```
 
-You can provide `to` as a string or an array.
-
-Examples:
+### Tables spill automatically
 
 ```text
-/sf:send:{"to":"user@example.com","subj":"Status","body":"hello"}
-/sf:send:{"to":["a@example.com","b@example.com"],"subj":"Report","body":"see attached @policy"}
+#compare @product with competitors;4;6
 ```
 
-## File Cells
-
-File cells store uploaded files in the workbook. They:
-
-- show the filename in the sheet
-- expose extracted text content to AI prompts
-- can be sent through supported channels as real attachments
-
-Examples:
+### Files become AI context
 
 ```text
-'Summarise @policy
-/tg @policy uploaded
 File:@policy:[Upload policy PDF]
 ```
+
+AI prompts can read the file automatically.
+
+### Cells can trigger actions
+
+```text
+/tg Launch update is live
+/sf:send:{"to":"team@example.com","subj":"Report","body":"See @summary"}
+```
+
+---
+
+## How it works
+
+MetaCells uses a spreadsheet-native computation model:
+
+```text
+data -> formulas -> prompts -> AI computation -> new data -> actions
+```
+
+Cells reference each other with:
+
+```text
+@cell
+```
+
+Everything updates reactively across the workbook.
+
+---
+
+## Quick start
+
+### Run locally
+
+Requirements:
+
+- Node.js 20+
+- Meteor 3.4+
+
+Install Meteor:
+
+```bash
+curl https://install.meteor.com/ | sh
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the app:
+
+```bash
+npm start
+```
+
+Open:
+
+```text
+http://localhost:3400
+```
+
+Optional worker for background jobs and connectors:
+
+```bash
+npm run start:worker
+```
+
+### Run with Docker
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+```text
+http://localhost:3400
+```
+
+## First 3 minutes
+
+1. Open MetaCells.
+2. Create a workbook.
+3. Open `Settings`.
+4. Add an AI provider.
+
+Supported providers:
+
+- OpenAI
+- Groq
+- DeepSeek
+- OpenRouter
+- Ollama
+- LM Studio
+- Together
+- Fireworks
+- xAI
