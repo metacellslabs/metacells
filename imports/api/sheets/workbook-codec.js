@@ -1,5 +1,6 @@
 import { AI_MODE, STORAGE_KEYS } from '../../engine/constants.js';
 import { decodeStorageMap } from './storage-codec';
+import { normalizeCellSchedule } from '../../lib/cell-schedule.js';
 
 const FORMULA_PREFIXES = {
   '=': true,
@@ -95,6 +96,36 @@ function parseJsonTabs(rawValue, fallbackValue) {
   } catch (error) {
     return cloneTabs(fallbackValue);
   }
+}
+
+function normalizeChannelFeedMeta(metaValue) {
+  const meta = isPlainObject(metaValue) ? metaValue : null;
+  if (!meta) return null;
+  const next = {
+    filterMode: String(meta.filterMode || ''),
+    decisionMode: String(meta.decisionMode || ''),
+    promptTemplate: String(meta.promptTemplate || ''),
+    lastDecisionAt: String(meta.lastDecisionAt || ''),
+    lastEvaluatedEventId: String(meta.lastEvaluatedEventId || ''),
+    lastIncludedEventId: String(meta.lastIncludedEventId || ''),
+    lastValuePreview: String(meta.lastValuePreview || ''),
+    lastAttributes: isPlainObject(meta.lastAttributes)
+      ? { ...meta.lastAttributes }
+      : {},
+  };
+  if (
+    !next.filterMode &&
+    !next.decisionMode &&
+    !next.promptTemplate &&
+    !next.lastDecisionAt &&
+    !next.lastEvaluatedEventId &&
+    !next.lastIncludedEventId &&
+    !next.lastValuePreview &&
+    !Object.keys(next.lastAttributes).length
+  ) {
+    return null;
+  }
+  return next;
 }
 
 function createEmptySheetEntry() {
@@ -347,6 +378,10 @@ function buildCellRecord(source, previousCell) {
     )
       ? { ...previous.lastProcessedChannelEventIds }
       : {},
+    channelFeedMeta:
+      nextSourceType === 'formula' && !sourceChanged
+        ? normalizeChannelFeedMeta(previous.channelFeedMeta)
+        : null,
     sourceVersion: nextVersion,
     computedVersion:
       nextSourceType === 'formula'
@@ -364,6 +399,7 @@ function buildCellRecord(source, previousCell) {
       nextSourceType === 'formula' && !sourceChanged
         ? String(previous.dependencySignature || '')
         : '',
+    schedule: normalizeCellSchedule(previous.schedule) || null,
     version: nextVersion,
   };
 }
@@ -523,7 +559,8 @@ export function buildWorkbookFromFlatStorage(
       if (!isPlainObject(cell)) return;
       const sourceValue = String(cell.source || '');
       const generatedBy = String(cell.generatedBy || '');
-      if (!sourceValue && !generatedBy) return;
+      const schedule = normalizeCellSchedule(cell.schedule) || null;
+      if (!sourceValue && !generatedBy && !schedule) return;
       nextCells[cellId] = {
         source: sourceValue,
         sourceType: cell.sourceType === 'formula' ? 'formula' : 'raw',
@@ -542,10 +579,12 @@ export function buildWorkbookFromFlatStorage(
         )
           ? { ...cell.lastProcessedChannelEventIds }
           : {},
+        channelFeedMeta: normalizeChannelFeedMeta(cell.channelFeedMeta),
         sourceVersion: Number(cell.sourceVersion) || Number(cell.version) || 1,
         computedVersion: Number(cell.computedVersion) || 0,
         dependencyVersion: Number(cell.dependencyVersion) || 0,
         dependencySignature: String(cell.dependencySignature || ''),
+        schedule,
         version: Number(cell.version) || 1,
       };
     });

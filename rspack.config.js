@@ -1,4 +1,5 @@
 const { defineConfig } = require('@meteorjs/rspack');
+const path = require('node:path');
 
 /**
  * Rspack configuration for Meteor projects.
@@ -17,6 +18,14 @@ module.exports = defineConfig((Meteor) => {
       .toLowerCase() === 'worker';
   return {
     cache: Meteor.isDevelopment ? false : undefined,
+    resolve: {
+      alias: {
+        'simple-yenc$': path.resolve(
+          __dirname,
+          'node_modules/simple-yenc/dist/esm.js',
+        ),
+      },
+    },
     ...(Meteor.isDevelopment
       ? {
           devServer: {

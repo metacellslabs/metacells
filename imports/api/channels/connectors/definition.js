@@ -16,6 +16,41 @@ export function defineChannelConnector(definition) {
     packageName: String(source.packageName || '').trim(),
     supportsReceive: source.supportsReceive !== false,
     supportsSend: !!source.supportsSend,
+    supportsSearch: source.supportsSearch !== false,
+    capabilities: {
+      test: (source.capabilities && source.capabilities.test) !== false,
+      send:
+        source.capabilities && Object.prototype.hasOwnProperty.call(source.capabilities, 'send')
+          ? !!source.capabilities.send
+          : !!source.supportsSend,
+      receive:
+        source.capabilities &&
+        Object.prototype.hasOwnProperty.call(source.capabilities, 'receive')
+          ? !!source.capabilities.receive
+          : source.supportsReceive !== false,
+      subscribe: !!(source.capabilities && source.capabilities.subscribe),
+      poll: !!(source.capabilities && source.capabilities.poll),
+      normalizeEvent: !!(source.capabilities && source.capabilities.normalizeEvent),
+      search:
+        source.capabilities &&
+        Object.prototype.hasOwnProperty.call(source.capabilities, 'search')
+          ? !!source.capabilities.search
+          : source.supportsSearch !== false,
+      attachments: !!(source.capabilities && source.capabilities.attachments),
+      oauth: !!(source.capabilities && source.capabilities.oauth),
+      actions:
+        source.capabilities && Array.isArray(source.capabilities.actions)
+          ? source.capabilities.actions
+              .map((item) => String(item || '').trim())
+              .filter(Boolean)
+          : [],
+      entities:
+        source.capabilities && Array.isArray(source.capabilities.entities)
+          ? source.capabilities.entities
+              .map((item) => String(item || '').trim())
+              .filter(Boolean)
+          : [],
+    },
     settingsFields: Array.isArray(source.settingsFields)
       ? source.settingsFields
           .filter((field) => field && typeof field === 'object' && field.key)
@@ -32,6 +67,11 @@ export function defineChannelConnector(definition) {
           .map((item) => String(item || '').trim())
           .filter(Boolean)
       : [],
+    searchParams: Array.isArray(source.searchParams)
+      ? source.searchParams
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      : ['query', 'limit'],
     mentioningFormulas: Array.isArray(source.mentioningFormulas)
       ? source.mentioningFormulas
           .map((item) => String(item || '').trim())

@@ -70,6 +70,24 @@ export function compareSortValues(app, a, b, direction) {
   return cmp < 0 ? -1 * multiplier : 1 * multiplier;
 }
 
+function readCellTransferState(app, cellId) {
+  if (!cellId) return null;
+  return {
+    raw: app.getRawCellValue(cellId),
+    schedule: app.getCellSchedule(cellId),
+  };
+}
+
+function writeCellTransferState(app, cellId, state) {
+  var next = state && typeof state === 'object' ? state : null;
+  app.setCellSchedule(cellId, next ? next.schedule || null : null);
+  app.setRawCellValue(
+    cellId,
+    next ? next.raw || '' : '',
+    { preserveSchedule: true },
+  );
+}
+
 export function toggleSortByColumn(app, colIndex) {
   var state = app.getSortState();
   var current = state[colIndex];
@@ -104,7 +122,7 @@ export function sortRowsByColumn(app, colIndex, direction, skipCompute) {
     var raw = {};
     for (var c = 1; c < colCount; c++) {
       var cellId = app.cellIdFrom(c, rowIndex);
-      raw[c] = app.getRawCellValue(cellId);
+      raw[c] = readCellTransferState(app, cellId);
     }
 
     rows.push({
@@ -123,12 +141,18 @@ export function sortRowsByColumn(app, colIndex, direction, skipCompute) {
     var dRow = targetRow - source.sourceRowIndex;
     for (var col = 1; col < colCount; col++) {
       var targetCellId = app.cellIdFrom(col, targetRow);
-      var rawValue = source.raw[col] || '';
+      var sourceState = source.raw[col] || null;
+      var rawValue = sourceState && typeof sourceState.raw === 'string'
+        ? sourceState.raw
+        : '';
       var nextValue =
         rawValue.charAt(0) === '='
           ? app.shiftFormulaReferences(rawValue, dRow, 0)
           : rawValue;
-      app.setRawCellValue(targetCellId, nextValue);
+      writeCellTransferState(app, targetCellId, {
+        raw: nextValue,
+        schedule: sourceState ? sourceState.schedule || null : null,
+      });
     }
   }
 
@@ -441,9 +465,10 @@ export function insertRowsAtContext(app, position) {
       var sourceRow = row - count;
       var sourceId =
         sourceRow >= start ? app.formatCellId(col, sourceRow) : null;
-      app.setRawCellValue(
+      writeCellTransferState(
+        app,
         targetId,
-        sourceId ? app.getRawCellValue(sourceId) : '',
+        sourceId ? readCellTransferState(app, sourceId) : null,
       );
     }
   }
@@ -474,9 +499,10 @@ export function deleteRowsAtContext(app) {
       var sourceRow = row + count;
       var sourceId =
         sourceRow <= maxRow ? app.formatCellId(col, sourceRow) : null;
-      app.setRawCellValue(
+      writeCellTransferState(
+        app,
         targetId,
-        sourceId ? app.getRawCellValue(sourceId) : '',
+        sourceId ? readCellTransferState(app, sourceId) : null,
       );
     }
   }
@@ -524,9 +550,10 @@ export function insertColumnsAtContext(app, position) {
       var sourceCol = col - count;
       var sourceId =
         sourceCol >= start ? app.formatCellId(sourceCol, row) : null;
-      app.setRawCellValue(
+      writeCellTransferState(
+        app,
         targetId,
-        sourceId ? app.getRawCellValue(sourceId) : '',
+        sourceId ? readCellTransferState(app, sourceId) : null,
       );
     }
   }
@@ -557,9 +584,10 @@ export function deleteColumnsAtContext(app) {
       var sourceCol = col + count;
       var sourceId =
         sourceCol <= maxCol ? app.formatCellId(sourceCol, row) : null;
-      app.setRawCellValue(
+      writeCellTransferState(
+        app,
         targetId,
-        sourceId ? app.getRawCellValue(sourceId) : '',
+        sourceId ? readCellTransferState(app, sourceId) : null,
       );
     }
   }

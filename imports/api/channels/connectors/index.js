@@ -1,5 +1,34 @@
 import { validateChannelConnectorDefinition } from './definition.js';
 
+function formatConnectorCapabilities(connector) {
+  const capabilities =
+    connector && typeof connector === 'object' && connector.capabilities
+      ? connector.capabilities
+      : {};
+  const flags = [
+    capabilities.test !== false ? 'test' : '',
+    capabilities.send ? 'send' : '',
+    capabilities.receive ? 'receive' : '',
+    capabilities.subscribe ? 'subscribe' : '',
+    capabilities.poll ? 'poll' : '',
+    capabilities.normalizeEvent ? 'normalize-event' : '',
+    capabilities.search ? 'search' : '',
+    capabilities.attachments ? 'attachments' : '',
+    capabilities.oauth ? 'oauth' : '',
+  ].filter(Boolean);
+  const actions = Array.isArray(capabilities.actions)
+    ? capabilities.actions.filter(Boolean)
+    : [];
+  const entities = Array.isArray(capabilities.entities)
+    ? capabilities.entities.filter(Boolean)
+    : [];
+  return {
+    flags,
+    actions,
+    entities,
+  };
+}
+
 function shouldIgnoreConnectorFile(key) {
   return /(?:^|\/)(?:index|definition)\.js$/i.test(String(key || ''));
 }
@@ -85,6 +114,18 @@ export function buildChannelHelpSection() {
       lines.push(
         `\`${connector.name}\` uses package \`${connector.packageName || 'custom'}\``,
       );
+      const capabilitySummary = formatConnectorCapabilities(connector);
+      if (capabilitySummary.flags.length) {
+        lines.push(
+          `Capabilities: ${capabilitySummary.flags.join(', ')}`,
+        );
+      }
+      if (capabilitySummary.actions.length) {
+        lines.push(`Actions: ${capabilitySummary.actions.join(', ')}`);
+      }
+      if (capabilitySummary.entities.length) {
+        lines.push(`Entities: ${capabilitySummary.entities.join(', ')}`);
+      }
       connector.help.forEach((item) => lines.push(item));
       connector.mentioningFormulas.forEach((item) =>
         lines.push(`Example: \`${item}\``),

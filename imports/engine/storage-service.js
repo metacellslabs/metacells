@@ -140,6 +140,13 @@ export class StorageService {
     return {};
   }
 
+  getCellSchedule(sheetId, cellId) {
+    if (typeof this.storage.getCellSchedule === 'function') {
+      return this.storage.getCellSchedule(sheetId, cellId) || null;
+    }
+    return null;
+  }
+
   getCellVersionInfo(sheetId, cellId) {
     if (typeof this.storage.getCellVersionInfo === 'function') {
       return (
@@ -191,6 +198,12 @@ export class StorageService {
   setCellPresentation(sheetId, cellId, presentation) {
     if (typeof this.storage.setCellPresentation === 'function') {
       this.storage.setCellPresentation(sheetId, cellId, presentation);
+    }
+  }
+
+  setCellSchedule(sheetId, cellId, schedule) {
+    if (typeof this.storage.setCellSchedule === 'function') {
+      this.storage.setCellSchedule(sheetId, cellId, schedule);
     }
   }
 

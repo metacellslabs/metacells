@@ -1,0 +1,88 @@
+import { defineChannelConnector } from './definition.js';
+
+export default defineChannelConnector({
+  id: 'github',
+  type: 'github',
+  name: 'GitHub',
+  description:
+    'Poll repository events and run local git pull/push actions for a configured repository.',
+  packageName: 'GitHub REST API + git CLI',
+  supportsReceive: true,
+  supportsSend: true,
+  capabilities: {
+    test: true,
+    send: true,
+    receive: true,
+    poll: true,
+    normalizeEvent: true,
+    search: true,
+    attachments: false,
+    oauth: true,
+    actions: ['test', 'push', 'pull', 'poll', 'search'],
+    entities: ['repository', 'event', 'issue', 'pull_request', 'commit'],
+  },
+  settingsFields: [
+    {
+      key: 'label',
+      label: 'Channel label',
+      type: 'text',
+      placeholder: 'gh',
+      defaultValue: 'gh',
+    },
+    { key: 'enabled', label: 'Enabled', type: 'checkbox', defaultValue: true },
+    {
+      key: 'accessToken',
+      label: 'Access token',
+      type: 'password',
+      placeholder: 'GitHub token with repo access',
+      defaultValue: '',
+    },
+    {
+      key: 'owner',
+      label: 'Owner',
+      type: 'text',
+      placeholder: 'octocat',
+      defaultValue: '',
+    },
+    {
+      key: 'repo',
+      label: 'Repository',
+      type: 'text',
+      placeholder: 'hello-world',
+      defaultValue: '',
+    },
+    {
+      key: 'defaultBranch',
+      label: 'Default branch',
+      type: 'text',
+      placeholder: 'main',
+      defaultValue: 'main',
+    },
+    {
+      key: 'localRepoPath',
+      label: 'Local repo path',
+      type: 'text',
+      placeholder: '/absolute/path/to/repo',
+      defaultValue: '',
+    },
+    {
+      key: 'apiBaseUrl',
+      label: 'API base URL',
+      type: 'text',
+      placeholder: 'https://api.github.com',
+      defaultValue: 'https://api.github.com',
+    },
+  ],
+  sendParams: ['action', 'branch', 'commitMessage', 'pathspec', 'body'],
+  mentioningFormulas: [
+    '# /gh summarise each new repository event in one line',
+    '/gh:send:{"action":"pull","branch":"main"}',
+    '/gh:send:{"action":"push","branch":"main","commitMessage":"Update generated files"}',
+  ],
+  help: [
+    'Polls `List repository events` from the GitHub REST API and exposes them as channel events.',
+    'Use `/gh:send:{"action":"pull"}` to run `git pull --ff-only` in the configured local repository.',
+    'Use `/gh:send:{"action":"push","commitMessage":"..."}` to run `git add -A`, `git commit`, and `git push` in the configured local repository.',
+    'This first version supports repository events plus local `pull` and `push` actions. PR creation, issue creation, and webhook management are not included yet.',
+  ],
+});

@@ -9,6 +9,18 @@ export default defineChannelConnector({
   packageName: 'X API v2',
   supportsReceive: false,
   supportsSend: true,
+  capabilities: {
+    test: true,
+    send: true,
+    receive: false,
+    poll: false,
+    normalizeEvent: false,
+    search: false,
+    attachments: false,
+    oauth: true,
+    actions: ['test', 'post'],
+    entities: ['tweet', 'user'],
+  },
   settingsFields: [
     {
       key: 'label',

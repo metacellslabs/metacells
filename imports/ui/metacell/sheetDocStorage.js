@@ -81,6 +81,11 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
     this.scheduleFlush();
   }
 
+  setCellSchedule(sheetId, cellId, schedule) {
+    super.setCellSchedule(sheetId, cellId, schedule);
+    this.scheduleFlush();
+  }
+
   setCellDependencies(sheetId, cellId, dependencies) {
     super.setCellDependencies(sheetId, cellId, dependencies);
     this.scheduleFlush();

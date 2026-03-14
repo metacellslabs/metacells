@@ -2484,6 +2484,33 @@ function SheetPage({
                 <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L8.76 18.07a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </LucideIcon>
             </button>
+            <button
+              id="assistant-chat-button"
+              type="button"
+              aria-label="Open AI assistant"
+              title="Open AI assistant"
+            >
+              <LucideIcon size={16}>
+                <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                <path d="M8 9h8" />
+                <path d="M8 13h5" />
+              </LucideIcon>
+            </button>
+            <button
+              id="formula-tracker-button"
+              type="button"
+              aria-label="Open automation list"
+              title="Open automation list"
+            >
+              <LucideIcon size={16}>
+                <path d="M9 6h11" />
+                <path d="M9 12h11" />
+                <path d="M9 18h11" />
+                <path d="M4 6h.01" />
+                <path d="M4 12h.01" />
+                <path d="M4 18h.01" />
+              </LucideIcon>
+            </button>
           </div>
           <div
             id="region-recording-controls"

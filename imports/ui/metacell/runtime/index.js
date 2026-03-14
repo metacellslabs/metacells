@@ -212,6 +212,23 @@ import {
   toggleAddTabMenu as toggleAddTabMenuRuntime,
 } from './keyboard-runtime.js';
 import {
+  hideScheduleDialog as hideScheduleDialogRuntime,
+  setupScheduleDialog as setupScheduleDialogRuntime,
+  showScheduleDialogForCell as showScheduleDialogForCellRuntime,
+  showScheduleDialogForContextCell as showScheduleDialogForContextCellRuntime,
+} from './schedule-runtime.js';
+import {
+  hideAssistantPanel as hideAssistantPanelRuntime,
+  setupAssistantPanel as setupAssistantPanelRuntime,
+  toggleAssistantPanel as toggleAssistantPanelRuntime,
+} from './assistant-runtime.js';
+import {
+  hideFormulaTrackerPanel as hideFormulaTrackerPanelRuntime,
+  refreshFormulaTrackerPanel as refreshFormulaTrackerPanelRuntime,
+  setupFormulaTrackerPanel as setupFormulaTrackerPanelRuntime,
+  toggleFormulaTrackerPanel as toggleFormulaTrackerPanelRuntime,
+} from './formula-tracker-runtime.js';
+import {
   applyDependencyHighlight as applyDependencyHighlightRuntime,
   applyHeaderSelectionRange as applyHeaderSelectionRangeRuntime,
   bindHeaderSelectionEvents as bindHeaderSelectionEventsRuntime,
@@ -282,6 +299,45 @@ function parseStructuredChannelSendMessage(message) {
   } catch (e) {
     return null;
   }
+}
+
+function parseChannelCommandCellInput(rawValue) {
+  var raw = String(rawValue == null ? '' : rawValue).trim();
+  if (!raw) return null;
+  var spill = false;
+  if (raw.charAt(0) === '>') {
+    spill = true;
+    raw = raw.substring(1).trim();
+  }
+  var command = parseChannelSendCommand(raw);
+  if (!command) return null;
+  return {
+    spill: spill,
+    label: String(command.label || '').trim().toLowerCase(),
+    message: String(command.message || ''),
+  };
+}
+
+function getChannelCommandResultText(result, fallbackLabel) {
+  var source = result && typeof result === 'object' ? result : {};
+  var stdout = String(source.stdout || '').trim();
+  if (stdout) return stdout;
+  var body = String(source.body || source.text || source.value || '').trim();
+  if (body) return body;
+  var stderr = String(source.stderr || '').trim();
+  if (stderr) return stderr;
+  var message = String(source.message || '').trim();
+  if (message) return message;
+  return `Sent to /${String(fallbackLabel || '').trim()}`;
+}
+
+function splitChannelCommandResultLines(text) {
+  return String(text == null ? '' : text)
+    .split(/\r?\n/)
+    .map(function (line) {
+      return String(line || '').trim();
+    })
+    .filter(Boolean);
 }
 
 export class SpreadsheetApp {
@@ -393,6 +449,10 @@ export class SpreadsheetApp {
     this.undoButton = document.querySelector('#undo-action');
     this.redoButton = document.querySelector('#redo-action');
     this.updateAIButton = document.querySelector('#update-ai');
+    this.assistantChatButton = document.querySelector('#assistant-chat-button');
+    this.formulaTrackerButton = document.querySelector(
+      '#formula-tracker-button',
+    );
     this.tabsContainer = document.querySelector('#tabs');
     this.addTabButton = document.querySelector('#add-tab');
     this.deleteTabButton = document.querySelector('#delete-tab');
@@ -509,6 +569,9 @@ export class SpreadsheetApp {
     this.setupMentionAutocomplete();
     this.setupFullscreenOverlay();
     this.setupContextMenu();
+    this.setupScheduleDialog();
+    this.setupAssistantPanel();
+    this.setupFormulaTrackerPanel();
     this.setupAttachmentLinkPreview();
     this.startUncomputedMonitor();
 
@@ -756,6 +819,10 @@ export class SpreadsheetApp {
     return this.storage.getCellPresentation(this.activeSheetId, cellId);
   }
 
+  getCellSchedule(cellId) {
+    return this.storage.getCellSchedule(this.activeSheetId, cellId);
+  }
+
   setRawCellValue(cellId, value, meta) {
     this.storage.setCellValue(this.activeSheetId, cellId, value, meta);
   }
@@ -768,6 +835,10 @@ export class SpreadsheetApp {
   setCellPresentation(cellId, presentation) {
     this.storage.setCellPresentation(this.activeSheetId, cellId, presentation);
     this.syncCellPresentationControls();
+  }
+
+  setCellSchedule(cellId, schedule) {
+    this.storage.setCellSchedule(this.activeSheetId, cellId, schedule);
   }
 
   getWorkbookAdapter() {
@@ -829,7 +900,7 @@ export class SpreadsheetApp {
   runChannelSendCommandForCell(cellId, rawValue) {
     var normalizedCellId = String(cellId || '').toUpperCase();
     var raw = String(rawValue == null ? '' : rawValue);
-    var command = parseChannelSendCommand(raw);
+    var command = parseChannelCommandCellInput(raw);
     if (!command || !command.label || !command.message) return false;
     var structuredPayload = parseStructuredChannelSendMessage(command.message);
     var messageTemplate = structuredPayload
@@ -859,6 +930,10 @@ export class SpreadsheetApp {
         };
 
     this.setRawCellValue(normalizedCellId, raw);
+    this.storage.clearGeneratedCellsBySource(
+      this.activeSheetId,
+      normalizedCellId,
+    );
     this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
       value: `Sending to /${command.label}...`,
       state: 'pending',
@@ -870,9 +945,24 @@ export class SpreadsheetApp {
     }
 
     Meteor.callAsync('channels.sendByLabel', command.label, outboundPayload)
-      .then(() => {
+      .then((result) => {
+        var displayValue = getChannelCommandResultText(result, command.label);
+        if (command.spill) {
+          var lines = splitChannelCommandResultLines(displayValue);
+          this.storage.clearGeneratedCellsBySource(
+            this.activeSheetId,
+            normalizedCellId,
+          );
+          this.formulaEngine.fillUnderneathCells(
+            this.activeSheetId,
+            normalizedCellId,
+            lines,
+            0,
+          );
+          displayValue = lines.length ? lines[0] : '';
+        }
         this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
-          value: `Sent to /${command.label}`,
+          value: displayValue,
           state: 'resolved',
           error: '',
         });
@@ -1802,6 +1892,10 @@ export class SpreadsheetApp {
       this.pasteFromClipboard();
       return;
     }
+    if (action === 'schedule') {
+      this.showScheduleDialogForContextCell();
+      return;
+    }
 
     if (action === 'insert-row-before') {
       this.insertRowsAtContext('before');
@@ -1866,6 +1960,52 @@ export class SpreadsheetApp {
 
   setupAIModeControls() {
     setupAIModeControlsRuntime(this);
+  }
+
+  setupScheduleDialog() {
+    setupScheduleDialogRuntime(this);
+  }
+
+  setupAssistantPanel() {
+    setupAssistantPanelRuntime(this);
+  }
+
+  setupFormulaTrackerPanel() {
+    setupFormulaTrackerPanelRuntime(this);
+  }
+
+  toggleAssistantPanel() {
+    toggleAssistantPanelRuntime(this);
+    this.refreshFormulaTrackerPanel();
+  }
+
+  hideAssistantPanel() {
+    hideAssistantPanelRuntime(this);
+    this.refreshFormulaTrackerPanel();
+  }
+
+  toggleFormulaTrackerPanel() {
+    toggleFormulaTrackerPanelRuntime(this);
+  }
+
+  hideFormulaTrackerPanel() {
+    hideFormulaTrackerPanelRuntime(this);
+  }
+
+  refreshFormulaTrackerPanel() {
+    refreshFormulaTrackerPanelRuntime(this);
+  }
+
+  showScheduleDialogForCell(cellId) {
+    showScheduleDialogForCellRuntime(this, cellId);
+  }
+
+  showScheduleDialogForContextCell() {
+    showScheduleDialogForContextCellRuntime(this);
+  }
+
+  hideScheduleDialog() {
+    hideScheduleDialogRuntime(this);
   }
 
   setupAttachmentControls() {
@@ -2531,10 +2671,12 @@ export class SpreadsheetApp {
 
   switchToSheet(sheetId) {
     switchToSheetRuntime(this, sheetId);
+    this.refreshFormulaTrackerPanel();
   }
 
   renderCurrentSheetFromStorage() {
     renderCurrentSheetFromStorageRuntime(this);
+    this.refreshFormulaTrackerPanel();
   }
 
   getRenderTargetsForComputeResult(computedValues, didResort) {

@@ -1,5 +1,6 @@
 import { Meteor } from 'meteor/meteor';
 import { getArtifactBinary } from '../../../artifacts/index.js';
+import { defineChannelHandler } from '../handler-definition.js';
 
 const TELEGRAM_CAPTION_MAX_CHARS = 1024;
 
@@ -221,3 +222,28 @@ export async function sendTelegramMessage(payload) {
     chatId,
   };
 }
+
+const TELEGRAM_HANDLER = defineChannelHandler({
+  id: 'telegram',
+  name: 'Telegram',
+  summary: 'Telegram Bot API channel for outbound messages and attachments.',
+  docs: ['https://core.telegram.org/bots/api'],
+  popularMethods: ['getMe', 'sendMessage', 'sendPhoto', 'sendDocument', 'getUpdates'],
+  capabilities: {
+    test: true,
+    send: true,
+    receive: false,
+    poll: false,
+    normalizeEvent: false,
+    search: false,
+    attachments: true,
+    oauth: false,
+    actions: ['test', 'send'],
+    entities: ['chat', 'message', 'photo', 'document'],
+  },
+  testConnection: async ({ settings }) => testTelegramConnection(settings),
+  send: async ({ settings, payload }) =>
+    sendTelegramMessage({ ...(payload || {}), settings }),
+});
+
+export default TELEGRAM_HANDLER;

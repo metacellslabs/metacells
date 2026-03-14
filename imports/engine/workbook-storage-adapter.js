@@ -1,4 +1,5 @@
 import { AI_MODE } from './constants.js';
+import { normalizeCellSchedule } from '../lib/cell-schedule.js';
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -6,6 +7,35 @@ function isPlainObject(value) {
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value || {}));
+}
+
+function normalizeChannelFeedMeta(meta) {
+  if (!isPlainObject(meta)) return null;
+  var next = {
+    filterMode: String(meta.filterMode || ''),
+    decisionMode: String(meta.decisionMode || ''),
+    promptTemplate: String(meta.promptTemplate || ''),
+    lastDecisionAt: String(meta.lastDecisionAt || ''),
+    lastEvaluatedEventId: String(meta.lastEvaluatedEventId || ''),
+    lastIncludedEventId: String(meta.lastIncludedEventId || ''),
+    lastValuePreview: String(meta.lastValuePreview || ''),
+    lastAttributes: isPlainObject(meta.lastAttributes)
+      ? deepClone(meta.lastAttributes)
+      : {},
+  };
+  if (
+    !next.filterMode &&
+    !next.decisionMode &&
+    !next.promptTemplate &&
+    !next.lastDecisionAt &&
+    !next.lastEvaluatedEventId &&
+    !next.lastIncludedEventId &&
+    !next.lastValuePreview &&
+    !Object.keys(next.lastAttributes).length
+  ) {
+    return null;
+  }
+  return next;
 }
 
 function normalizeTabs(tabs) {
@@ -127,6 +157,10 @@ function normalizeCellRecord(source, previousCell) {
     )
       ? deepClone(prev.lastProcessedChannelEventIds)
       : {},
+    channelFeedMeta:
+      sourceType === 'formula' && !sourceChanged
+        ? normalizeChannelFeedMeta(prev.channelFeedMeta)
+        : null,
     sourceVersion: sourceVersion,
     computedVersion: computedVersion,
     dependencyVersion: dependencyVersion,
@@ -134,6 +168,7 @@ function normalizeCellRecord(source, previousCell) {
       sourceType === 'formula' && !sourceChanged
         ? String(prev.dependencySignature || '')
         : '',
+    schedule: normalizeCellSchedule(prev.schedule) || null,
     version: sourceVersion,
   };
 }
@@ -390,6 +425,11 @@ export class WorkbookStorageAdapter {
     };
   }
 
+  getCellSchedule(sheetId, cellId) {
+    var cell = this.getCellRecord(sheetId, cellId);
+    return cell ? normalizeCellSchedule(cell.schedule) : null;
+  }
+
   setCellSource(sheetId, cellId, value, meta) {
     var sheet = this.ensureSheet(sheetId);
     if (!sheet) return;
@@ -408,10 +448,22 @@ export class WorkbookStorageAdapter {
     ) {
       next.generatedBy = '';
     }
+    if (
+      (!meta || meta.preserveSchedule !== true) &&
+      previous &&
+      previous.schedule &&
+      String(previous.source || '') !== String(next.source || '')
+    ) {
+      var previousSchedule = normalizeCellSchedule(previous.schedule);
+      if (previousSchedule && previousSchedule.origin === 'detected') {
+        next.schedule = null;
+      }
+    }
 
     if (
       !next.source &&
       !next.generatedBy &&
+      !next.schedule &&
       String(next.format || 'text') === 'text' &&
       String(next.align || 'left') === 'left' &&
       next.wrapText !== true &&
@@ -489,6 +541,7 @@ export class WorkbookStorageAdapter {
     var cell = this.getCellRecord(sheetId, id);
     if (!cell) {
       var hasMeaningfulPresentation =
+        !!normalizeCellSchedule(nextPresentation.schedule) ||
         String(nextPresentation.align || 'left') !== 'left' ||
         nextPresentation.wrapText === true ||
         nextPresentation.bold === true ||
@@ -560,9 +613,49 @@ export class WorkbookStorageAdapter {
         left: nextBorders.left === true,
       };
     }
+    if (Object.prototype.hasOwnProperty.call(nextPresentation, 'schedule')) {
+      cell.schedule = normalizeCellSchedule(nextPresentation.schedule) || null;
+    }
     if (
       !cell.source &&
       !cell.generatedBy &&
+      !cell.schedule &&
+      String(cell.format || 'text') === 'text' &&
+      String(cell.align || 'left') === 'left' &&
+      cell.wrapText !== true &&
+      cell.bold !== true &&
+      cell.italic !== true &&
+      cell.decimalPlaces == null &&
+      String(cell.backgroundColor || '') === '' &&
+      String(cell.fontFamily || 'default') === 'default' &&
+      Number(cell.fontSize || 14) === 14 &&
+      (!cell.borders ||
+        (cell.borders.top !== true &&
+          cell.borders.right !== true &&
+          cell.borders.bottom !== true &&
+          cell.borders.left !== true))
+    ) {
+      delete sheet.cells[id];
+      return;
+    }
+    sheet.cells[id] = cell;
+  }
+
+  setCellSchedule(sheetId, cellId, scheduleValue) {
+    var sheet = this.ensureSheet(sheetId);
+    if (!sheet) return;
+    var id = String(cellId || '').toUpperCase();
+    var schedule = normalizeCellSchedule(scheduleValue) || null;
+    var cell = this.getCellRecord(sheetId, id);
+    if (!cell) {
+      if (!schedule) return;
+      cell = normalizeCellRecord('', null);
+    }
+    cell.schedule = schedule;
+    if (
+      !cell.source &&
+      !cell.generatedBy &&
+      !cell.schedule &&
       String(cell.format || 'text') === 'text' &&
       String(cell.align || 'left') === 'left' &&
       cell.wrapText !== true &&
@@ -632,6 +725,9 @@ export class WorkbookStorageAdapter {
       )
         ? deepClone(next.lastProcessedChannelEventIds)
         : {};
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'channelFeedMeta')) {
+      cell.channelFeedMeta = normalizeChannelFeedMeta(next.channelFeedMeta);
     }
     if (Object.prototype.hasOwnProperty.call(next, 'computedVersion')) {
       cell.computedVersion = Number(next.computedVersion) || 0;

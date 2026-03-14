@@ -1,6 +1,7 @@
 import { Meteor } from 'meteor/meteor';
 import { AI_MODE } from './constants.js';
 import { traceCellUpdateClient } from '../../../lib/cell-update-profile.js';
+import { describeCellSchedule } from '../../../lib/cell-schedule.js';
 
 function parseNumericDisplayValue(value) {
   if (typeof value === 'number' && isFinite(value)) return value;
@@ -221,6 +222,10 @@ export function renderCurrentSheetFromStorage(app) {
         app.activeSheetId,
         input.id,
       );
+      var cellSchedule = app.storage.getCellSchedule(
+        app.activeSheetId,
+        input.id,
+      );
       var isEditing = document.activeElement === input;
       var literalDisplay = !!raw && raw.charAt(0) === '#';
       var showFormulas = app.displayMode === 'formulas';
@@ -310,6 +315,8 @@ export function renderCurrentSheetFromStorage(app) {
         fontFamily: !showFormulas ? formatMeta.fontFamily : 'default',
         fontSize: !showFormulas ? formatMeta.fontSize : 14,
         borders: formatMeta.borders,
+        hasSchedule: !!cellSchedule,
+        scheduleTitle: cellSchedule ? describeCellSchedule(cellSchedule) : '',
       });
       if (isFormula) {
         formulaDone++;

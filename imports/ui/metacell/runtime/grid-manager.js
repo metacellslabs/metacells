@@ -32,7 +32,7 @@ export class GridManager {
         var letter = columnIndexToLabel(j);
         row.insertCell(-1).innerHTML =
           i && j
-            ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><input id='" +
+            ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><div class='cell-schedule-indicator' aria-hidden='true'></div><input id='" +
               letter +
               i +
               "'/><div class='cell-actions'><button type='button' class='cell-action' data-action='copy' title='Copy value' aria-label='Copy value'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='10' height='10' rx='2'></rect><path d='M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1'></path></svg></button><button type='button' class='cell-action' data-action='fullscreen' title='Fullscreen' aria-label='Fullscreen'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M8 3H5a2 2 0 0 0-2 2v3'></path><path d='M16 3h3a2 2 0 0 1 2 2v3'></path><path d='M8 21H5a2 2 0 0 1-2-2v-3'></path><path d='M16 21h3a2 2 0 0 0 2-2v-3'></path></svg></button><button type='button' class='cell-action' data-action='run' title='Run formula'>▶</button></div><div class='fill-handle'></div>"
@@ -360,6 +360,9 @@ export class GridManager {
 
     var output = input.parentElement.querySelector('.cell-output');
     var statusNode = input.parentElement.querySelector('.cell-status');
+    var scheduleNode = input.parentElement.querySelector(
+      '.cell-schedule-indicator',
+    );
     var opts = options || {};
     input.parentElement.classList.toggle('has-ai-skeleton', !!opts.aiSkeleton);
     if (output) {
@@ -428,6 +431,21 @@ export class GridManager {
       'display-border-left',
       borders.left === true,
     );
+    input.parentElement.classList.toggle('has-schedule', !!opts.hasSchedule);
+    if (scheduleNode) {
+      if (opts.hasSchedule) {
+        scheduleNode.innerHTML =
+          "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='5.5' width='17' height='15' rx='2.5'></rect><path d='M7 3.5v4'></path><path d='M17 3.5v4'></path><path d='M3.5 9.5h17'></path></svg>";
+        if (opts.scheduleTitle) {
+          scheduleNode.setAttribute('title', String(opts.scheduleTitle));
+        } else {
+          scheduleNode.removeAttribute('title');
+        }
+      } else {
+        scheduleNode.innerHTML = '';
+        scheduleNode.removeAttribute('title');
+      }
+    }
     if (statusNode) {
       var nextState = hasFormula ? String(opts.state || '') : '';
       var showStatusBadge = !(opts.aiSkeleton && (nextState === 'pending' || nextState === 'stale'));

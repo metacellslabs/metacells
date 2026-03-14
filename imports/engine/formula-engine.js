@@ -5,6 +5,7 @@ import { recalcMethods } from './formula-engine/recalc-methods.js';
 import { parserMethods } from './formula-engine/parser-methods.js';
 import { referenceMethods } from './formula-engine/reference-methods.js';
 import { schedulerMethods } from './formula-engine/scheduler-methods.js';
+import { fallbackMethods } from './formula-engine/fallback-methods.js';
 import { buildFormulaContext } from './formulas/index.js';
 
 export class FormulaEngine {
@@ -58,6 +59,7 @@ export class FormulaEngine {
           promptTemplate: promptRaw,
           dependencies: promptDependencies,
           attachmentLinks: preparedPrompt.attachmentLinks,
+          forceRefresh: !!opts.forceRefreshAI,
         };
         if (!preparedPrompt.userPrompt) return '';
         return this.aiService.ask(preparedPrompt.userPrompt, {
@@ -150,7 +152,25 @@ export class FormulaEngine {
         'context',
         'with (context) { return (' + expression + '); }',
       );
-      return fn(context);
+      try {
+        return fn(context);
+      } catch (error) {
+        var unknownFunctions = this.shouldUseUnknownFormulaFallback(
+          raw.substring(1),
+          context,
+          error,
+        );
+        if (unknownFunctions && unknownFunctions.length) {
+          return this.evaluateUnknownFormulaFallback(
+            sheetId,
+            cellId,
+            raw,
+            unknownFunctions,
+            options,
+          );
+        }
+        throw error;
+      }
     } finally {
       delete stack[token];
     }
@@ -295,6 +315,7 @@ export class FormulaEngine {
           promptTemplate: text,
           dependencies: dependencies,
           attachmentLinks: prepared.attachmentLinks,
+          forceRefresh: forceRefreshAI,
         };
         return this.aiService.ask(prepared.userPrompt, {
           forceRefresh: forceRefreshAI,
@@ -471,4 +492,5 @@ Object.assign(
   parserMethods,
   referenceMethods,
   schedulerMethods,
+  fallbackMethods,
 );

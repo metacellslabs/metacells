@@ -1,0 +1,80 @@
+import { defineChannelConnector } from './definition.js';
+
+export default defineChannelConnector({
+  id: 'google-drive',
+  type: 'google-drive',
+  name: 'Google Drive',
+  description:
+    'Poll new Drive files and upload files into Google Drive through the Drive API v3.',
+  packageName: 'Google Drive API v3',
+  supportsReceive: true,
+  supportsSend: true,
+  capabilities: {
+    test: true,
+    send: true,
+    receive: true,
+    poll: true,
+    normalizeEvent: true,
+    search: true,
+    attachments: true,
+    oauth: true,
+    actions: ['test', 'upload', 'poll', 'search'],
+    entities: ['file', 'folder', 'change'],
+  },
+  settingsFields: [
+    {
+      key: 'label',
+      label: 'Channel label',
+      type: 'text',
+      placeholder: 'drive',
+      defaultValue: 'drive',
+    },
+    { key: 'enabled', label: 'Enabled', type: 'checkbox', defaultValue: true },
+    {
+      key: 'accessToken',
+      label: 'Access token',
+      type: 'password',
+      placeholder: 'OAuth access token with Drive scope',
+      defaultValue: '',
+    },
+    {
+      key: 'folderId',
+      label: 'Folder ID',
+      type: 'text',
+      placeholder: 'Optional target folder id',
+      defaultValue: '',
+    },
+    {
+      key: 'limit',
+      label: 'Files per poll',
+      type: 'number',
+      placeholder: '20',
+      defaultValue: 20,
+    },
+    {
+      key: 'apiBaseUrl',
+      label: 'API base URL',
+      type: 'text',
+      placeholder: 'https://www.googleapis.com/drive/v3',
+      defaultValue: 'https://www.googleapis.com/drive/v3',
+    },
+    {
+      key: 'uploadBaseUrl',
+      label: 'Upload base URL',
+      type: 'text',
+      placeholder: 'https://www.googleapis.com/upload/drive/v3',
+      defaultValue: 'https://www.googleapis.com/upload/drive/v3',
+    },
+  ],
+  sendParams: ['name', 'body', 'mimeType', 'folderId', 'attachments'],
+  mentioningFormulas: [
+    '# /drive summarise each new file in one line',
+    '/drive:send:{"name":"notes.txt","body":"hello from MetaCells","mimeType":"text/plain"}',
+  ],
+  help: [
+    'Polls new files from Google Drive using `files.list` and exposes them as channel events.',
+    'Uploads files using the Drive API multipart upload flow.',
+    'If workbook attachments are passed to `/drive:send`, the first attachment is uploaded to Drive.',
+    'This first version works with a bearer access token and optional folder id. Browser OAuth flow is not included here.',
+  ],
+});

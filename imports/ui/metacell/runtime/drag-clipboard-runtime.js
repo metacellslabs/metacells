@@ -155,6 +155,7 @@ export function clearSelectedCells(app) {
   app.captureHistorySnapshot('clear:' + app.activeSheetId);
 
   for (var i = 0; i < ids.length; i++) {
+    app.setCellSchedule(ids[i], null);
     app.setRawCellValue(ids[i], '');
   }
 

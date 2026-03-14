@@ -1,5 +1,94 @@
 # Changelog
 
+## 2026-03-14
+
+### Added
+
+- Electron desktop packaging flow with local desktop preparation, packing, and per-OS distribution scripts.
+- Self-contained desktop runtime support for bundling the Meteor backend and local services into the packaged Electron app.
+- Cell scheduling system:
+  - backend schedule persistence and execution
+  - schedule detection jobs
+  - schedule dialog in the cell context menu
+  - schedule indicators in the grid
+- Workbook-aware AI assistant:
+  - topbar entry point
+  - floating chat panel
+  - provider selection
+  - persisted conversation history in Mongo
+  - workbook/tool-aware server orchestration
+- Assistant file uploads with extracted-content context and tools to place uploaded files into workbook cells.
+- Assistant mutation tools for:
+  - cell content
+  - formatting and presentation
+  - schedules
+  - reports
+  - tabs
+  - batch workbook patching
+- Automatic assistant tool exposure for configured channel send/search capabilities.
+- AI fallback path for unsupported formulas that now evaluates unknown function-style formulas using workbook context instead of failing immediately.
+- Dedicated automation/tracker toolbar panel for navigating to cells that use schedules or channel-linked formulas/commands.
+- New channel connectors:
+  - Gmail
+  - LinkedIn
+  - Reddit
+  - WhatsApp Web (Baileys)
+  - GitHub
+  - Facebook
+  - Instagram
+  - Hacker News
+  - Shell
+  - Google Drive
+- Gmail OAuth credential support.
+- Unified channel handler abstraction and registry under:
+  - `imports/api/channels/server/handler-definition.js`
+  - `imports/api/channels/server/handlers/index.js`
+- Unified channel event/message model with normalized attachments and native/view links.
+- Standardized channel search contract and assistant search tools.
+- Channel/event standard documentation:
+  - `docs/channel-handler-standard.md`
+  - `docs/channel-event-standard.md`
+
+### Changed
+
+- Desktop packaging and runtime startup flow now supports real backend embedding instead of Electron-only shell packaging.
+- Schedule execution now runs safely in the main server path, with stronger dedupe, stale-job guards, queued-job cleanup, and schedule/workbook lifecycle cleanup.
+- Editing, deleting, sorting, and row/column structure mutations now preserve or clear schedule metadata correctly.
+- Channel feed formulas can now use AI-based per-event filtering/classification and persist decision metadata and extracted attributes.
+- Channel feed prompts now describe expected returned fields/columns based on the inferred filter intent.
+- Assistant system instructions were expanded to cover:
+  - shortcut AI syntax (`'`, `>`, `#`)
+  - mentions and examples
+  - channels and receive/send behavior
+  - file-cell context
+  - workbook capabilities and tool usage
+- Assistant UI/UX was refined across:
+  - header layout
+  - compact provider dropdown
+  - attachment chips
+  - message bubbles
+  - inline composer hints
+  - thinking indicator
+  - auto-scroll
+  - draft preservation between reloads
+- Assistant now injects hydrated file-cell context and stronger channel context into chat turns.
+- Channel connectors now publish standardized capability metadata in their descriptions and assistant manifest output.
+- Receive-capable channels can use live subscription-style event handling where available, with polling preserved as fallback.
+- `/sh ...` now writes command output back into the source cell, and `>/sh ...` spills line output into generated cells below.
+- Global `Delete` / `Backspace` handling was hardened so selected cells clear reliably even when focus is not inside the active cell input.
+- Rspack configuration now aliases `simple-yenc` to its ESM entry to avoid the server build failure caused by `@wasm-audio-decoders/common`.
+
+### Verification
+
+- `node --check imports/engine/formula-engine/fallback-methods.js`
+- `node --check imports/engine/formula-engine.js`
+- `node --check imports/api/ai/index.js`
+- `node --check imports/ui/metacell/runtime/assistant-runtime.js`
+- `node --check imports/ui/metacell/runtime/formula-tracker-runtime.js`
+- `node --check imports/ui/metacell/runtime/index.js`
+- `node --check imports/ui/metacell/runtime/keyboard-runtime.js`
+- `node --check rspack.config.js`
+
 ## 2026-03-10
 
 ### Added

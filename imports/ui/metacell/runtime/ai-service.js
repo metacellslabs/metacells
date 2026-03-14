@@ -118,6 +118,28 @@ export class AIService {
     this.autoDebounceTimer = null;
   }
 
+  getResolvedSourceCellValue(queueMeta) {
+    var meta = queueMeta || {};
+    var sheetId = String(meta.activeSheetId || '');
+    var cellId = String(meta.sourceCellId || '').toUpperCase();
+    if (!sheetId || !cellId) return '';
+    var state = '';
+    if (
+      this.storageService &&
+      typeof this.storageService.getCellState === 'function'
+    ) {
+      state = String(this.storageService.getCellState(sheetId, cellId) || '');
+    }
+    if (state !== 'resolved') return '';
+    if (
+      this.storageService &&
+      typeof this.storageService.getCellDisplayValue === 'function'
+    ) {
+      return String(this.storageService.getCellDisplayValue(sheetId, cellId) || '');
+    }
+    return '';
+  }
+
   ask(text, options) {
     var prompt = String(text == null ? '' : text);
     var opts = options || {};
@@ -135,6 +157,16 @@ export class AIService {
       !suppressionBlocked;
     var forceRefresh =
       requestForced || mode === AI_MODE.manual || this.forceRefresh;
+    var resolvedSourceValue =
+      !forceRefresh && opts.queueMeta
+        ? this.getResolvedSourceCellValue(this.buildQueueMeta(opts.queueMeta))
+        : '';
+
+    if (resolvedSourceValue) {
+      this.cache[cacheKey] = resolvedSourceValue;
+      this.storageService.setCacheValue(cacheKey, resolvedSourceValue);
+      return resolvedSourceValue;
+    }
 
     if (shouldRequest) {
       if (mode === AI_MODE.auto && this.autoDebounceActive && !forceRefresh) {

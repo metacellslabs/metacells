@@ -4,6 +4,7 @@ import {
   createBinaryArtifact,
   createTextArtifact,
 } from '../../../artifacts/index.js';
+import { defineChannelHandler } from '../handler-definition.js';
 
 function formatNestedError(error) {
   if (!error) return '';
@@ -23,6 +24,8 @@ function formatNestedError(error) {
 function logChannelTest(event, payload) {
   console.log(`[channels.imap] ${event}`, payload);
 }
+
+const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 function normalizeAddressList(list) {
   if (!Array.isArray(list)) return [];
@@ -209,7 +212,7 @@ function validateImapSettings(settings) {
   if (!username) {
     throw new Error('IMAP username is required');
   }
-  if (!password) {
+  if (!password && !usesOAuth(settings)) {
     throw new Error('IMAP password is required');
   }
 
@@ -218,9 +221,11 @@ function validateImapSettings(settings) {
 
 function validateSmtpSettings(settings) {
   const host = String(settings.smtpHost || '').trim();
-  const username = String(settings.smtpUsername || '').trim();
-  const password = String(settings.smtpPassword || '');
-  const from = String(settings.from || '').trim();
+  const username = String(
+    settings.smtpUsername || settings.username || '',
+  ).trim();
+  const password = String(settings.smtpPassword || settings.password || '');
+  const from = String(settings.from || settings.username || '').trim();
 
   if (!host) {
     throw new Error('SMTP host is required');
@@ -228,7 +233,7 @@ function validateSmtpSettings(settings) {
   if (!username) {
     throw new Error('SMTP username is required');
   }
-  if (!password) {
+  if (!password && !usesOAuth(settings)) {
     throw new Error('SMTP password is required');
   }
   if (!from) {
@@ -238,9 +243,118 @@ function validateSmtpSettings(settings) {
   return { host, username, password, from };
 }
 
+function usesOAuth(settings) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  return (
+    source.useOAuth === true ||
+    (!!String(source.oauthRefreshToken || '').trim() &&
+      !!String(source.oauthClientId || '').trim())
+  );
+}
+
+async function fetchGoogleOAuthAccessToken(settings, username) {
+  const clientId = String(settings.oauthClientId || '').trim();
+  const clientSecret = String(settings.oauthClientSecret || '').trim();
+  const refreshToken = String(settings.oauthRefreshToken || '').trim();
+  const fallbackAccessToken = String(settings.oauthAccessToken || '').trim();
+  const user = String(username || settings.username || '').trim();
+
+  if (!clientId) {
+    throw new Error('OAuth client ID is required');
+  }
+  if (!clientSecret) {
+    throw new Error('OAuth client secret is required');
+  }
+  if (!refreshToken) {
+    if (fallbackAccessToken) {
+      return { accessToken: fallbackAccessToken, expiresAt: null };
+    }
+    throw new Error('OAuth refresh token is required');
+  }
+
+  const response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }).toString(),
+  });
+
+  const text = String(await response.text()).trim();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (error) {
+    data = {};
+  }
+  if (!response.ok) {
+    throw new Error(
+      (data && (data.error_description || data.error)) ||
+        text ||
+        `OAuth token request failed with HTTP ${response.status}`,
+    );
+  }
+  const accessToken = String(
+    (data && (data.access_token || data.accessToken)) || fallbackAccessToken || '',
+  ).trim();
+  if (!accessToken) {
+    throw new Error('OAuth token response did not include access_token');
+  }
+  logChannelTest('oauth.token.success', {
+    username: user,
+    expiresIn: Number(data && data.expires_in) || 0,
+  });
+  return {
+    accessToken,
+    expiresAt:
+      Number(data && data.expires_in) > 0
+        ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
+        : null,
+  };
+}
+
+async function buildEmailAuth(settings, username) {
+  if (!usesOAuth(settings)) {
+    return {
+      mode: 'password',
+      auth: {
+        user: String(username || '').trim(),
+        pass: String(settings.password || '').trim(),
+      },
+      smtpAuth: {
+        user: String(settings.smtpUsername || settings.username || '').trim(),
+        pass: String(settings.smtpPassword || settings.password || '').trim(),
+      },
+      token: null,
+    };
+  }
+
+  const token = await fetchGoogleOAuthAccessToken(settings, username);
+  return {
+    mode: 'oauth',
+    auth: {
+      user: String(username || '').trim(),
+      accessToken: token.accessToken,
+    },
+    smtpAuth: {
+      type: 'OAuth2',
+      user: String(settings.smtpUsername || settings.username || '').trim(),
+      clientId: String(settings.oauthClientId || '').trim(),
+      clientSecret: String(settings.oauthClientSecret || '').trim(),
+      refreshToken: String(settings.oauthRefreshToken || '').trim(),
+      accessToken: token.accessToken,
+    },
+    token,
+  };
+}
+
 export async function testImapConnection(settings) {
   const { host, username, password, mailbox } = validateImapSettings(settings);
   const smtp = validateSmtpSettings(settings);
+  const authBundle = await buildEmailAuth(settings, username);
 
   const { ImapFlow } = await import('imapflow');
   const nodemailer = await import('nodemailer');
@@ -248,10 +362,7 @@ export async function testImapConnection(settings) {
     host,
     port: Number(settings.port || 993) || 993,
     secure: settings.secure !== false,
-    auth: {
-      user: username,
-      pass: password,
-    },
+    auth: authBundle.auth,
     logger: false,
   });
 
@@ -262,6 +373,7 @@ export async function testImapConnection(settings) {
         port: Number(settings.port || 993) || 993,
         secure: settings.secure !== false,
         username,
+        authMode: authBundle.mode,
       });
       await client.connect();
       logChannelTest('imap.connect.success', {
@@ -283,10 +395,7 @@ export async function testImapConnection(settings) {
         host: smtp.host,
         port: Number(settings.smtpPort || 465) || 465,
         secure: settings.smtpSecure !== false,
-        auth: {
-          user: smtp.username,
-          pass: smtp.password,
-        },
+        auth: authBundle.smtpAuth,
       });
       logChannelTest('smtp.verify.start', {
         host: smtp.host,
@@ -294,6 +403,7 @@ export async function testImapConnection(settings) {
         secure: settings.smtpSecure !== false,
         username: smtp.username,
         from: smtp.from,
+        authMode: authBundle.mode,
       });
       await transporter.verify();
       logChannelTest('smtp.verify.success', {
@@ -311,6 +421,7 @@ export async function testImapConnection(settings) {
           secure: settings.secure !== false,
           mailbox,
           username,
+          authMode: authBundle.mode,
         },
         smtp: {
           host: smtp.host,
@@ -318,6 +429,7 @@ export async function testImapConnection(settings) {
           secure: settings.smtpSecure !== false,
           username: smtp.username,
           from: smtp.from,
+          authMode: authBundle.mode,
         },
       });
       throw new Error(message);
@@ -345,15 +457,13 @@ export async function sendImapMessage(payload) {
       ? source.settings
       : {};
   const smtp = validateSmtpSettings(settings);
+  const authBundle = await buildEmailAuth(settings, smtp.username);
   const nodemailer = await import('nodemailer');
   const transporter = nodemailer.createTransport({
     host: smtp.host,
     port: Number(settings.smtpPort || 465) || 465,
     secure: settings.smtpSecure !== false,
-    auth: {
-      user: smtp.username,
-      pass: smtp.password,
-    },
+    auth: authBundle.smtpAuth,
   });
 
   const to = Array.isArray(source.to) ? source.to.filter(Boolean) : [];
@@ -393,22 +503,153 @@ export async function handleImapEvent(event, message) {
   };
 }
 
+async function fetchImapEventsSince({
+  client,
+  channel,
+  mailbox,
+  lastSeenUid,
+}) {
+  const events = [];
+  const mailboxState = client.mailbox || {};
+  const nextUid = Number(mailboxState.uidNext) || 0;
+  const rangeStart = Math.max(1, Number(lastSeenUid) + 1 || 1);
+
+  logChannelTest('poll.mailbox.opened', {
+    mailbox,
+    exists: Number(mailboxState.exists) || 0,
+    uidNext: nextUid,
+    rangeStart,
+  });
+
+  if (!lastSeenUid && nextUid > 1) {
+    const baselineUid = Math.max(0, nextUid - 1);
+    logChannelTest('poll.baseline_set', {
+      mailbox,
+      baselineUid,
+      reason: 'no-lastSeenUid',
+    });
+    return {
+      lastSeenUid: baselineUid,
+      events,
+    };
+  }
+
+  if (nextUid && rangeStart >= nextUid) {
+    logChannelTest('poll.no_new_mail', {
+      mailbox,
+      lastSeenUid,
+      uidNext: nextUid,
+    });
+    return {
+      lastSeenUid,
+      events,
+    };
+  }
+
+  let uids = [];
+  try {
+    const searchResult = await client.search(
+      { uid: `${rangeStart}:*` },
+      { uid: true },
+    );
+    uids = Array.isArray(searchResult)
+      ? searchResult.map((value) => Number(value) || 0).filter(Boolean)
+      : [];
+    logChannelTest('poll.search.result', {
+      mailbox,
+      range: `${rangeStart}:*`,
+      count: uids.length,
+      uids,
+    });
+  } catch (error) {
+    logChannelTest('poll.search_failed', {
+      message: formatNestedError(error),
+      mailbox,
+      rangeStart,
+    });
+    throw error;
+  }
+
+  uids.sort((left, right) => left - right);
+
+  for (let i = 0; i < uids.length; i += 1) {
+    const uid = uids[i];
+    const message = await client.fetchOne(
+      String(uid),
+      {
+        uid: true,
+        envelope: true,
+        internalDate: true,
+        bodyStructure: true,
+        source: { start: 0, maxLength: 128000 },
+      },
+      { uid: true },
+    );
+    if (!message) continue;
+
+    const attachments = await fetchMessageAttachments(
+      client,
+      uid,
+      message.bodyStructure,
+    );
+
+    const payload = {
+      channelId: String((channel && channel.id) || ''),
+      label: String((channel && channel.label) || ''),
+      connectorId: String((channel && channel.connectorId) || 'imap-email'),
+      event: 'message.new',
+      mailbox,
+      uid: Number(message.uid || uid) || uid,
+      subject: String(
+        (message.envelope && message.envelope.subject) || '',
+      ).trim(),
+      from: normalizeAddressList(message.envelope && message.envelope.from),
+      to: normalizeAddressList(message.envelope && message.envelope.to),
+      date:
+        message.internalDate instanceof Date
+          ? message.internalDate.toISOString()
+          : '',
+      text: decodeMessageSource(message.source),
+      attachments,
+    };
+    events.push(payload);
+    logChannelTest('poll.event', {
+      mailbox,
+      uid: payload.uid,
+      subject: payload.subject,
+      from: payload.from,
+      date: payload.date,
+      textPreview: String(payload.text || '').slice(0, 240),
+      attachments: attachments.map((item) => ({
+        name: item.name,
+        type: item.type,
+        size: item.size,
+        hasDownloadUrl: !!item.downloadUrl,
+        hasContent: !!item.content,
+        error: item.error || '',
+      })),
+    });
+  }
+
+  return {
+    lastSeenUid: uids.length ? uids[uids.length - 1] : lastSeenUid,
+    events,
+  };
+}
+
 export async function pollImapMessages(settings, channel) {
-  const { host, username, password, mailbox } = validateImapSettings(settings);
+  const { host, username, mailbox } = validateImapSettings(settings);
+  const authBundle = await buildEmailAuth(settings, username);
   const { ImapFlow } = await import('imapflow');
   const client = new ImapFlow({
     host,
     port: Number(settings.port || 993) || 993,
     secure: settings.secure !== false,
-    auth: {
-      user: username,
-      pass: password,
-    },
+    auth: authBundle.auth,
     logger: false,
   });
 
   const lastSeenUid = Number(channel && channel.lastSeenUid) || 0;
-  const events = [];
 
   try {
     logChannelTest('poll.start', {
@@ -417,142 +658,31 @@ export async function pollImapMessages(settings, channel) {
       host,
       mailbox,
       lastSeenUid,
+      authMode: authBundle.mode,
     });
 
     await client.connect();
-    const lock = await client.mailboxOpen(mailbox);
-    const nextUid = Number(lock && lock.uidNext) || 0;
-    const rangeStart = Math.max(1, lastSeenUid + 1);
-    logChannelTest('poll.mailbox.opened', {
+    await client.mailboxOpen(mailbox);
+    const result = await fetchImapEventsSince({
+      client,
+      channel,
       mailbox,
-      exists: Number(lock && lock.exists) || 0,
-      uidNext: nextUid,
-      rangeStart,
+      lastSeenUid,
     });
-
-    if (!lastSeenUid && nextUid > 1) {
-      const baselineUid = Math.max(0, nextUid - 1);
-      logChannelTest('poll.baseline_set', {
-        mailbox,
-        baselineUid,
-        reason: 'no-lastSeenUid',
-      });
-      return {
-        ok: true,
-        lastSeenUid: baselineUid,
-        events,
-      };
-    }
-
-    if (nextUid && rangeStart >= nextUid) {
-      logChannelTest('poll.no_new_mail', {
-        mailbox,
-        lastSeenUid,
-        uidNext: nextUid,
-      });
-      return {
-        ok: true,
-        lastSeenUid,
-        events,
-      };
-    }
-
-    let uids = [];
-    try {
-      const searchResult = await client.search(
-        { uid: `${rangeStart}:*` },
-        { uid: true },
-      );
-      uids = Array.isArray(searchResult)
-        ? searchResult.map((value) => Number(value) || 0).filter(Boolean)
-        : [];
-      logChannelTest('poll.search.result', {
-        mailbox,
-        range: `${rangeStart}:*`,
-        count: uids.length,
-        uids,
-      });
-    } catch (error) {
-      logChannelTest('poll.search_failed', {
-        message: formatNestedError(error),
-        mailbox,
-        rangeStart,
-      });
-      throw error;
-    }
-
-    uids.sort((left, right) => left - right);
-
-    for (let i = 0; i < uids.length; i += 1) {
-      const uid = uids[i];
-      const message = await client.fetchOne(
-        String(uid),
-        {
-          uid: true,
-          envelope: true,
-          internalDate: true,
-          bodyStructure: true,
-          source: { start: 0, maxLength: 128000 },
-        },
-        { uid: true },
-      );
-      if (!message) continue;
-
-      const attachments = await fetchMessageAttachments(
-        client,
-        uid,
-        message.bodyStructure,
-      );
-
-      const payload = {
-        channelId: String((channel && channel.id) || ''),
-        label: String((channel && channel.label) || ''),
-        connectorId: String((channel && channel.connectorId) || 'imap-email'),
-        event: 'message.new',
-        mailbox,
-        uid: Number(message.uid || uid) || uid,
-        subject: String(
-          (message.envelope && message.envelope.subject) || '',
-        ).trim(),
-        from: normalizeAddressList(message.envelope && message.envelope.from),
-        to: normalizeAddressList(message.envelope && message.envelope.to),
-        date:
-          message.internalDate instanceof Date
-            ? message.internalDate.toISOString()
-            : '',
-        text: decodeMessageSource(message.source),
-        attachments,
-      };
-      events.push(payload);
-      logChannelTest('poll.event', {
-        mailbox,
-        uid: payload.uid,
-        subject: payload.subject,
-        from: payload.from,
-        date: payload.date,
-        textPreview: String(payload.text || '').slice(0, 240),
-        attachments: attachments.map((item) => ({
-          name: item.name,
-          type: item.type,
-          size: item.size,
-          hasDownloadUrl: !!item.downloadUrl,
-          hasContent: !!item.content,
-          error: item.error || '',
-        })),
-      });
-    }
 
     logChannelTest('poll.success', {
       mailbox,
-      count: events.length,
-      lastSeenUid: uids.length ? uids[uids.length - 1] : lastSeenUid,
-      subjects: events.map((event) => String(event.subject || '')).slice(0, 10),
+      count: result.events.length,
+      lastSeenUid: result.lastSeenUid,
+      subjects: result.events
+        .map((event) => String(event.subject || ''))
+        .slice(0, 10),
     });
 
     return {
       ok: true,
-      lastSeenUid: uids.length ? uids[uids.length - 1] : lastSeenUid,
-      events,
+      lastSeenUid: Number(result.lastSeenUid) || lastSeenUid,
+      events: Array.isArray(result.events) ? result.events : [],
     };
   } finally {
     try {
@@ -560,3 +690,140 @@ export async function pollImapMessages(settings, channel) {
     } catch (error) {}
   }
 }
+
+export async function subscribeImapMessages({
+  settings,
+  channel,
+  onEvent,
+  onError,
+  onState,
+}) {
+  const { host, username, mailbox } = validateImapSettings(settings);
+  const authBundle = await buildEmailAuth(settings, username);
+  const { ImapFlow } = await import('imapflow');
+  const client = new ImapFlow({
+    host,
+    port: Number(settings.port || 993) || 993,
+    secure: settings.secure !== false,
+    auth: authBundle.auth,
+    logger: false,
+  });
+
+  let stopped = false;
+  let currentLastSeenUid = Number(channel && channel.lastSeenUid) || 0;
+  let queue = Promise.resolve();
+
+  const reportError = (error) => {
+    if (stopped || typeof onError !== 'function') return;
+    onError(error);
+  };
+
+  const processNewMail = () => {
+    queue = queue
+      .catch(() => {})
+      .then(async () => {
+        if (stopped) return;
+        const result = await fetchImapEventsSince({
+          client,
+          channel,
+          mailbox,
+          lastSeenUid: currentLastSeenUid,
+        });
+        currentLastSeenUid =
+          Number(result && result.lastSeenUid) || currentLastSeenUid;
+        if (typeof onState === 'function') {
+          await onState({ lastSeenUid: currentLastSeenUid });
+        }
+        const events = Array.isArray(result && result.events) ? result.events : [];
+        for (let i = 0; i < events.length; i += 1) {
+          const payload = events[i];
+          if (typeof onEvent === 'function') {
+            await onEvent({
+              payload,
+              nextUid: Number(payload && payload.uid) || currentLastSeenUid,
+            });
+          }
+        }
+      })
+      .catch(reportError);
+    return queue;
+  };
+
+  await client.connect();
+  await client.mailboxOpen(mailbox);
+
+  logChannelTest('subscribe.start', {
+    channelId: String((channel && channel.id) || ''),
+    label: String((channel && channel.label) || ''),
+    host,
+    mailbox,
+    lastSeenUid: currentLastSeenUid,
+    authMode: authBundle.mode,
+  });
+
+  await processNewMail();
+
+  const handleExists = () => {
+    processNewMail().catch(reportError);
+  };
+  const handleError = (error) => {
+    reportError(error);
+  };
+  const handleClose = () => {
+    reportError(new Error('IMAP channel connection closed'));
+  };
+
+  client.on('exists', handleExists);
+  client.on('error', handleError);
+  client.on('close', handleClose);
+
+  return async () => {
+    stopped = true;
+    client.off('exists', handleExists);
+    client.off('error', handleError);
+    client.off('close', handleClose);
+    try {
+      await client.logout();
+    } catch (error) {}
+  };
+}
+
+const IMAP_HANDLER = defineChannelHandler({
+  id: 'imap-email',
+  name: 'IMAP Email',
+  summary: 'Email channel over IMAP/SMTP with polling, send, attachments, and OAuth support.',
+  docs: [
+    'https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list',
+    'https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get',
+    'https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send',
+  ],
+  popularMethods: [
+    'messages.list',
+    'messages.get',
+    'messages.send',
+    'threads.list',
+  ],
+  capabilities: {
+    test: true,
+    send: true,
+    receive: true,
+    poll: true,
+    subscribe: true,
+    normalizeEvent: true,
+    search: true,
+    attachments: true,
+    oauth: true,
+    actions: ['test', 'send', 'poll', 'search'],
+    entities: ['message', 'thread', 'attachment'],
+  },
+  testConnection: async ({ settings }) => testImapConnection(settings),
+  send: async ({ settings, payload }) =>
+    sendImapMessage({ ...(payload || {}), settings }),
+  poll: async ({ settings, channel }) => pollImapMessages(settings, channel),
+  subscribe: async ({ settings, channel, onEvent, onError, onState }) =>
+    subscribeImapMessages({ settings, channel, onEvent, onError, onState }),
+  normalizeEvent: async ({ eventType, payload }) =>
+    handleImapEvent(eventType, payload),
+});
+
+export default IMAP_HANDLER;

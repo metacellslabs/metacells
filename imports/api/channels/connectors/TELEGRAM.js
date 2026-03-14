@@ -9,6 +9,18 @@ export default defineChannelConnector({
   packageName: 'Telegram Bot API',
   supportsReceive: false,
   supportsSend: true,
+  capabilities: {
+    test: true,
+    send: true,
+    receive: false,
+    poll: false,
+    normalizeEvent: false,
+    search: false,
+    attachments: true,
+    oauth: false,
+    actions: ['test', 'send'],
+    entities: ['chat', 'message', 'photo', 'document'],
+  },
   settingsFields: [
     {
       key: 'label',

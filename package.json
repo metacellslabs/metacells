@@ -28,9 +28,13 @@
   "dependencies": {
     "@babel/runtime": "^7.23.5",
     "@swc/helpers": "^0.5.17",
+    "@whiskeysockets/baileys": "^6.7.21",
+    "audio-decode": "^2.2.3",
     "gif.js": "^0.2.0",
     "html2canvas": "^1.4.1",
     "imapflow": "^1.2.13",
+    "jimp": "^1.6.0",
+    "link-preview-js": "^3.2.0",
     "meteor-node-stubs": "^1.2.12",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

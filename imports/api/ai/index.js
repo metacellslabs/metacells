@@ -411,6 +411,22 @@ async function buildQueuedPayload(queueMeta) {
 
   return aiService.withRequestsSuppressed(() => {
     const runtimeOptions = { channelPayloads };
+    if (queueMeta.formulaKind === 'formula-fallback') {
+      const prepared = formulaEngine.buildUnknownFormulaFallbackRequest(
+        sourceSheetId,
+        String(queueMeta.sourceCellId || '').toUpperCase(),
+        promptTemplate,
+        runtimeOptions,
+      );
+      return {
+        messages: [
+          { role: 'system', content: prepared.systemPrompt },
+          { role: 'user', content: prepared.userContent || prepared.userPrompt },
+        ],
+        dependencies: prepared.dependencies,
+      };
+    }
+
     const prepared = formulaEngine.prepareAIPrompt(
       sourceSheetId,
       promptTemplate,
@@ -478,6 +494,39 @@ async function buildQueuedPayload(queueMeta) {
     });
     return enrich(messages);
   });
+}
+
+async function getResolvedSourceCellValue(queueMeta) {
+  if (
+    !queueMeta ||
+    !queueMeta.sheetDocumentId ||
+    !queueMeta.activeSheetId ||
+    !queueMeta.sourceCellId ||
+    typeof loadSheetDocumentStorageHook !== 'function'
+  ) {
+    return '';
+  }
+
+  const workbookData = await loadSheetDocumentStorageHook(
+    queueMeta.sheetDocumentId,
+  );
+  if (!workbookData) return '';
+
+  const rawStorage = new WorkbookStorageAdapter(workbookData);
+  const storageService = new StorageService(rawStorage);
+  const state = String(
+    storageService.getCellState(
+      queueMeta.activeSheetId,
+      queueMeta.sourceCellId,
+    ) || '',
+  );
+  if (state !== 'resolved') return '';
+  return String(
+    storageService.getCellDisplayValue(
+      queueMeta.activeSheetId,
+      queueMeta.sourceCellId,
+    ) || '',
+  );
 }
 
 async function refreshTaskFromSheetState(task, reason) {
@@ -706,6 +755,16 @@ async function runAIChatJob(job) {
     task.queueMeta &&
     String(task.queueMeta.formulaKind || '') !== 'channel-feed'
   ) {
+    if (task.queueMeta.forceRefresh !== true) {
+      const currentValue = await getResolvedSourceCellValue(task.queueMeta);
+      if (currentValue) {
+        log('method.ai.requestChat.skip_resolved', {
+          taskKey: task.key,
+          sourceCellId: String(task.queueMeta.sourceCellId || '').toUpperCase(),
+        });
+        return currentValue;
+      }
+    }
     const rebuilt = await buildQueuedPayload(task.queueMeta);
     if (rebuilt && Array.isArray(rebuilt.messages) && rebuilt.messages.length) {
       task.payload = {

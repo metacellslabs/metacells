@@ -9,6 +9,19 @@ export default defineChannelConnector({
   packageName: 'imapflow + nodemailer',
   supportsReceive: true,
   supportsSend: true,
+  capabilities: {
+    test: true,
+    send: true,
+    receive: true,
+    subscribe: true,
+    poll: true,
+    normalizeEvent: true,
+    search: true,
+    attachments: true,
+    oauth: true,
+    actions: ['test', 'send', 'poll', 'search'],
+    entities: ['message', 'thread', 'attachment'],
+  },
   settingsFields: [
     {
       key: 'label',

@@ -3,7 +3,11 @@ import {
   DEFAULT_SETTINGS_ID,
   ensureDefaultSettings,
 } from '../settings/index.js';
-import { buildChannelAttachmentPath, ChannelEvents } from './events.js';
+import {
+  buildChannelAttachmentPath,
+  buildUnifiedChannelEvent,
+  ChannelEvents,
+} from './events.js';
 import { normalizeChannelLabel } from './mentioning.js';
 import { getArtifactText } from '../artifacts/index.js';
 
@@ -44,13 +48,36 @@ async function buildChannelPayloadMapFromChannelsAndEvents(
           }),
         )
       : [];
+    const unified = buildUnifiedChannelEvent(
+      {
+        ...eventDoc,
+        attachments,
+      },
+      { eventId: String(eventDoc._id || eventId) },
+    );
     map[label] = {
       ...eventDoc,
+      ...unified,
       attachments,
       eventId: String(eventDoc._id || eventId),
       label: String(channel.label || ''),
       channelId: String(channel.id || ''),
       connectorId: String(channel.connectorId || channel.type || ''),
+      nativeUrl: String(
+        (unified.message && unified.message.nativeUrl) || eventDoc.nativeUrl || '',
+      ),
+      viewUrl: String(
+        (unified.message && unified.message.viewUrl) || '',
+      ),
+      messageId: String(
+        (unified.message && unified.message.messageId) || eventDoc.messageId || '',
+      ),
+      threadId: String(
+        (unified.message && unified.message.threadId) || eventDoc.threadId || '',
+      ),
+      subchannel: String(
+        (unified.channel && unified.channel.subchannel) || eventDoc.subchannel || '',
+      ),
     };
   }
   return map;

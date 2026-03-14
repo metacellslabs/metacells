@@ -1,3 +1,5 @@
+import { defineChannelHandler } from '../handler-definition.js';
+
 function formatNestedError(error) {
   if (!error) return '';
   if (Array.isArray(error.errors) && error.errors.length) {
@@ -144,3 +146,31 @@ export async function sendTwitterMessage(payload) {
     text: String(data.text || ''),
   };
 }
+
+const TWITTER_HANDLER = defineChannelHandler({
+  id: 'twitter',
+  name: 'X',
+  summary: 'X/Twitter outbound posting channel.',
+  docs: [
+    'https://developer.x.com/en/docs/x-api/tweets/manage-tweets/introduction',
+    'https://developer.x.com/en/docs/x-api/tweets/search/introduction',
+  ],
+  popularMethods: ['POST /2/tweets', 'GET /2/tweets/search/recent', 'GET /2/users/me'],
+  capabilities: {
+    test: true,
+    send: true,
+    receive: false,
+    poll: false,
+    normalizeEvent: false,
+    search: false,
+    attachments: false,
+    oauth: true,
+    actions: ['test', 'post'],
+    entities: ['tweet', 'user'],
+  },
+  testConnection: async ({ settings }) => testTwitterConnection(settings),
+  send: async ({ settings, payload }) =>
+    sendTwitterMessage({ ...(payload || {}), settings }),
+});
+
+export default TWITTER_HANDLER;

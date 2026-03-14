@@ -11,6 +11,14 @@ export function setupButtons(app) {
     app.undoButton.addEventListener('click', () => app.undo());
   if (app.redoButton)
     app.redoButton.addEventListener('click', () => app.redo());
+  if (app.assistantChatButton)
+    app.assistantChatButton.addEventListener('click', () =>
+      app.toggleAssistantPanel(),
+    );
+  if (app.formulaTrackerButton)
+    app.formulaTrackerButton.addEventListener('click', () =>
+      app.toggleFormulaTrackerPanel(),
+    );
 
   document.addEventListener('click', (e) => {
     if (!app.addTabMenu || app.addTabMenu.style.display === 'none') return;
@@ -25,9 +33,36 @@ export function setupButtons(app) {
     app.hideAddTabMenu();
   });
   document.addEventListener('keydown', (e) => {
+    var activeEl = document.activeElement;
+    var isEditableTarget = !!(
+      activeEl &&
+      (activeEl === app.formulaInput ||
+        activeEl === app.cellNameInput ||
+        activeEl === app.reportEditor ||
+        (activeEl.tagName === 'TEXTAREA' &&
+          activeEl !== app.activeInput &&
+          activeEl !== app.formulaInput) ||
+        (activeEl.tagName === 'INPUT' &&
+          activeEl !== app.activeInput &&
+          activeEl !== app.formulaInput &&
+          activeEl !== app.cellNameInput) ||
+        activeEl.isContentEditable)
+    );
+    if (
+      !e.metaKey &&
+      !e.ctrlKey &&
+      (e.key === 'Delete' || e.key === 'Backspace') &&
+      !isEditableTarget &&
+      !app.isReportActive() &&
+      app.activeInput
+    ) {
+      e.preventDefault();
+      app.clearSelectedCells();
+      return;
+    }
+
     if ((e.metaKey || e.ctrlKey) && !e.altKey) {
       var key = String(e.key || '').toLowerCase();
-      var activeEl = document.activeElement;
       var isReportEditing = !!(
         activeEl &&
         app.reportEditor &&
@@ -107,6 +142,7 @@ export function setupButtons(app) {
     }
     if (e.key !== 'Escape') return;
     app.hideAddTabMenu();
+    app.hideFormulaTrackerPanel();
   });
   window.addEventListener('resize', () => app.hideAddTabMenu());
 }
@@ -192,6 +228,7 @@ export function ensureContextMenu(app) {
     "<button type='button' class='sheet-context-item' data-action='delete-col'>Delete column</button>" +
     "<div class='sheet-context-sep'></div>" +
     "<button type='button' class='sheet-context-item' data-action='recalc'>Re-calc</button>" +
+    "<button type='button' class='sheet-context-item' data-action='schedule'>Schedule</button>" +
     "<button type='button' class='sheet-context-item' data-action='copy'>Copy</button>" +
     "<button type='button' class='sheet-context-item' data-action='paste'>Paste</button>";
   document.body.appendChild(menu);
@@ -266,8 +303,15 @@ export function prepareContextFromCell(app, td) {
 export function openContextMenu(app, clientX, clientY) {
   var menu = ensureContextMenu(app);
   var recalcItem = menu.querySelector("[data-action='recalc']");
+  var scheduleItem = menu.querySelector("[data-action='schedule']");
   if (recalcItem) {
     recalcItem.style.display =
+      app.contextMenuState && app.contextMenuState.type === 'cell'
+        ? 'block'
+        : 'none';
+  }
+  if (scheduleItem) {
+    scheduleItem.style.display =
       app.contextMenuState && app.contextMenuState.type === 'cell'
         ? 'block'
         : 'none';
