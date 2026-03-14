@@ -1040,5 +1040,78 @@ if (Meteor.isServer) {
       });
       return finalMarkdown;
     },
+
+    async 'ai.fetchProviderModels'(baseUrl, apiKey) {
+      check(baseUrl, String);
+      check(apiKey, Match.Maybe(String));
+
+      let effectiveUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
+      if (!effectiveUrl) {
+        throw new Meteor.Error('invalid-url', 'Base URL is required');
+      }
+
+      const alias = String(
+        process.env.METACELLS_CONTAINER_HOST_ALIAS || '',
+      ).trim();
+      if (alias) {
+        try {
+          const parsed = new URL(effectiveUrl);
+          const host = String(parsed.hostname || '').trim().toLowerCase();
+          if (
+            host === 'localhost' ||
+            host === '127.0.0.1' ||
+            host === '[::1]'
+          ) {
+            parsed.hostname = alias;
+            effectiveUrl = parsed.toString().replace(/\/$/, '');
+          }
+        } catch (e) {}
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
+
+      log('method.ai.fetchProviderModels.start', {
+        url: effectiveUrl,
+      });
+
+      const response = await fetch(`${effectiveUrl}/models`, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        log('method.ai.fetchProviderModels.error', {
+          status: response.status,
+          body: body.slice(0, 500),
+        });
+        throw new Meteor.Error(
+          'fetch-models-error',
+          `HTTP ${response.status}: ${body.slice(0, 200)}`,
+        );
+      }
+
+      const data = await response.json();
+      const models = (
+        data && Array.isArray(data.data) ? data.data : []
+      )
+        .map((m) => ({
+          id: String((m && m.id) || ''),
+          name: String((m && (m.name || m.id)) || ''),
+          owned_by: String((m && m.owned_by) || ''),
+        }))
+        .filter((m) => m.id)
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+      log('method.ai.fetchProviderModels.success', {
+        count: models.length,
+        preview: models.slice(0, 5).map((m) => m.id),
+      });
+
+      return models;
+    },
   });
 }

@@ -444,12 +444,13 @@ function SettingsPage() {
     readSettingsTabFromUrl(SETTINGS_TAB_IDS),
   );
   const [activeProviderId, setActiveProviderId] = useState(defaultProviderId);
-  const [openProviderHelpId, setOpenProviderHelpId] = useState('');
+  const [selectedChipId, setSelectedChipId] = useState(() => defaultProviderId);
+  const [fetchedModels, setFetchedModels] = useState({});
+  const [fetchingModelsForId, setFetchingModelsForId] = useState('');
   const [providerDrafts, setProviderDrafts] = useState(() =>
     buildProviderDrafts(registeredProviders),
   );
   const [savingProviderId, setSavingProviderId] = useState('');
-  const [isSavingActiveProvider, setIsSavingActiveProvider] = useState(false);
   const [addingChannel, setAddingChannel] = useState('');
   const [channelDrafts, setChannelDrafts] = useState({});
   const [savingChannelId, setSavingChannelId] = useState('');
@@ -507,16 +508,19 @@ function SettingsPage() {
     const channels = Array.isArray(settings && settings.communicationChannels)
       ? settings.communicationChannels
       : [];
-    setActiveProviderId(
-      (settings && settings.activeAIProviderId) || defaultProviderId,
-    );
+    const nextActiveId =
+      (settings && settings.activeAIProviderId) || defaultProviderId;
+    setActiveProviderId(nextActiveId);
+    setSelectedChipId((current) => current || nextActiveId);
     setProviderDrafts(buildProviderDrafts(registeredProviders, providers));
     setChannelDrafts(buildChannelDrafts(registeredChannelConnectors, channels));
     setJobSettingsDraft(
       buildJobSettingsDraft(settings && settings.jobSettings),
     );
   }, [
-    settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() : 0,
+    settings && settings.updatedAt
+      ? new Date(settings.updatedAt).getTime()
+      : 0,
   ]);
 
   const handleProviderDraftChange = (providerId, fieldKey, value) => {
@@ -527,6 +531,64 @@ function SettingsPage() {
         [fieldKey]: value,
       },
     }));
+  };
+
+  const handleFetchModels = (providerId) => {
+    if (fetchingModelsForId) return;
+    const draft = providerDrafts[providerId];
+    if (!draft || !String(draft.baseUrl || '').trim()) {
+      window.alert('Please enter a Base URL first.');
+      return;
+    }
+    setFetchingModelsForId(providerId);
+    Meteor.callAsync(
+      'ai.fetchProviderModels',
+      String(draft.baseUrl || '').trim(),
+      String(draft.apiKey || '').trim() || null,
+    )
+      .then((models) => {
+        setFetchingModelsForId('');
+        setFetchedModels((current) => ({
+          ...current,
+          [providerId]: Array.isArray(models) ? models : [],
+        }));
+      })
+      .catch((error) => {
+        setFetchingModelsForId('');
+        window.alert(
+          error.reason || error.message || 'Failed to fetch models',
+        );
+      });
+  };
+
+  const handleSaveAndActivate = (providerId) => {
+    if (savingProviderId) return;
+    const draft = providerDrafts[providerId];
+    if (!draft) return;
+
+    setSavingProviderId(providerId);
+    Meteor.callAsync('settings.upsertAIProvider', {
+      id: String(draft.id || '').trim(),
+      name: String(draft.name || '').trim(),
+      type: String(draft.type || '').trim(),
+      baseUrl: String(draft.baseUrl || '').trim(),
+      model: String(draft.model || '').trim(),
+      apiKey: String(draft.apiKey || '').trim(),
+      enabled: draft.enabled !== false,
+    })
+      .then(() =>
+        Meteor.callAsync('settings.setActiveAIProvider', providerId),
+      )
+      .then(() => {
+        setSavingProviderId('');
+        setActiveProviderId(providerId);
+      })
+      .catch((error) => {
+        setSavingProviderId('');
+        window.alert(
+          error.reason || error.message || 'Failed to save AI provider',
+        );
+      });
   };
 
   const handleSaveProvider = (providerId) => {
@@ -553,19 +615,6 @@ function SettingsPage() {
       });
   };
 
-  const handleSaveActiveProvider = () => {
-    if (isSavingActiveProvider || !activeProviderId) return;
-    setIsSavingActiveProvider(true);
-    Meteor.callAsync('settings.setActiveAIProvider', activeProviderId)
-      .then(() => setIsSavingActiveProvider(false))
-      .catch((error) => {
-        setIsSavingActiveProvider(false);
-        window.alert(
-          error.reason || error.message || 'Failed to set active AI provider',
-        );
-      });
-  };
-
   const handleAddChannel = (connectorId) => {
     if (addingChannel) return;
     setAddingChannel(connectorId);
@@ -575,8 +624,8 @@ function SettingsPage() {
         setAddingChannel('');
         window.alert(
           error.reason ||
-            error.message ||
-            'Failed to add communication channel',
+          error.message ||
+          'Failed to add communication channel',
         );
       });
   };
@@ -588,11 +637,11 @@ function SettingsPage() {
         ...(current[channelId] || {}),
         ...(nestedKey
           ? {
-              [fieldKey]: {
-                ...((current[channelId] && current[channelId][fieldKey]) || {}),
-                [nestedKey]: value,
-              },
-            }
+            [fieldKey]: {
+              ...((current[channelId] && current[channelId][fieldKey]) || {}),
+              [nestedKey]: value,
+            },
+          }
           : { [fieldKey]: value }),
       },
     }));
@@ -615,8 +664,8 @@ function SettingsPage() {
         setSavingChannelId('');
         window.alert(
           error.reason ||
-            error.message ||
-            'Failed to save communication channel',
+          error.message ||
+          'Failed to save communication channel',
         );
       });
   };
@@ -633,8 +682,8 @@ function SettingsPage() {
         setTestingChannelId('');
         window.alert(
           error.reason ||
-            error.message ||
-            'Failed to test communication channel',
+          error.message ||
+          'Failed to test communication channel',
         );
       });
   };
@@ -652,20 +701,20 @@ function SettingsPage() {
         const polled = Number(summary.polled) || 0;
         const details = Array.isArray(summary.results)
           ? summary.results
-              .map((item) => {
-                if (!item) return '';
-                const label = String(item.label || item.channelId || 'channel');
-                if (item.error) return `${label}: ${item.error}`;
-                if (item.skipped)
-                  return `${label}: ${String(item.reason || 'skipped')}`;
-                return `${label}: ${Number(item.events) || 0} event(s)`;
-              })
-              .filter(Boolean)
-              .join('\n')
+            .map((item) => {
+              if (!item) return '';
+              const label = String(item.label || item.channelId || 'channel');
+              if (item.error) return `${label}: ${item.error}`;
+              if (item.skipped)
+                return `${label}: ${String(item.reason || 'skipped')}`;
+              return `${label}: ${Number(item.events) || 0} event(s)`;
+            })
+            .filter(Boolean)
+            .join('\n')
           : '';
         window.alert(
           `Poll complete.\nChannels: ${total}\nPolled: ${polled}\nNew events: ${events}\nFailed: ${failed}` +
-            (details ? `\n\n${details}` : ''),
+          (details ? `\n\n${details}` : ''),
         );
       })
       .catch((error) => {
@@ -755,6 +804,273 @@ function SettingsPage() {
   const configuredSecretsCount = Object.values(providerDrafts).filter(
     (provider) => String((provider && provider.apiKey) || '').trim(),
   ).length;
+
+  const renderAIProvidersPanel = () => {
+    const selectedProvider = registeredProviders.find(
+      (p) => p.id === selectedChipId,
+    );
+    const draft = selectedProvider
+      ? providerDrafts[selectedProvider.id] || selectedProvider
+      : null;
+    const models = selectedProvider
+      ? fetchedModels[selectedProvider.id] || []
+      : [];
+    const isFetching =
+      selectedProvider && fetchingModelsForId === selectedProvider.id;
+    const isActive =
+      selectedProvider && activeProviderId === selectedProvider.id;
+    const suggestedModels =
+      selectedProvider && Array.isArray(selectedProvider.availableModels)
+        ? selectedProvider.availableModels
+        : [];
+    const hasCredentialHelp =
+      selectedProvider &&
+      ((Array.isArray(selectedProvider.credentialSteps) &&
+          selectedProvider.credentialSteps.length > 0) ||
+        (Array.isArray(selectedProvider.credentialLinks) &&
+          selectedProvider.credentialLinks.length > 0));
+
+    return (
+      <>
+        <div className="home-section-head">
+          <h2>AI Provider</h2>
+        </div>
+        <div className="settings-section-copy">
+          <p>
+            Select your AI provider, enter credentials, load available models,
+            and activate.
+          </p>
+        </div>
+
+        <div className="settings-provider-chips">
+          {registeredProviders.map((provider) => (
+            <button
+              key={provider.id}
+              type="button"
+              className={`settings-provider-chip${selectedChipId === provider.id ? ' active' : ''}`}
+              onClick={() => setSelectedChipId(provider.id)}
+            >
+              <span className="settings-chip-name">{provider.name}</span>
+              {activeProviderId === provider.id ? (
+                <span className="settings-chip-check" aria-label="Active">
+                  ✓
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        {selectedProvider && draft ? (
+          <div className="settings-provider-config">
+            <div className="settings-provider-config-head">
+              <strong>{selectedProvider.name}</strong>
+              {isActive ? (
+                <span className="settings-chip-active-badge">
+                  Active provider
+                </span>
+              ) : null}
+            </div>
+
+            {hasCredentialHelp ? (
+              <div className="settings-help-panel">
+                {selectedProvider.credentialSteps &&
+                selectedProvider.credentialSteps.length ? (
+                  <ol className="settings-help-steps">
+                    {selectedProvider.credentialSteps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                ) : null}
+                {selectedProvider.credentialLinks &&
+                selectedProvider.credentialLinks.length ? (
+                  <div className="settings-help-links">
+                    {selectedProvider.credentialLinks.map((link) => (
+                      <a
+                        key={`${selectedProvider.id}-${link.url}`}
+                        className="settings-help-link"
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="settings-field">
+              <label
+                className="settings-label"
+                htmlFor={`provider-${selectedProvider.id}-baseUrl`}
+              >
+                Base URL
+              </label>
+              <input
+                id={`provider-${selectedProvider.id}-baseUrl`}
+                className="settings-input"
+                type="text"
+                value={String(draft.baseUrl || '')}
+                onChange={(e) =>
+                  handleProviderDraftChange(
+                    selectedProvider.id,
+                    'baseUrl',
+                    e.target.value,
+                  )
+                }
+                placeholder={
+                  selectedProvider.fields?.find((f) => f.key === 'baseUrl')
+                    ?.placeholder || 'https://...'
+                }
+              />
+            </div>
+
+            {selectedProvider.fields?.some((f) => f.key === 'apiKey') ? (
+              <div className="settings-field">
+                <label
+                  className="settings-label"
+                  htmlFor={`provider-${selectedProvider.id}-apiKey`}
+                >
+                  API Key
+                </label>
+                <input
+                  id={`provider-${selectedProvider.id}-apiKey`}
+                  className="settings-input"
+                  type="password"
+                  value={String(draft.apiKey || '')}
+                  onChange={(e) =>
+                    handleProviderDraftChange(
+                      selectedProvider.id,
+                      'apiKey',
+                      e.target.value,
+                    )
+                  }
+                  placeholder={
+                    selectedProvider.fields?.find((f) => f.key === 'apiKey')
+                      ?.placeholder || 'sk-...'
+                  }
+                />
+              </div>
+            ) : null}
+
+            <div className="settings-field">
+              <label
+                className="settings-label"
+                htmlFor={`provider-${selectedProvider.id}-model`}
+              >
+                Model
+                {models.length ? (
+                  <>
+                    {' '}
+                    <span className="settings-models-count">
+                      {models.length} available
+                    </span>
+                  </>
+                ) : null}
+              </label>
+              <div className="settings-model-row">
+                {models.length ? (
+                  <select
+                    id={`provider-${selectedProvider.id}-model`}
+                    className="settings-input settings-model-select"
+                    value={String(draft.model || '')}
+                    onChange={(e) =>
+                      handleProviderDraftChange(
+                        selectedProvider.id,
+                        'model',
+                        e.target.value,
+                      )
+                    }
+                  >
+                    <option value="">Select a model…</option>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.id}
+                        {m.owned_by ? ` (${m.owned_by})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={`provider-${selectedProvider.id}-model`}
+                    className="settings-input"
+                    type="text"
+                    value={String(draft.model || '')}
+                    onChange={(e) =>
+                      handleProviderDraftChange(
+                        selectedProvider.id,
+                        'model',
+                        e.target.value,
+                      )
+                    }
+                    placeholder="Click 'Load models' or type a model ID"
+                  />
+                )}
+                <button
+                  type="button"
+                  className="settings-fetch-models-button"
+                  onClick={() => handleFetchModels(selectedProvider.id)}
+                  disabled={
+                    !!isFetching || !String(draft.baseUrl || '').trim()
+                  }
+                >
+                  {isFetching ? 'Loading…' : 'Load models'}
+                </button>
+              </div>
+              {suggestedModels.length > 0 && !models.length ? (
+                <p className="settings-provider-note">
+                  Suggested: {suggestedModels.join(', ')}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="settings-actions">
+              {isActive ? (
+                <button
+                  type="button"
+                  className="settings-save-activate-button"
+                  onClick={() => handleSaveProvider(selectedProvider.id)}
+                  disabled={!!savingProviderId}
+                >
+                  {savingProviderId === selectedProvider.id
+                    ? 'Saving…'
+                    : 'Save'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="settings-save-activate-button"
+                  onClick={() => handleSaveAndActivate(selectedProvider.id)}
+                  disabled={!!savingProviderId}
+                >
+                  {savingProviderId === selectedProvider.id
+                    ? 'Saving…'
+                    : 'Save & activate'}
+                </button>
+              )}
+              {!isActive ? (
+                <button
+                  type="button"
+                  onClick={() => handleSaveProvider(selectedProvider.id)}
+                  disabled={!!savingProviderId}
+                >
+                  {savingProviderId === selectedProvider.id
+                    ? 'Saving…'
+                    : 'Save only'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="settings-provider-config settings-provider-config-empty">
+            <p>Select a provider above to configure it.</p>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const renderSettingsPanel = () => {
     if (activeSettingsTab === 'channels') {
       return (
@@ -1383,164 +1699,7 @@ function SettingsPage() {
       );
     }
 
-    return (
-      <>
-        <div className="home-section-head">
-          <h2>AI Providers</h2>
-        </div>
-        <div className="settings-section-copy">
-          <p>
-            Current provider configuration is stored in Mongo and used by
-            server-side AI requests.
-          </p>
-        </div>
-
-        <div className="settings-provider-card">
-          <div className="settings-provider-head">
-            <strong>Default provider</strong>
-            <span className="settings-status">
-              {isLoading ? 'Loading...' : 'Saved in DB'}
-            </span>
-          </div>
-          <label className="settings-label" htmlFor="active-provider-id">
-            Active AI provider
-          </label>
-          <select
-            id="active-provider-id"
-            className="settings-input"
-            value={activeProviderId}
-            onChange={(event) => setActiveProviderId(event.target.value)}
-          >
-            {registeredProviders.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-          </select>
-          <div className="settings-actions">
-            <button
-              type="button"
-              onClick={handleSaveActiveProvider}
-              disabled={isSavingActiveProvider || isLoading}
-            >
-              {isSavingActiveProvider ? 'Saving...' : 'Set default provider'}
-            </button>
-            <span className="settings-meta">
-              Current: {activeProviderLabel}
-            </span>
-          </div>
-        </div>
-
-        {registeredProviders.map((provider) => {
-          const draft = providerDrafts[provider.id] || provider;
-          const isActive = activeProviderId === provider.id;
-          const hasCredentialHelp =
-            (Array.isArray(provider.credentialSteps) &&
-              provider.credentialSteps.length > 0) ||
-            (Array.isArray(provider.credentialLinks) &&
-              provider.credentialLinks.length > 0);
-          const isHelpOpen = openProviderHelpId === provider.id;
-          return (
-            <div key={provider.id} className="settings-provider-card">
-              <div className="settings-provider-head">
-                <div className="settings-provider-title">
-                  <strong>{provider.name}</strong>
-                  {hasCredentialHelp ? (
-                    <button
-                      type="button"
-                      className="settings-help-toggle"
-                      aria-label={`Credential help for ${provider.name}`}
-                      aria-expanded={isHelpOpen}
-                      onClick={() =>
-                        setOpenProviderHelpId((current) =>
-                          current === provider.id ? '' : provider.id,
-                        )
-                      }
-                    >
-                      ?
-                    </button>
-                  ) : null}
-                </div>
-                <span className="settings-status">
-                  {isActive
-                    ? 'Default'
-                    : isLoading
-                      ? 'Loading...'
-                      : 'Available'}
-                </span>
-              </div>
-              {isHelpOpen ? (
-                <div className="settings-help-panel">
-                  {provider.credentialSteps && provider.credentialSteps.length ? (
-                    <ol className="settings-help-steps">
-                      {provider.credentialSteps.map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                    </ol>
-                  ) : null}
-                  {provider.credentialLinks && provider.credentialLinks.length ? (
-                    <div className="settings-help-links">
-                      {provider.credentialLinks.map((link) => (
-                        <a
-                          key={`${provider.id}-${link.url}`}
-                          className="settings-help-link"
-                          href={link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {link.label}
-                        </a>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {Array.isArray(provider.fields) &&
-                provider.fields.map((field) => (
-                  <div key={field.key} className="settings-field">
-                    <label
-                      className="settings-label"
-                      htmlFor={`${provider.id}-${field.key}`}
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      id={`${provider.id}-${field.key}`}
-                      className="settings-input"
-                      type={field.type || 'text'}
-                      value={String(draft[field.key] || '')}
-                      onChange={(event) =>
-                        handleProviderDraftChange(
-                          provider.id,
-                          field.key,
-                          event.target.value,
-                        )
-                      }
-                      placeholder={field.placeholder || ''}
-                    />
-                  </div>
-                ))}
-              {provider.availableModels && provider.availableModels.length ? (
-                <p className="settings-provider-note">
-                  Models: {provider.availableModels.join(', ')}
-                </p>
-              ) : null}
-              <div className="settings-actions">
-                <button
-                  type="button"
-                  onClick={() => handleSaveProvider(provider.id)}
-                  disabled={Boolean(savingProviderId) || isLoading}
-                >
-                  {savingProviderId === provider.id
-                    ? 'Saving...'
-                    : 'Save provider'}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </>
-    );
+    return renderAIProvidersPanel();
   };
 
   return (
