@@ -79,6 +79,13 @@ export class StorageService {
     return '';
   }
 
+  getCellComputedValue(sheetId, cellId) {
+    if (typeof this.storage.getCellComputedValue === 'function') {
+      return this.storage.getCellComputedValue(sheetId, cellId) || '';
+    }
+    return this.getCellDisplayValue(sheetId, cellId);
+  }
+
   getCellState(sheetId, cellId) {
     if (typeof this.storage.getCellState === 'function') {
       return this.storage.getCellState(sheetId, cellId) || '';

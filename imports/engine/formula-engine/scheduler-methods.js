@@ -127,7 +127,7 @@ export const schedulerMethods = {
     if (raw.charAt(0) === "'") {
       return this.collectFormulaReferenceDependencies(
         sheetId,
-        raw.substring(1),
+        this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
       );
     }
 
@@ -155,14 +155,16 @@ export const schedulerMethods = {
           : null;
       return this.collectFormulaReferenceDependencies(
         sheetId,
-        spec && spec.prompt ? spec.prompt : raw.substring(1),
+        spec && spec.prompt
+          ? spec.prompt
+          : this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
       );
     }
 
     if (raw.charAt(0) === '=') {
       return this.collectFormulaReferenceDependencies(
         sheetId,
-        raw.substring(1),
+        this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
       );
     }
 

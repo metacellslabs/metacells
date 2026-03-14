@@ -36,12 +36,29 @@ export class FormulaEngine {
         );
       }
       if (raw.charAt(0) === "'") {
-        var promptRaw = raw.substring(1);
+        var askFormulaSpec = this.parseFormulaDisplayPlaceholder(
+          this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
+        );
+        var promptRaw = askFormulaSpec.content;
         if (!promptRaw.trim()) return '';
+        var askEmptyMessage = this.getEmptyMentionDependencyMessage(
+          sheetId,
+          promptRaw,
+          stack,
+          options,
+        );
         var promptDependencies = this.collectAIPromptDependencies(
           sheetId,
           promptRaw,
         );
+        if (askEmptyMessage) {
+          this.recordAIPromptDependencies(options, promptDependencies);
+          this.setDisplayPlaceholder(
+            options,
+            askFormulaSpec.placeholder || askEmptyMessage,
+          );
+          return '';
+        }
         this.recordAIPromptDependencies(options, promptDependencies);
         if (!this.arePromptDependenciesResolved(sheetId, promptRaw, options))
           return '...';
@@ -55,11 +72,16 @@ export class FormulaEngine {
         var queueMeta = {
           formulaKind: 'ask',
           sourceCellId: cellId,
-          promptTemplate: promptRaw,
+          promptTemplate: this.normalizeQueuedPromptTemplate(promptRaw),
           dependencies: promptDependencies,
           attachmentLinks: preparedPrompt.attachmentLinks,
         };
-        if (!preparedPrompt.userPrompt) return '';
+        if (!preparedPrompt.userPrompt) {
+          if (askFormulaSpec.placeholder) {
+            this.setDisplayPlaceholder(options, askFormulaSpec.placeholder);
+          }
+          return '';
+        }
         return this.aiService.ask(preparedPrompt.userPrompt, {
           forceRefresh: !!opts.forceRefreshAI,
           systemPrompt: preparedPrompt.systemPrompt,
@@ -71,6 +93,23 @@ export class FormulaEngine {
         var listSpec = this.parseListShortcutSpec(raw);
         var listPrompt = listSpec && listSpec.prompt ? listSpec.prompt : '';
         if (!listPrompt) return raw;
+        var listEmptyMessage = this.getEmptyMentionDependencyMessage(
+          sheetId,
+          listPrompt,
+          stack,
+          options,
+        );
+        if (listEmptyMessage) {
+          this.recordAIPromptDependencies(
+            options,
+            this.collectAIPromptDependencies(sheetId, listPrompt),
+          );
+          this.setDisplayPlaceholder(
+            options,
+            (listSpec && listSpec.placeholder) || listEmptyMessage,
+          );
+          return '';
+        }
         var listOpts = options || {};
         var listResult = this.listAI(
           sheetId,
@@ -93,11 +132,45 @@ export class FormulaEngine {
       if (raw.charAt(0) === '#') {
         var channelFeedSpec = this.parseChannelFeedPromptSpec(raw);
         if (channelFeedSpec) {
+          var channelFeedEmptyMessage = this.getEmptyMentionDependencyMessage(
+            sheetId,
+            channelFeedSpec.prompt,
+            stack,
+            options,
+          );
+          if (channelFeedEmptyMessage) {
+            this.recordAIPromptDependencies(
+              options,
+              this.collectAIPromptDependencies(sheetId, channelFeedSpec.prompt),
+            );
+            this.setDisplayPlaceholder(
+              options,
+              channelFeedSpec.placeholder || channelFeedEmptyMessage,
+            );
+            return '';
+          }
           return raw;
         }
         var tableSpec = this.parseTablePromptSpec(raw);
         if (!tableSpec) return raw;
         if (!tableSpec.prompt) return '';
+        var tableEmptyMessage = this.getEmptyMentionDependencyMessage(
+          sheetId,
+          tableSpec.prompt,
+          stack,
+          options,
+        );
+        if (tableEmptyMessage) {
+          this.recordAIPromptDependencies(
+            options,
+            this.collectAIPromptDependencies(sheetId, tableSpec.prompt),
+          );
+          this.setDisplayPlaceholder(
+            options,
+            tableSpec.placeholder || tableEmptyMessage,
+          );
+          return '';
+        }
         var tableOpts = options || {};
         var tableResult = this.tableAI(
           sheetId,
@@ -117,6 +190,28 @@ export class FormulaEngine {
         return raw;
       }
       if (raw.charAt(0) !== '=') return this.coerce(raw);
+      var equalFormulaSpec = this.parseFormulaDisplayPlaceholder(
+        this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
+      );
+      var formulaSource = equalFormulaSpec.content;
+      var formulaEmptyMessage = this.getEmptyMentionDependencyMessage(
+        sheetId,
+        formulaSource,
+        stack,
+        options,
+      );
+      if (formulaEmptyMessage) {
+        this.recordExplicitMentionDependenciesFromText(
+          sheetId,
+          formulaSource,
+          options,
+        );
+        this.setDisplayPlaceholder(
+          options,
+          equalFormulaSpec.placeholder || formulaEmptyMessage,
+        );
+        return '';
+      }
       var tableSpill = this.tryDirectMentionTableSpill(
         sheetId,
         cellId,
@@ -144,13 +239,20 @@ export class FormulaEngine {
       }
 
       var context = this.createContext(sheetId, cellId, stack, options);
-      var expression = this.preprocessFormula(raw.substring(1), cellId);
+      var expression = this.preprocessFormula(formulaSource, cellId);
 
       var fn = Function(
         'context',
         'with (context) { return (' + expression + '); }',
       );
-      return fn(context);
+      var result = fn(context);
+      if (
+        equalFormulaSpec.placeholder &&
+        String(result == null ? '' : result) === ''
+      ) {
+        this.setDisplayPlaceholder(options, equalFormulaSpec.placeholder);
+      }
+      return result;
     } finally {
       delete stack[token];
     }
@@ -259,6 +361,19 @@ export class FormulaEngine {
     }
   }
 
+  getRuntimeMeta(options) {
+    var opts = options && typeof options === 'object' ? options : {};
+    return opts.runtimeMeta && typeof opts.runtimeMeta === 'object'
+      ? opts.runtimeMeta
+      : null;
+  }
+
+  setDisplayPlaceholder(options, value) {
+    var runtimeMeta = this.getRuntimeMeta(options);
+    if (!runtimeMeta) return;
+    runtimeMeta.displayValue = String(value == null ? '' : value);
+  }
+
   enumerateRegionCellIds(startCellId, endCellId) {
     var start = this.parseCellId(startCellId);
     var end = this.parseCellId(endCellId);
@@ -292,7 +407,7 @@ export class FormulaEngine {
         var queueMeta = {
           formulaKind: 'ask',
           sourceCellId: cellId,
-          promptTemplate: text,
+          promptTemplate: this.normalizeQueuedPromptTemplate(text),
           dependencies: dependencies,
           attachmentLinks: prepared.attachmentLinks,
         };

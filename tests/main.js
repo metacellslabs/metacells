@@ -230,6 +230,235 @@ describe('metacells', function () {
       );
     });
 
+    it('stores empty mention params as empty values and exposes display placeholders', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: '',
+        B1: "'summarize @A1 and @name",
+        B2: '>ideas from @A1 and @name',
+        B3: '#compare @A1 and @name;2;2',
+        B4: '=SUM(@A1, 1)',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        getCellDisplayValue() {
+          return '';
+        },
+        resolveNamedCell(name) {
+          if (name === 'name') return { sheetId: 'sheet-1', cellId: 'A1' };
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      const b1Meta = {};
+      const b2Meta = {};
+      const b3Meta = {};
+      const b4Meta = {};
+
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B1', {}, { runtimeMeta: b1Meta }),
+        '',
+      );
+      assert.strictEqual(b1Meta.displayValue, 'Params: @A1, @name are empty');
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B2', {}, { runtimeMeta: b2Meta }),
+        '',
+      );
+      assert.strictEqual(b2Meta.displayValue, 'Params: @A1, @name are empty');
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B3', {}, { runtimeMeta: b3Meta }),
+        '',
+      );
+      assert.strictEqual(b3Meta.displayValue, 'Params: @A1, @name are empty');
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B4', {}, { runtimeMeta: b4Meta }),
+        '',
+      );
+      assert.strictEqual(b4Meta.displayValue, 'Params: @A1 are empty');
+    });
+
+    it('accepts an optional question marker after formula prefixes', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: '5',
+        B1: '=? @A1 + 2',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        getCellDisplayValue() {
+          return '';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B1', {}), 7);
+      assert.deepStrictEqual(
+        formulaEngine.parseListShortcutSpec('>? brainstorm @A1'),
+        {
+          prompt: 'brainstorm @A1',
+          includeAttachments: false,
+          days: 1,
+          placeholder: '',
+        },
+      );
+      assert.deepStrictEqual(
+        formulaEngine.parseTablePromptSpec('#? compare @A1;3;3'),
+        {
+          prompt: 'compare @A1',
+          cols: 3,
+          rows: 3,
+          placeholder: '',
+        },
+      );
+    });
+
+    it('supports display placeholders for empty formula values', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: '',
+        B1: "'summarize @A1:[Waiting for input]",
+        B2: '=TRIM(A1):[Nothing yet]',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        getCellDisplayValue() {
+          return '';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      const askMeta = {};
+      const eqMeta = {};
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B1', {}, { runtimeMeta: askMeta }),
+        '',
+      );
+      assert.strictEqual(askMeta.displayValue, 'Waiting for input');
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'B2', {}, { runtimeMeta: eqMeta }),
+        '',
+      );
+      assert.strictEqual(eqMeta.displayValue, 'Nothing yet');
+    });
+
+    it('persists display placeholders separately from computed values', async function () {
+      const { WorkbookStorageAdapter } = await import(
+        '../imports/engine/workbook-storage-adapter.js'
+      );
+
+      const storage = new WorkbookStorageAdapter({
+        sheets: {
+          'sheet-1': {
+            cells: {
+              B1: {
+                source: "'summarize @A1",
+                sourceType: 'formula',
+                value: '',
+                state: 'resolved',
+              },
+            },
+          },
+        },
+      });
+
+      storage.setComputedCellValue(
+        'sheet-1',
+        'B1',
+        '',
+        'resolved',
+        '',
+        { displayValue: 'Params: @A1 are empty' },
+      );
+
+      assert.strictEqual(storage.getCellComputedValue('sheet-1', 'B1'), '');
+      assert.strictEqual(
+        storage.getCellDisplayValue('sheet-1', 'B1'),
+        'Params: @A1 are empty',
+      );
+    });
+
+    it('expands quoted mentions inside question-mark prompt formulas', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        B2: 'hello',
+        C1: '\'? "@B2" in russian',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        getCellDisplayValue() {
+          return '';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {
+          ask(userPrompt) {
+            return userPrompt;
+          },
+        },
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'C1', {}),
+        '"hello" in russian',
+      );
+    });
+
     it('records chained AI prompt dependencies even when upstream AI cells are pending', async function () {
       const { FormulaEngine } =
         await import('../imports/engine/formula-engine.js');
@@ -864,6 +1093,7 @@ describe('metacells', function () {
         days: 1,
         labels: ['sf'],
         includeAttachments: false,
+        placeholder: '',
       });
 
       const weekSpec = formulaEngine.parseChannelFeedPromptSpec(
@@ -874,6 +1104,7 @@ describe('metacells', function () {
         days: 7,
         labels: ['sf'],
         includeAttachments: false,
+        placeholder: '',
       });
 
       const attachmentOptInWeekSpec = formulaEngine.parseChannelFeedPromptSpec(
@@ -884,6 +1115,7 @@ describe('metacells', function () {
         days: 7,
         labels: ['sf'],
         includeAttachments: true,
+        placeholder: '',
       });
 
       const listSpec = formulaEngine.parseListShortcutSpec(
@@ -893,6 +1125,7 @@ describe('metacells', function () {
         prompt: '/sf any payment requests?',
         includeAttachments: false,
         days: 1,
+        placeholder: '',
       });
 
       const listAttachmentSpec = formulaEngine.parseListShortcutSpec(
@@ -902,6 +1135,7 @@ describe('metacells', function () {
         prompt: '/sf any payment requests?',
         includeAttachments: true,
         days: 7,
+        placeholder: '',
       });
 
       assert.strictEqual(
@@ -914,6 +1148,7 @@ describe('metacells', function () {
           prompt: 'compare @idea',
           cols: 4,
           rows: 6,
+          placeholder: '',
         },
       );
     });
@@ -1565,6 +1800,78 @@ describe('metacells', function () {
 
       assert.deepStrictEqual(matrix, [['Name', 'GDP'], ['Japan', '4.3']]);
       assert.deepStrictEqual(events, ['result', 'invalidate']);
+    });
+
+    it('ignores stale list spill results after the source formula changes', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+      const { WorkbookStorageAdapter } =
+        await import('../imports/engine/workbook-storage-adapter.js');
+      const { StorageService } =
+        await import('../imports/engine/storage-service.js');
+
+      const workbook = {
+        tabs: [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        activeTabId: 'sheet-1',
+        sheets: {
+          'sheet-1': {
+            cells: {
+              A1: {
+                source: '>facts about @B2',
+                sourceType: 'formula',
+                value: '...',
+                displayValue: '...',
+                state: 'pending',
+                error: '',
+                generatedBy: '',
+                version: 1,
+              },
+              B2: {
+                source: 'duda',
+                sourceType: 'raw',
+                value: 'duda',
+                displayValue: 'duda',
+                state: 'resolved',
+                error: '',
+                generatedBy: '',
+                version: 1,
+              },
+            },
+            columnWidths: {},
+            rowHeights: {},
+            reportContent: '',
+          },
+        },
+      };
+
+      const adapter = new WorkbookStorageAdapter(workbook);
+      const storageService = new StorageService(adapter);
+      let pendingOnResult = null;
+      const aiService = {
+        list(prompt, count, onResult) {
+          pendingOnResult = onResult;
+          return '...';
+        },
+        getMode() {
+          return 'auto';
+        },
+      };
+      const engine = new FormulaEngine(
+        storageService,
+        aiService,
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        ['A1', 'B2'],
+      );
+
+      const first = engine.evaluateCell('sheet-1', 'A1', {});
+      assert.strictEqual(first, '...');
+      assert.ok(typeof pendingOnResult === 'function');
+
+      storageService.setCellValue('sheet-1', 'A1', '>facts about @B2 updated');
+      pendingOnResult(['old fact 1', 'old fact 2']);
+
+      assert.strictEqual(storageService.getCellValue('sheet-1', 'A2'), '');
+      assert.strictEqual(storageService.getCellValue('sheet-1', 'A3'), '');
     });
 
     it('recomputes chained named references across sheets', async function () {

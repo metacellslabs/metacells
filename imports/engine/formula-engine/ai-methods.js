@@ -363,9 +363,40 @@ export const aiMethods = {
   isCellDependencyResolved(sheetId, cellId) {
     var raw = String(this.storageService.getCellValue(sheetId, cellId) || '');
     if (!raw) return true;
+    var isFormula = /^[='>#]/.test(raw);
     var state = String(this.storageService.getCellState(sheetId, cellId) || '');
-    if (!state) return true;
-    if (state === 'resolved' || state === 'error') return true;
+    var computedValue =
+      this.storageService &&
+      typeof this.storageService.getCellComputedValue === 'function'
+        ? String(this.storageService.getCellComputedValue(sheetId, cellId) || '')
+        : '';
+    var displayValue =
+      this.storageService &&
+      typeof this.storageService.getCellDisplayValue === 'function'
+        ? String(this.storageService.getCellDisplayValue(sheetId, cellId) || '')
+        : '';
+    if (!state) {
+      if (!isFormula) return true;
+      if (
+        computedValue === '...' ||
+        computedValue === '(manual: click Update)' ||
+        displayValue === '...' ||
+        displayValue === '(manual: click Update)'
+      ) {
+        return false;
+      }
+      return !!(computedValue || displayValue);
+    }
+    if (state === 'error') return true;
+    if (state === 'resolved') {
+      if (
+        computedValue === '...' ||
+        computedValue === '(manual: click Update)'
+      ) {
+        return false;
+      }
+      return true;
+    }
     return false;
   },
 
@@ -744,7 +775,10 @@ export const aiMethods = {
     var raw = String(rawFormula == null ? '' : rawFormula);
     if (!raw || raw.charAt(0) !== '>') return null;
 
-    var body = raw.substring(1).trim();
+    var parsed = this.parseFormulaDisplayPlaceholder(
+      this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
+    );
+    var body = String(parsed.content || '').trim();
     if (!body) return null;
 
     var includeAttachments = false;
@@ -763,6 +797,7 @@ export const aiMethods = {
       prompt: prompt,
       includeAttachments: includeAttachments,
       days: days,
+      placeholder: String(parsed.placeholder || ''),
     };
   },
 
@@ -775,7 +810,10 @@ export const aiMethods = {
     var raw = String(rawValue == null ? '' : rawValue);
     if (!raw || raw.charAt(0) !== '#') return null;
 
-    var payload = raw.substring(1).trim();
+    var parsed = this.parseFormulaDisplayPlaceholder(
+      this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
+    );
+    var payload = String(parsed.content || '').trim();
     if (!payload) return null;
 
     var match = /^(\+)?(\d+)?\s*(.+)$/.exec(payload);
@@ -797,6 +835,7 @@ export const aiMethods = {
       days: days,
       labels: labels,
       includeAttachments: includeAttachments,
+      placeholder: String(parsed.placeholder || ''),
     };
   },
 
@@ -804,8 +843,18 @@ export const aiMethods = {
     var raw = String(rawValue == null ? '' : rawValue);
     if (!raw || raw.charAt(0) !== '#') return null;
 
-    var payload = raw.substring(1).trim();
-    if (!payload) return { prompt: '', cols: null, rows: null };
+    var parsed = this.parseFormulaDisplayPlaceholder(
+      this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
+    );
+    var payload = String(parsed.content || '').trim();
+    if (!payload) {
+      return {
+        prompt: '',
+        cols: null,
+        rows: null,
+        placeholder: String(parsed.placeholder || ''),
+      };
+    }
 
     var parts = payload.split(';');
     if (parts.length >= 3) {
@@ -821,11 +870,17 @@ export const aiMethods = {
           prompt: parts.slice(0, -2).join(';').trim(),
           cols: maybeCols,
           rows: maybeRows,
+          placeholder: String(parsed.placeholder || ''),
         };
       }
     }
 
-    return { prompt: payload, cols: null, rows: null };
+    return {
+      prompt: payload,
+      cols: null,
+      rows: null,
+      placeholder: String(parsed.placeholder || ''),
+    };
   },
 
   tryDirectMentionTableSpill(sheetId, cellId, rawFormula, stack, options) {
@@ -854,7 +909,7 @@ export const aiMethods = {
   resolveDirectMentionFormulaRef(sheetId, rawFormula) {
     var raw = String(rawFormula == null ? '' : rawFormula);
     if (!raw || raw.charAt(0) !== '=') return null;
-    var body = raw.substring(1).trim();
+    var body = this.stripOptionalFormulaQuestionMarker(raw.substring(1)).trim();
     if (!body || body.charAt(0) !== '@') return null;
     var token = body.substring(1).trim();
     if (!token) return null;
@@ -893,6 +948,9 @@ export const aiMethods = {
     options,
     fillStartFromIndex,
   ) {
+    var sourceRaw = String(
+      this.storageService.getCellValue(sheetId, sourceCellId) || '',
+    );
     var dependencies = this.collectAIPromptDependencies(sheetId, text);
     if (typeof this.recordAIPromptDependencies === 'function') {
       this.recordAIPromptDependencies(options, dependencies);
@@ -911,8 +969,19 @@ export const aiMethods = {
     return this.aiService.list(
       prompt,
       total,
-      (options) => {
-        this.fillUnderneathCells(sheetId, sourceCellId, options, startIndex);
+      (items) => {
+        if (
+          String(this.storageService.getCellValue(sheetId, sourceCellId) || '') !==
+          sourceRaw
+        ) {
+          return;
+        }
+        var rows = (Array.isArray(items) ? items : [])
+          .slice(startIndex)
+          .map((item) => [String(item == null ? '' : item)]);
+        this.spillMatrixToSheet(sheetId, sourceCellId, rows, {
+          preserveSourceCell: true,
+        });
       },
       {
         forceRefresh: !!forceRefresh,
@@ -921,7 +990,7 @@ export const aiMethods = {
         queueMeta: {
           formulaKind: 'list',
           sourceCellId: sourceCellId,
-          promptTemplate: text,
+          promptTemplate: this.normalizeQueuedPromptTemplate(text),
           count: total,
           dependencies: dependencies,
           attachmentLinks: prepared.attachmentLinks,
@@ -982,7 +1051,7 @@ export const aiMethods = {
         queueMeta: {
           formulaKind: 'table',
           sourceCellId: sourceCellId,
-          promptTemplate: text,
+          promptTemplate: this.normalizeQueuedPromptTemplate(text),
           colsLimit: cols,
           rowsLimit: rows,
           dependencies: dependencies,
@@ -999,7 +1068,9 @@ export const aiMethods = {
     if (!raw) return false;
     var head = raw.charAt(0);
     if (head !== '#') return false;
-    return raw.substring(1).trim() !== '';
+    return (
+      this.stripOptionalFormulaQuestionMarker(raw.substring(1)).trim() !== ''
+    );
   },
 
   isListShortcutRaw(rawValue) {
@@ -1007,7 +1078,9 @@ export const aiMethods = {
     if (!raw) return false;
     var head = raw.charAt(0);
     if (head !== '>') return false;
-    return raw.substring(1).trim() !== '';
+    return (
+      this.stripOptionalFormulaQuestionMarker(raw.substring(1)).trim() !== ''
+    );
   },
 
   readListShortcutResult(sheetId, sourceCellId, stack, options) {

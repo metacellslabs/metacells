@@ -61,8 +61,15 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
     this.scheduleFlush();
   }
 
-  setComputedCellValue(sheetId, cellId, value, state) {
-    super.setComputedCellValue(sheetId, cellId, value, state);
+  setComputedCellValue(sheetId, cellId, value, state, errorMessage, meta) {
+    super.setComputedCellValue(
+      sheetId,
+      cellId,
+      value,
+      state,
+      errorMessage,
+      meta,
+    );
     this.scheduleFlush();
   }
 

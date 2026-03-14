@@ -114,6 +114,8 @@ function normalizeCellRecord(source, previousCell) {
           left: false,
         },
     value: sourceType === 'formula' ? String(prev.value || '') : nextSource,
+    displayValue:
+      sourceType === 'formula' ? String(prev.displayValue || '') : nextSource,
     state:
       sourceType === 'formula'
         ? String(prev.source || '') !== nextSource
@@ -302,6 +304,15 @@ export class WorkbookStorageAdapter {
   }
 
   getCellDisplayValue(sheetId, cellId) {
+    var cell = this.getCellRecord(sheetId, cellId);
+    if (!cell) return '';
+    if (String(cell.displayValue == null ? '' : cell.displayValue) !== '') {
+      return String(cell.displayValue == null ? '' : cell.displayValue);
+    }
+    return String(cell.value == null ? '' : cell.value);
+  }
+
+  getCellComputedValue(sheetId, cellId) {
     var cell = this.getCellRecord(sheetId, cellId);
     if (!cell) return '';
     return String(cell.value == null ? '' : cell.value);
@@ -592,6 +603,11 @@ export class WorkbookStorageAdapter {
     if (!cell) return;
     var details = isPlainObject(meta) ? meta : {};
     cell.value = String(value == null ? '' : value);
+    if (Object.prototype.hasOwnProperty.call(details, 'displayValue')) {
+      cell.displayValue = String(details.displayValue == null ? '' : details.displayValue);
+    } else {
+      cell.displayValue = String(value == null ? '' : value);
+    }
     cell.state = String(state || 'resolved');
     cell.error = String(errorMessage || '');
     cell.computedVersion = Math.max(1, (Number(cell.computedVersion) || 0) + 1);
@@ -617,6 +633,11 @@ export class WorkbookStorageAdapter {
     var next = isPlainObject(updates) ? updates : {};
     if (Object.prototype.hasOwnProperty.call(next, 'value')) {
       cell.value = String(next.value == null ? '' : next.value);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'displayValue')) {
+      cell.displayValue = String(
+        next.displayValue == null ? '' : next.displayValue,
+      );
     }
     if (Object.prototype.hasOwnProperty.call(next, 'state')) {
       cell.state = String(next.state || '');

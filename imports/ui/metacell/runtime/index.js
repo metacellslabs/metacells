@@ -1322,16 +1322,18 @@ export class SpreadsheetApp {
       var parsed = this.parseDependencySourceKey(targets[i]);
       if (!parsed) continue;
       try {
+        var runtimeMeta = {};
         var value = this.formulaEngine.evaluateCell(
           parsed.sheetId,
           parsed.cellId,
           {},
-          { forceRefreshAI: false },
+          { forceRefreshAI: false, runtimeMeta: runtimeMeta },
         );
         var nextValue = String(value == null ? '' : value);
         var nextState = nextValue === '...' ? 'pending' : 'resolved';
         this.storage.setCellRuntimeState(parsed.sheetId, parsed.cellId, {
           value: nextValue,
+          displayValue: String(runtimeMeta.displayValue || nextValue),
           state: nextState,
           error: '',
         });

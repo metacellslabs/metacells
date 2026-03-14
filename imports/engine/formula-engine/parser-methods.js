@@ -1,5 +1,32 @@
 // Description: parser methods extracted from FormulaEngine for smaller logical modules.
 export const parserMethods = {
+  stripOptionalFormulaQuestionMarker(text) {
+    var source = String(text == null ? '' : text);
+    if (source.charAt(0) !== '?') return source;
+    return source.substring(1).replace(/^\s+/, '');
+  },
+
+  normalizeQueuedPromptTemplate(text) {
+    return String(
+      this.stripOptionalFormulaQuestionMarker(text == null ? '' : text),
+    ).trim();
+  },
+
+  parseFormulaDisplayPlaceholder(text) {
+    var source = String(text == null ? '' : text);
+    var match = /^(.*?)(?:\s*:\[([^\]]*)\]\s*)$/.exec(source);
+    if (!match) {
+      return {
+        content: source,
+        placeholder: '',
+      };
+    }
+    return {
+      content: String(match[1] == null ? '' : match[1]),
+      placeholder: String(match[2] == null ? '' : match[2]),
+    };
+  },
+
   findSheetIdByName(name) {
     var tabs = this.getTabs();
 

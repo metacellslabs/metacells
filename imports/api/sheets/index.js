@@ -490,6 +490,9 @@ function mergeWorkbookForCompute(persistedWorkbookValue, clientWorkbookValue) {
         mergedCell.value = String(
           persistedCell.value == null ? '' : persistedCell.value,
         );
+        mergedCell.displayValue = String(
+          persistedCell.displayValue == null ? '' : persistedCell.displayValue,
+        );
         mergedCell.state = String(
           persistedCell.state || mergedCell.state || '',
         );
@@ -627,7 +630,13 @@ function collectChannelBatchTasks(
       let days = null;
       let includeAttachments = false;
       if (formulaKind === 'ask') {
-        promptTemplate = source.substring(1).trim();
+        const askSpec =
+          typeof formulaEngine.parseFormulaDisplayPlaceholder === 'function'
+            ? formulaEngine.parseFormulaDisplayPlaceholder(source.substring(1))
+            : { content: source.substring(1) };
+        promptTemplate = formulaEngine.normalizeQueuedPromptTemplate(
+          askSpec && askSpec.content ? askSpec.content : source.substring(1),
+        );
       } else if (formulaKind === 'list') {
         promptTemplate = listSpec && listSpec.prompt ? listSpec.prompt : '';
         count = 5;
@@ -787,36 +796,15 @@ async function runChannelBatchForWorkbook({
               .map((entry) => String(entry == null ? '' : entry))
               .filter((entry) => entry.trim() !== '')
           : [];
-        if (!shouldAppend) {
-          storageService.clearGeneratedCellsBySource(task.sheetId, task.cellId);
-          formulaEngine.fillUnderneathCells(
-            task.sheetId,
-            task.cellId,
-            values,
-            0,
-          );
-        } else {
-          const source = formulaEngine.parseCellId(task.cellId);
-          const existing =
-            storageService.listGeneratedCellsBySource(
-              task.sheetId,
-              task.cellId,
-            ) || [];
-          let maxRow = source ? source.row : 0;
-          existing.forEach((cellId) => {
-            const parsedCell = formulaEngine.parseCellId(cellId);
-            if (parsedCell && parsedCell.row > maxRow) maxRow = parsedCell.row;
-          });
-          const colLabel = source
-            ? formulaEngine.columnIndexToLabel(source.col)
-            : 'A';
-          for (let i = 0; i < values.length; i += 1) {
-            const targetCellId = `${colLabel}${maxRow + i + 1}`;
-            storageService.setCellValue(task.sheetId, targetCellId, values[i], {
-              generatedBy: task.cellId,
-            });
-          }
-        }
+        formulaEngine.spillMatrixToSheet(
+          task.sheetId,
+          task.cellId,
+          values.map((value) => [value]),
+          {
+            preserveSourceCell: true,
+            appendBelowExisting: shouldAppend,
+          },
+        );
       } else if (task.formulaKind === 'table') {
         const rows = Array.isArray(item.rows) ? item.rows : [];
         formulaEngine.spillMatrixToSheet(task.sheetId, task.cellId, rows, {
@@ -937,8 +925,14 @@ async function runChannelBatchForWorkbook({
     }
 
     if (!shouldAppend) {
-      storageService.clearGeneratedCellsBySource(task.sheetId, task.cellId);
-      formulaEngine.fillUnderneathCells(task.sheetId, task.cellId, values, 0);
+      formulaEngine.spillMatrixToSheet(
+        task.sheetId,
+        task.cellId,
+        values.map((value) => [value]),
+        {
+          preserveSourceCell: true,
+        },
+      );
       console.log('[channel-feed] task.write.replace', {
         sheetDocumentId,
         sheetId: task.sheetId,
@@ -950,24 +944,22 @@ async function runChannelBatchForWorkbook({
         ),
       });
     } else if (values.length) {
-      const source = formulaEngine.parseCellId(task.cellId);
-      const existing =
-        storageService.listGeneratedCellsBySource(task.sheetId, task.cellId) ||
-        [];
-      let maxRow = source ? source.row : 0;
-      existing.forEach((cellId) => {
-        const parsedCell = formulaEngine.parseCellId(cellId);
-        if (parsedCell && parsedCell.row > maxRow) maxRow = parsedCell.row;
-      });
-      const colLabel = source ? formulaEngine.columnIndexToLabel(source.col) : 'A';
-      const writtenIds = [];
-      for (let i = 0; i < values.length; i += 1) {
-        const targetCellId = `${colLabel}${maxRow + i + 1}`;
-        storageService.setCellValue(task.sheetId, targetCellId, values[i], {
-          generatedBy: task.cellId,
-        });
-        writtenIds.push(targetCellId);
-      }
+      const previousGenerated =
+        storageService.listGeneratedCellsBySource(task.sheetId, task.cellId) || [];
+      formulaEngine.spillMatrixToSheet(
+        task.sheetId,
+        task.cellId,
+        values.map((value) => [value]),
+        {
+          preserveSourceCell: true,
+          appendBelowExisting: true,
+        },
+      );
+      const nextGenerated =
+        storageService.listGeneratedCellsBySource(task.sheetId, task.cellId) || [];
+      const writtenIds = nextGenerated.filter(
+        (cellId) => previousGenerated.indexOf(cellId) === -1,
+      );
       console.log('[channel-feed] task.write.append', {
         sheetDocumentId,
         sheetId: task.sheetId,

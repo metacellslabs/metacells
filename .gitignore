@@ -6,7 +6,9 @@ npm-debug.log
 _build/
 .tmp-ci/
 .vscode/
-
+dist/
+.desktop-runtime/
+.desktop-cache/
 # Meteor Modern-Tools build context directories
 _build
 */build-assets

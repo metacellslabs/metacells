@@ -104,6 +104,37 @@ function stripUnsupportedImageParts(messages) {
     : [];
 }
 
+function containsPendingPromptMarker(text) {
+  const source = String(text == null ? '' : text);
+  if (!source) return false;
+  if (source.includes('(manual: click Update)')) return true;
+  return /(^|[\s([{:])\.\.\.(?=$|[\s)\]}:;,.!?])/m.test(source);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) =>
+    Meteor.setTimeout(resolve, Math.max(0, Number(ms) || 0)),
+  );
+}
+
+async function buildQueuedPayloadWhenReady(
+  queueMeta,
+  timeoutMs = 400,
+  pollIntervalMs = 40,
+) {
+  let rebuilt = await buildQueuedPayload(queueMeta);
+  if (!rebuilt || !rebuilt.pendingDependencies) return rebuilt;
+
+  const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+  while (Date.now() < deadline) {
+    await sleep(pollIntervalMs);
+    rebuilt = await buildQueuedPayload(queueMeta);
+    if (!rebuilt || !rebuilt.pendingDependencies) return rebuilt;
+  }
+
+  return rebuilt;
+}
+
 async function materializeAiMessageUrls(messages) {
   if (!Array.isArray(messages)) return [];
   return Promise.all(messages.map(async (message) => {
@@ -538,7 +569,8 @@ async function buildQueuedPayload(queueMeta) {
   );
   const sourceSheetId = String(queueMeta.activeSheetId || '');
   const sourceCellId = String(queueMeta.sourceCellId || '').toUpperCase();
-  const promptTemplate = String(queueMeta.promptTemplate || '');
+  let promptTemplate = String(queueMeta.promptTemplate || '');
+  let queueMetaUpdates = null;
 
   if (sourceSheetId && sourceCellId) {
     const currentRaw = String(
@@ -546,41 +578,54 @@ async function buildQueuedPayload(queueMeta) {
     );
     const kind = String(queueMeta.formulaKind || '');
     if (kind === 'ask') {
-      if (currentRaw.charAt(0) !== "'") return null;
-      if (String(currentRaw.substring(1).trim()) !== promptTemplate) return null;
+      if (currentRaw.charAt(0) === "'") {
+        promptTemplate =
+          typeof formulaEngine.normalizeQueuedPromptTemplate === 'function'
+            ? formulaEngine.normalizeQueuedPromptTemplate(currentRaw.substring(1))
+            : String(currentRaw.substring(1).trim());
+        if (!promptTemplate) return null;
+        queueMetaUpdates = {
+          ...(queueMetaUpdates || {}),
+          promptTemplate,
+        };
+      }
     } else if (kind === 'list') {
-      if (currentRaw.charAt(0) !== '>') return null;
-      const listSpec =
-        typeof formulaEngine.parseListShortcutSpec === 'function'
-          ? formulaEngine.parseListShortcutSpec(currentRaw)
-          : null;
-      if (!listSpec || String(listSpec.prompt || '') !== promptTemplate)
-        return null;
+      if (currentRaw.charAt(0) === '>') {
+        const listSpec =
+          typeof formulaEngine.parseListShortcutSpec === 'function'
+            ? formulaEngine.parseListShortcutSpec(currentRaw)
+            : null;
+        if (!listSpec || !String(listSpec.prompt || '')) return null;
+        promptTemplate = String(listSpec.prompt || '');
+        queueMetaUpdates = {
+          ...(queueMetaUpdates || {}),
+          promptTemplate,
+          count: Math.max(1, Math.min(50, parseInt(queueMeta.count, 10) || 5)),
+        };
+      }
     } else if (kind === 'table') {
-      if (currentRaw.charAt(0) !== '#') return null;
-      const tableSpec =
-        typeof formulaEngine.parseTablePromptSpec === 'function'
-          ? formulaEngine.parseTablePromptSpec(currentRaw)
-          : null;
-      if (!tableSpec || String(tableSpec.prompt || '') !== promptTemplate)
-        return null;
-      if (
-        (parseInt(queueMeta.colsLimit, 10) || null) !==
-          (parseInt(tableSpec.cols, 10) || null) ||
-        (parseInt(queueMeta.rowsLimit, 10) || null) !==
-          (parseInt(tableSpec.rows, 10) || null)
-      ) {
-        return null;
+      if (currentRaw.charAt(0) === '#') {
+        const tableSpec =
+          typeof formulaEngine.parseTablePromptSpec === 'function'
+            ? formulaEngine.parseTablePromptSpec(currentRaw)
+            : null;
+        if (!tableSpec || !String(tableSpec.prompt || '')) return null;
+        promptTemplate = String(tableSpec.prompt || '');
+        queueMetaUpdates = {
+          ...(queueMetaUpdates || {}),
+          promptTemplate,
+          colsLimit: parseInt(tableSpec.cols, 10) || null,
+          rowsLimit: parseInt(tableSpec.rows, 10) || null,
+        };
       }
     }
   }
 
   return aiService.withRequestsSuppressed(() => {
     const runtimeOptions = { channelPayloads };
-    const prepared = formulaEngine.prepareAIPrompt(
+    const dependenciesResolved = formulaEngine.arePromptDependenciesResolved(
       sourceSheetId,
       promptTemplate,
-      {},
       runtimeOptions,
     );
     const dependencies = formulaEngine.collectAIPromptDependencies(
@@ -588,6 +633,29 @@ async function buildQueuedPayload(queueMeta) {
       promptTemplate,
       runtimeOptions,
     );
+    if (!dependenciesResolved) {
+      return {
+        pendingDependencies: true,
+        dependencies,
+        queueMetaUpdates,
+      };
+    }
+    const prepared = formulaEngine.prepareAIPrompt(
+      sourceSheetId,
+      promptTemplate,
+      {},
+      runtimeOptions,
+    );
+    if (
+      containsPendingPromptMarker(prepared.userPrompt) ||
+      containsPendingPromptMarker(prepared.systemPrompt)
+    ) {
+      return {
+        pendingDependencies: true,
+        dependencies,
+        queueMetaUpdates,
+      };
+    }
     const buildUserContent = (text) =>
       aiService.buildUserMessageContent(text, prepared.userContent);
     const enrich = (messages) =>
@@ -599,7 +667,11 @@ async function buildQueuedPayload(queueMeta) {
             role: 'user',
             content: buildUserContent(finalPrompt),
           };
-          return { messages: nextMessages, dependencies };
+          return {
+            messages: nextMessages,
+            dependencies,
+            queueMetaUpdates,
+          };
         });
 
     if (queueMeta.formulaKind === 'list') {
@@ -661,6 +733,21 @@ async function refreshTaskFromSheetState(task, reason) {
   }
 
   const rebuilt = await buildQueuedPayload(task.queueMeta);
+  if (rebuilt && rebuilt.pendingDependencies) {
+    const refreshedQueueMeta = {
+      ...task.queueMeta,
+      ...(rebuilt.queueMetaUpdates || {}),
+      dependencies: rebuilt.dependencies,
+    };
+    refreshedQueueMeta.queueIdentity = createQueueIdentity(refreshedQueueMeta);
+    task.queueMeta = refreshedQueueMeta;
+    log('queue.waiting_on_dependencies', {
+      taskKey: task.key,
+      reason,
+      dependencies: normalizeTaskDependencies(rebuilt.dependencies).length,
+    });
+    return;
+  }
   if (
     !rebuilt ||
     !Array.isArray(rebuilt.messages) ||
@@ -683,11 +770,13 @@ async function refreshTaskFromSheetState(task, reason) {
     })),
   };
   const previousKey = task.key;
-  task.queueMeta = {
+  const refreshedQueueMeta = {
     ...task.queueMeta,
+    ...(rebuilt.queueMetaUpdates || {}),
     dependencies: rebuilt.dependencies,
-    queueIdentity: createQueueIdentity(task.queueMeta),
   };
+  refreshedQueueMeta.queueIdentity = createQueueIdentity(refreshedQueueMeta);
+  task.queueMeta = refreshedQueueMeta;
   const nextKey = createTaskKey('chat', task.payload, task.queueMeta);
   if (previousKey !== nextKey) {
     aiPendingTaskByKey.delete(previousKey);
@@ -879,7 +968,15 @@ async function runAIChatJob(job) {
     task.queueMeta &&
     String(task.queueMeta.formulaKind || '') !== 'channel-feed'
   ) {
-    const rebuilt = await buildQueuedPayload(task.queueMeta);
+    const rebuilt = await buildQueuedPayloadWhenReady(task.queueMeta);
+    if (rebuilt && rebuilt.pendingDependencies) {
+      task.queueMeta = {
+        ...task.queueMeta,
+        ...(rebuilt.queueMetaUpdates || {}),
+        dependencies: rebuilt.dependencies,
+      };
+      return deferJobExecution(500, 'waiting for prompt dependencies');
+    }
     if (!rebuilt || !Array.isArray(rebuilt.messages) || !rebuilt.messages.length) {
       log('method.ai.requestChat.cancelled', {
         sourceCellId:
@@ -899,6 +996,7 @@ async function runAIChatJob(job) {
       };
       task.queueMeta = {
         ...task.queueMeta,
+        ...(rebuilt.queueMetaUpdates || {}),
         dependencies: rebuilt.dependencies,
       };
     }

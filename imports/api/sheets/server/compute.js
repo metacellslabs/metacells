@@ -620,7 +620,7 @@ function canReuseComputedCell(
   const state = String(storageService.getCellState(sheetId, cellId) || '');
   if (state !== 'resolved') return false;
   const value = String(
-    storageService.getCellDisplayValue(sheetId, cellId) || '',
+    storageService.getCellComputedValue(sheetId, cellId) || '',
   );
   if (!value) return false;
   const versionInfo = storageService.getCellVersionInfo(sheetId, cellId);
@@ -689,6 +689,9 @@ export async function computeSheetSnapshot({
             sheetValues[cellId],
             inferComputedCellState(rawValue, sheetValues[cellId]),
             errorMessage,
+            {
+              displayValue: storageService.getCellDisplayValue(sheetId, cellId),
+            },
           );
           if (
             computedProcessedEventIds &&
@@ -711,7 +714,7 @@ export async function computeSheetSnapshot({
 
   const aiService = new AIService(
     storageService,
-    (queueMeta) => {
+    async (queueMeta) => {
       const asyncComputedValues = {};
       const asyncComputedErrors = {};
       const asyncProcessedEventIds = {};
@@ -740,6 +743,7 @@ export async function computeSheetSnapshot({
         asyncProcessedEventIds[sourceSheetId] = {};
         asyncDependenciesBySheet[sourceSheetId] = {};
         const sourceDependencyCollector = createDependencyCollector();
+        const sourceRuntimeMeta = {};
         try {
           const computedValue = formulaEngine.evaluateCell(
             sourceSheetId,
@@ -749,6 +753,7 @@ export async function computeSheetSnapshot({
               forceRefreshAI,
               channelPayloads,
               dependencyCollector: sourceDependencyCollector,
+              runtimeMeta: sourceRuntimeMeta,
             },
           );
           const sourceDependencies = sourceDependencyCollector.snapshot();
@@ -769,7 +774,21 @@ export async function computeSheetSnapshot({
               computedValue,
             ),
             '',
-            { dependencySignature },
+            {
+              dependencySignature,
+              ...(Object.prototype.hasOwnProperty.call(
+                sourceRuntimeMeta,
+                'displayValue',
+              )
+                ? {
+                    displayValue: String(
+                      sourceRuntimeMeta.displayValue == null
+                        ? ''
+                        : sourceRuntimeMeta.displayValue,
+                    ),
+                  }
+                : {}),
+            },
           );
           asyncProcessedEventIds[sourceSheetId][sourceCellId] =
             buildProcessedChannelEventIds(sourceDependencies, channelPayloads);
@@ -803,6 +822,9 @@ export async function computeSheetSnapshot({
             lastProcessedChannelEventIds:
               asyncProcessedEventIds[sourceSheetId][sourceCellId],
           });
+        }
+        if (typeof persistWorkbook === 'function') {
+          await persistWorkbook(rawStorage.snapshot());
         }
       }
       const asyncTargetCellMap = forceRefreshAI
@@ -859,7 +881,7 @@ export async function computeSheetSnapshot({
             )
           ) {
             asyncComputedValues[sheetId][cellId] =
-              storageService.getCellDisplayValue(sheetId, cellId);
+              storageService.getCellComputedValue(sheetId, cellId);
             asyncDependenciesBySheet[sheetId][cellId] = storedDependencies;
             asyncProcessedEventIds[sheetId][cellId] =
               buildProcessedChannelEventIds(
@@ -869,6 +891,7 @@ export async function computeSheetSnapshot({
             continue;
           }
           const dependencyCollector = createDependencyCollector();
+          const runtimeMeta = {};
           try {
             const computedValue = formulaEngine.evaluateCell(
               sheetId,
@@ -878,6 +901,7 @@ export async function computeSheetSnapshot({
                 forceRefreshAI,
                 channelPayloads,
                 dependencyCollector,
+                runtimeMeta,
               },
             );
             asyncDependenciesBySheet[sheetId][cellId] =
@@ -897,7 +921,21 @@ export async function computeSheetSnapshot({
                 computedValue,
               ),
               '',
-              { dependencySignature },
+              {
+                dependencySignature,
+                ...(Object.prototype.hasOwnProperty.call(
+                  runtimeMeta,
+                  'displayValue',
+                )
+                  ? {
+                      displayValue: String(
+                        runtimeMeta.displayValue == null
+                          ? ''
+                          : runtimeMeta.displayValue,
+                      ),
+                    }
+                  : {}),
+              },
             );
             asyncProcessedEventIds[sheetId][cellId] =
               buildProcessedChannelEventIds(
@@ -1024,7 +1062,7 @@ export async function computeSheetSnapshot({
             forceRefreshAI,
           )
         ) {
-          sheetValues[cellId] = storageService.getCellDisplayValue(
+          sheetValues[cellId] = storageService.getCellComputedValue(
             sheetId,
             cellId,
           );
@@ -1036,6 +1074,7 @@ export async function computeSheetSnapshot({
           continue;
         }
         const dependencyCollector = createDependencyCollector();
+        const runtimeMeta = {};
         try {
           const computedValue = formulaEngine.evaluateCell(
             sheetId,
@@ -1045,6 +1084,7 @@ export async function computeSheetSnapshot({
               forceRefreshAI,
               channelPayloads,
               dependencyCollector,
+              runtimeMeta,
             },
           );
           sheetValues[cellId] = computedValue;
@@ -1067,7 +1107,21 @@ export async function computeSheetSnapshot({
               computedValue,
             ),
             '',
-            { dependencySignature },
+            {
+              dependencySignature,
+              ...(Object.prototype.hasOwnProperty.call(
+                runtimeMeta,
+                'displayValue',
+              )
+                ? {
+                    displayValue: String(
+                      runtimeMeta.displayValue == null
+                        ? ''
+                        : runtimeMeta.displayValue,
+                    ),
+                  }
+                : {}),
+            },
           );
           storageService.setCellRuntimeState(sheetId, cellId, {
             lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],

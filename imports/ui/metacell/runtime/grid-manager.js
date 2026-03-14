@@ -406,12 +406,21 @@ export class GridManager {
     var output = input.parentElement.querySelector('.cell-output');
     var statusNode = input.parentElement.querySelector('.cell-status');
     var opts = options || {};
+    var aiSkeletonVariant = String(opts.aiSkeletonVariant || 'default');
     input.parentElement.classList.toggle('has-ai-skeleton', !!opts.aiSkeleton);
     if (output) {
       output.classList.toggle('formula-value', !!hasFormula);
       output.classList.toggle('error-value', !!opts.error);
       output.classList.toggle('numeric-value', !!opts.alignRight);
       output.classList.toggle('ai-skeleton-value', !!opts.aiSkeleton);
+      output.classList.toggle(
+        'ai-skeleton-list-value',
+        !!opts.aiSkeleton && aiSkeletonVariant === 'list',
+      );
+      output.classList.toggle(
+        'ai-skeleton-table-value',
+        !!opts.aiSkeleton && aiSkeletonVariant === 'table',
+      );
       output.style.backgroundColor = opts.backgroundColor
         ? String(opts.backgroundColor)
         : '';
@@ -420,11 +429,33 @@ export class GridManager {
       if (opts.attachment) {
         output.innerHTML = this.renderAttachmentValue(opts.attachment);
       } else if (opts.aiSkeleton) {
-        output.innerHTML =
-          "<span class='cell-ai-skeleton' aria-hidden='true'>" +
-          "<span class='cell-ai-skeleton-line is-long'></span>" +
-          "<span class='cell-ai-skeleton-line is-short'></span>" +
-          '</span>';
+        if (aiSkeletonVariant === 'table') {
+          output.innerHTML =
+            "<span class='cell-ai-skeleton cell-ai-skeleton-table' aria-hidden='true'>" +
+            "<span class='cell-ai-skeleton-table-row'>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            '</span>' +
+            "<span class='cell-ai-skeleton-table-row'>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            '</span>' +
+            "<span class='cell-ai-skeleton-table-row'>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            "<span class='cell-ai-skeleton-block'></span>" +
+            '</span>' +
+            '</span>';
+        } else {
+          output.innerHTML =
+            "<span class='cell-ai-skeleton cell-ai-skeleton-list' aria-hidden='true'>" +
+            "<span class='cell-ai-skeleton-line is-long'></span>" +
+            "<span class='cell-ai-skeleton-line is-mid'></span>" +
+            "<span class='cell-ai-skeleton-line is-short'></span>" +
+            '</span>';
+        }
       } else {
         output.innerHTML = opts.literal
           ? this.escapeHtml(value == null ? '' : value).replace(

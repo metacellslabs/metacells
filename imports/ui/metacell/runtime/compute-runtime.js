@@ -139,6 +139,28 @@ function formatCellDisplay(app, sheetId, cellId, displayValue, options) {
   }).format(numericValue);
 }
 
+function getAISkeletonVariant(rawValue) {
+  var raw = String(rawValue || '');
+  if (!raw) return 'default';
+  if (raw.charAt(0) === '>') return 'list';
+  if (raw.charAt(0) === '#') return 'table';
+  return 'default';
+}
+
+function shouldHighlightEmptyMentionedCell(app, cellId, rawValue) {
+  if (!app || !app.storage || typeof app.storage.getDependencyGraph !== 'function') {
+    return false;
+  }
+  if (String(rawValue == null ? '' : rawValue).trim() !== '') return false;
+  var graph = app.storage.getDependencyGraph();
+  var key = String(app.activeSheetId || '') + ':' + String(cellId || '').toUpperCase();
+  var dependents =
+    graph && graph.dependentsByCell && Array.isArray(graph.dependentsByCell[key])
+      ? graph.dependentsByCell[key]
+      : [];
+  return dependents.length > 0;
+}
+
 export function renderCurrentSheetFromStorage(app) {
   if (app.isReportActive()) {
     app.renderReportLiveValues(true);
@@ -263,7 +285,7 @@ export function renderCurrentSheetFromStorage(app) {
       }
       var showAISkeleton =
         !showFormulas &&
-        isAIFormulaRaw(raw) &&
+        isFormula &&
         !attachment &&
         !errorHint &&
         (cellState === 'pending' || cellState === 'stale') &&
@@ -298,6 +320,10 @@ export function renderCurrentSheetFromStorage(app) {
       );
       input.parentElement.classList.toggle('has-formula', isFormula);
       input.parentElement.classList.toggle(
+        'empty-mentioned-cell',
+        shouldHighlightEmptyMentionedCell(app, input.id, raw),
+      );
+      input.parentElement.classList.toggle(
         'has-display-value',
         String(displayValue == null ? '' : displayValue) !== '',
       );
@@ -312,6 +338,7 @@ export function renderCurrentSheetFromStorage(app) {
         literal: showFormulas ? true : literalDisplay,
         attachment: attachment,
         aiSkeleton: showAISkeleton,
+        aiSkeletonVariant: getAISkeletonVariant(raw),
         error: !!errorHint,
         state: cellState,
         alignRight: !showFormulas && formatMeta.isNumeric,
@@ -331,6 +358,7 @@ export function renderCurrentSheetFromStorage(app) {
     } catch (e) {
       input.parentElement.classList.remove('manual-formula');
       input.parentElement.classList.remove('has-formula');
+      input.parentElement.classList.remove('empty-mentioned-cell');
       input.parentElement.classList.remove('has-display-value');
       input.parentElement.classList.remove('has-attachment');
       input.parentElement.classList.remove('has-error');
@@ -534,7 +562,7 @@ export function computeAll(app) {
             }
             var showAISkeleton =
               !showFormulas &&
-              isAIFormulaRaw(raw) &&
+              isFormula &&
               !attachment &&
               !errorHint &&
               (cellState === 'pending' || cellState === 'stale') &&
@@ -577,6 +605,10 @@ export function computeAll(app) {
             );
             input.parentElement.classList.toggle('has-formula', isFormula);
             input.parentElement.classList.toggle(
+              'empty-mentioned-cell',
+              shouldHighlightEmptyMentionedCell(app, input.id, raw),
+            );
+            input.parentElement.classList.toggle(
               'has-display-value',
               String(displayValue == null ? '' : displayValue) !== '',
             );
@@ -599,6 +631,7 @@ export function computeAll(app) {
                 literal: showFormulas ? true : literalDisplay,
                 attachment: attachment,
                 aiSkeleton: showAISkeleton,
+                aiSkeletonVariant: getAISkeletonVariant(raw),
                 error: !!errorHint,
                 state: cellState,
                 alignRight: !showFormulas && formatMeta.isNumeric,

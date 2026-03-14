@@ -481,7 +481,7 @@ export class AIService {
     var done = () => {
       delete this.pending[cacheKey];
       delete SHARED_AI_PENDING[cacheKey];
-      this.onInvalidate(queueMeta || null);
+      return Promise.resolve(this.onInvalidate(queueMeta || null));
     };
 
     var messages = [];
@@ -506,11 +506,11 @@ export class AIService {
         );
         this.cache[cacheKey] = answer;
         this.storageService.setCacheValue(cacheKey, answer);
-        done();
+        return done();
       })
       .catch((err) => {
         this.cache[cacheKey] = '#AI_ERROR: ' + err.message;
-        done();
+        return done();
       });
   }
 
@@ -541,7 +541,7 @@ export class AIService {
     var done = () => {
       delete this.pending[cacheKey];
       delete SHARED_AI_PENDING[cacheKey];
-      this.onInvalidate(queueMeta || null);
+      return Promise.resolve(this.onInvalidate(queueMeta || null));
     };
 
     var listSystemPrompt = buildListSystemPrompt(count, AI_LIST_DELIMITER);
@@ -570,12 +570,12 @@ export class AIService {
         this.cache[cacheKey] = options;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(options));
         if (typeof onResult === 'function') onResult(options);
-        done();
+        return done();
       })
       .catch((err) => {
         this.cache[cacheKey] = ['#AI_ERROR: ' + err.message];
         if (typeof onResult === 'function') onResult(this.cache[cacheKey]);
-        done();
+        return done();
       });
   }
 
@@ -609,7 +609,7 @@ export class AIService {
     var done = () => {
       delete this.pending[cacheKey];
       delete SHARED_AI_PENDING[cacheKey];
-      this.onInvalidate(queueMeta || null);
+      return Promise.resolve(this.onInvalidate(queueMeta || null));
     };
 
     var tableInstruction = buildTableSystemPrompt(cols, rows);
@@ -634,12 +634,12 @@ export class AIService {
         this.cache[cacheKey] = matrix;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(matrix));
         if (typeof onResult === 'function') onResult(matrix);
-        done();
-        return matrix;
+        return done().then(() => matrix);
       })
       .catch((error) => {
-        done();
-        throw error;
+        return done().then(() => {
+          throw error;
+        });
       });
 
     this.pending[cacheKey] = requestPromise;

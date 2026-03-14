@@ -1,5 +1,241 @@
 // Description: mention methods extracted from FormulaEngine for smaller logical modules.
 export const mentionMethods = {
+  collectExplicitMentionTokens(text) {
+    var source = String(text == null ? '' : text);
+    if (!source) return [];
+
+    var pattern =
+      /(_)?@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)|(_)?@([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)|(_)?@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)|(_)?@([A-Za-z_][A-Za-z0-9_]*)/g;
+    var results = [];
+    var seen = {};
+    var match;
+
+    while ((match = pattern.exec(source))) {
+      var token = null;
+
+      if (match[4] && match[5]) {
+        var rangeSheetName = match[2] || match[3] || '';
+        token = {
+          rawMode: match[1] === '_',
+          kind: 'sheet-region',
+          displayToken:
+            '@' +
+            (match[2]
+              ? "'" + rangeSheetName + "'"
+              : String(rangeSheetName || '')) +
+            '!' +
+            String(match[4]).toUpperCase() +
+            ':' +
+            String(match[5]).toUpperCase(),
+          sheetName: rangeSheetName,
+          startCellId: String(match[4]).toUpperCase(),
+          endCellId: String(match[5]).toUpperCase(),
+        };
+      } else if (match[7] && match[8]) {
+        token = {
+          rawMode: match[6] === '_',
+          kind: 'region',
+          displayToken:
+            '@' +
+            String(match[7]).toUpperCase() +
+            ':' +
+            String(match[8]).toUpperCase(),
+          startCellId: String(match[7]).toUpperCase(),
+          endCellId: String(match[8]).toUpperCase(),
+        };
+      } else if (match[12]) {
+        var sheetName = match[10] || match[11] || '';
+        token = {
+          rawMode: match[9] === '_',
+          kind: 'sheet-cell',
+          displayToken:
+            '@' +
+            (match[10] ? "'" + sheetName + "'" : String(sheetName || '')) +
+            '!' +
+            String(match[12]).toUpperCase(),
+          sheetName: sheetName,
+          cellId: String(match[12]).toUpperCase(),
+        };
+      } else if (match[14]) {
+        token = {
+          rawMode: match[13] === '_',
+          kind: 'plain',
+          displayToken: '@' + String(match[14] || '').trim(),
+          token: String(match[14] || '').trim(),
+        };
+      }
+
+      if (!token || !token.displayToken || seen[token.displayToken]) continue;
+      seen[token.displayToken] = true;
+      results.push(token);
+    }
+
+    return results;
+  },
+
+  recordExplicitMentionDependency(sheetId, mention, options) {
+    var token = mention && typeof mention === 'object' ? mention : null;
+    if (!token) return;
+
+    if (token.kind === 'sheet-region') {
+      var rangeSheetId = this.findSheetIdByName(token.sheetName);
+      if (!rangeSheetId) return;
+      var sheetRegionCellIds = this.enumerateRegionCellIds(
+        token.startCellId,
+        token.endCellId,
+      );
+      for (var i = 0; i < sheetRegionCellIds.length; i += 1) {
+        this.recordDependencyCell(options, rangeSheetId, sheetRegionCellIds[i]);
+      }
+      return;
+    }
+
+    if (token.kind === 'region') {
+      var regionCellIds = this.enumerateRegionCellIds(
+        token.startCellId,
+        token.endCellId,
+      );
+      for (var j = 0; j < regionCellIds.length; j += 1) {
+        this.recordDependencyCell(options, sheetId, regionCellIds[j]);
+      }
+      return;
+    }
+
+    if (token.kind === 'sheet-cell') {
+      var refSheetId = this.findSheetIdByName(token.sheetName);
+      if (!refSheetId) return;
+      this.recordDependencyCell(options, refSheetId, token.cellId);
+      return;
+    }
+
+    if (token.kind !== 'plain') return;
+    if (this.isExistingCellId(token.token)) {
+      this.recordDependencyCell(options, sheetId, token.token.toUpperCase());
+      return;
+    }
+
+    this.recordDependencyNamedRef(options, token.token);
+    var named = this.storageService.resolveNamedCell(token.token);
+    if (!named || !named.sheetId) return;
+
+    if (named.startCellId && named.endCellId) {
+      var namedRegionCellIds = this.enumerateRegionCellIds(
+        String(named.startCellId).toUpperCase(),
+        String(named.endCellId).toUpperCase(),
+      );
+      for (var k = 0; k < namedRegionCellIds.length; k += 1) {
+        this.recordDependencyCell(options, named.sheetId, namedRegionCellIds[k]);
+      }
+      return;
+    }
+
+    if (named.cellId) {
+      this.recordDependencyCell(
+        options,
+        named.sheetId,
+        String(named.cellId).toUpperCase(),
+      );
+    }
+  },
+
+  recordExplicitMentionDependenciesFromText(sheetId, text, options) {
+    var mentions = this.collectExplicitMentionTokens(text);
+    for (var i = 0; i < mentions.length; i += 1) {
+      this.recordExplicitMentionDependency(sheetId, mentions[i], options);
+    }
+  },
+
+  resolveExplicitMentionTokenValue(sheetId, mention, stack, options) {
+    var token = mention && typeof mention === 'object' ? mention : null;
+    if (!token) return null;
+    var resolutionOptions = null;
+    if (options && typeof options === 'object') {
+      resolutionOptions = { ...options };
+      delete resolutionOptions.dependencyCollector;
+    }
+
+    if (token.kind === 'sheet-region') {
+      var rangeSheetId = this.findSheetIdByName(token.sheetName);
+      if (!rangeSheetId) return undefined;
+      return token.rawMode
+        ? this.regionToRawCsv(rangeSheetId, token.startCellId, token.endCellId)
+        : this.regionToCsv(
+            rangeSheetId,
+            token.startCellId,
+            token.endCellId,
+            stack || {},
+          );
+    }
+
+    if (token.kind === 'region') {
+      return token.rawMode
+        ? this.regionToRawCsv(sheetId, token.startCellId, token.endCellId)
+        : this.regionToCsv(sheetId, token.startCellId, token.endCellId, stack || {});
+    }
+
+    if (token.kind === 'sheet-cell') {
+      var refSheetId = this.findSheetIdByName(token.sheetName);
+      if (!refSheetId) return undefined;
+      return token.rawMode
+        ? this.getMentionRawValue(refSheetId, token.cellId)
+        : this.getMentionValue(refSheetId, token.cellId, stack, resolutionOptions);
+    }
+
+    if (token.kind === 'plain') {
+      return token.rawMode
+        ? this.getPlainMentionValue(
+            sheetId,
+            token.token,
+            stack,
+            resolutionOptions,
+            true,
+          )
+        : this.getPlainMentionValue(
+            sheetId,
+            token.token,
+            stack,
+            resolutionOptions,
+          );
+    }
+
+    return null;
+  },
+
+  formatEmptyMentionDependencyMessage(tokens) {
+    var source = Array.isArray(tokens) ? tokens : [];
+    var labels = source
+      .map((item) => String((item && item.displayToken) || '').trim())
+      .filter(Boolean);
+    if (!labels.length) return '';
+    return 'Params: ' + labels.join(', ') + ' are empty';
+  },
+
+  getEmptyMentionDependencyMessage(sheetId, text, stack, options) {
+    var mentions = this.collectExplicitMentionTokens(text);
+    if (!mentions.length) return '';
+
+    var emptyMentions = [];
+    for (var i = 0; i < mentions.length; i += 1) {
+      var mention = mentions[i];
+      var resolved = null;
+      try {
+        resolved = this.resolveExplicitMentionTokenValue(
+          sheetId,
+          mention,
+          stack,
+          options,
+        );
+      } catch (error) {
+        continue;
+      }
+      if (typeof resolved === 'undefined') continue;
+      if (String(resolved == null ? '' : resolved).trim() !== '') continue;
+      emptyMentions.push(mention);
+    }
+
+    return this.formatEmptyMentionDependencyMessage(emptyMentions);
+  },
+
   getMentionValue(sheetId, cellId, stack, options) {
     var targetCellId = String(cellId || '').toUpperCase();
     var raw = this.storageService.getCellValue(sheetId, targetCellId);
@@ -48,12 +284,18 @@ export const mentionMethods = {
       var state = String(
         this.storageService.getCellState(sheetId, targetCellId) || '',
       );
+      var computedValue =
+        this.storageService &&
+        typeof this.storageService.getCellComputedValue === 'function'
+          ? this.storageService.getCellComputedValue(sheetId, targetCellId)
+          : '';
       var displayValue = this.storageService.getCellDisplayValue(
         sheetId,
         targetCellId,
       );
       if (
         state === 'resolved' &&
+        String(computedValue == null ? '' : computedValue) !== '' &&
         String(displayValue == null ? '' : displayValue) !== ''
       ) {
         return displayValue;
