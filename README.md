@@ -71,6 +71,10 @@ Everything updates reactively.
 - [#2 Columns resize](https://github.com/metacellslabs/MetaCells/issues/2)
 - [#3 Formula bar behavior](https://github.com/metacellslabs/MetaCells/issues/3)
 
+### bug
+
+- [#4 Add support for $ when referencing cells and regions in MetaCells.](https://github.com/metacellslabs/MetaCells/issues/4)
+
 <!-- featured-issues:end -->
 
 ## What you can build
