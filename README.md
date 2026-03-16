@@ -66,7 +66,9 @@ Everything updates reactively.
 
 <!-- featured-issues:start -->
 
-_No featured issues right now._
+### bug
+
+- [#2 Columns resize](https://github.com/metacellslabs/MetaCells/issues/2)
 
 <!-- featured-issues:end -->
 
