@@ -3080,7 +3080,7 @@ describe('metacells', function () {
       }
     });
 
-    it('shiftFormulaReferences adjusts relative references normally', async function () {
+    const makeShiftHelper = async () => {
       const { SpreadsheetApp } = await import(
         '../imports/ui/metacell/runtime/index.js'
       );
@@ -3101,9 +3101,11 @@ describe('metacells', function () {
         }
         return label;
       };
-      const shiftHelper = {
+      return {
         parseCellId(cellId) {
-          const match = /^([A-Za-z]+)([0-9]+)$/.exec(String(cellId || ''));
+          const match = /^\$?([A-Za-z]+)\$?([0-9]+)$/.exec(
+            String(cellId || ''),
+          );
           if (!match) return null;
           return {
             col: columnLabelToIndex(match[1].toUpperCase()),
@@ -3113,161 +3115,69 @@ describe('metacells', function () {
         columnIndexToLabel,
         shiftFormulaReferences: SpreadsheetApp.prototype.shiftFormulaReferences,
       };
+    };
 
+    it('shiftFormulaReferences adjusts relative references normally', async function () {
+      const helper = await makeShiftHelper();
+
+      assert.strictEqual(helper.shiftFormulaReferences('=B1', 1, 1), '=C2');
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=B1', 1, 1),
-        '=C2',
-      );
-      assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=B1+C2', 1, 0),
+        helper.shiftFormulaReferences('=B1+C2', 1, 0),
         '=B2+C3',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=A1:B3', 0, 1),
+        helper.shiftFormulaReferences('=A1:B3', 0, 1),
         '=B1:C3',
       );
     });
 
     it('shiftFormulaReferences respects $ absolute column reference', async function () {
-      const { SpreadsheetApp } = await import(
-        '../imports/ui/metacell/runtime/index.js'
-      );
-      const columnLabelToIndex = (label) => {
-        let result = 0;
-        for (let i = 0; i < label.length; i++) {
-          result = result * 26 + (label.charCodeAt(i) - 64);
-        }
-        return result;
-      };
-      const columnIndexToLabel = (index) => {
-        let n = Math.max(1, index);
-        let label = '';
-        while (n > 0) {
-          const rem = (n - 1) % 26;
-          label = String.fromCharCode(65 + rem) + label;
-          n = Math.floor((n - 1) / 26);
-        }
-        return label;
-      };
-      const shiftHelper = {
-        parseCellId(cellId) {
-          const match = /^([A-Za-z]+)([0-9]+)$/.exec(String(cellId || ''));
-          if (!match) return null;
-          return {
-            col: columnLabelToIndex(match[1].toUpperCase()),
-            row: parseInt(match[2], 10),
-          };
-        },
-        columnIndexToLabel,
-        shiftFormulaReferences: SpreadsheetApp.prototype.shiftFormulaReferences,
-      };
+      const helper = await makeShiftHelper();
 
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$B1', 1, 1),
+        helper.shiftFormulaReferences('=$B1', 1, 1),
         '=$B2',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$B1', 0, 3),
+        helper.shiftFormulaReferences('=$B1', 0, 3),
         '=$B1',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$B1:$D3', 1, 1),
+        helper.shiftFormulaReferences('=$B1:$D3', 1, 1),
         '=$B2:$D4',
       );
     });
 
     it('shiftFormulaReferences respects $ absolute row reference', async function () {
-      const { SpreadsheetApp } = await import(
-        '../imports/ui/metacell/runtime/index.js'
-      );
-      const columnLabelToIndex = (label) => {
-        let result = 0;
-        for (let i = 0; i < label.length; i++) {
-          result = result * 26 + (label.charCodeAt(i) - 64);
-        }
-        return result;
-      };
-      const columnIndexToLabel = (index) => {
-        let n = Math.max(1, index);
-        let label = '';
-        while (n > 0) {
-          const rem = (n - 1) % 26;
-          label = String.fromCharCode(65 + rem) + label;
-          n = Math.floor((n - 1) / 26);
-        }
-        return label;
-      };
-      const shiftHelper = {
-        parseCellId(cellId) {
-          const match = /^([A-Za-z]+)([0-9]+)$/.exec(String(cellId || ''));
-          if (!match) return null;
-          return {
-            col: columnLabelToIndex(match[1].toUpperCase()),
-            row: parseInt(match[2], 10),
-          };
-        },
-        columnIndexToLabel,
-        shiftFormulaReferences: SpreadsheetApp.prototype.shiftFormulaReferences,
-      };
+      const helper = await makeShiftHelper();
 
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=B$1', 1, 1),
+        helper.shiftFormulaReferences('=B$1', 1, 1),
         '=C$1',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=B$1', 5, 0),
+        helper.shiftFormulaReferences('=B$1', 5, 0),
         '=B$1',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=B$1:D$3', 2, 1),
+        helper.shiftFormulaReferences('=B$1:D$3', 2, 1),
         '=C$1:E$3',
       );
     });
 
     it('shiftFormulaReferences respects fully absolute $col$row reference', async function () {
-      const { SpreadsheetApp } = await import(
-        '../imports/ui/metacell/runtime/index.js'
-      );
-      const columnLabelToIndex = (label) => {
-        let result = 0;
-        for (let i = 0; i < label.length; i++) {
-          result = result * 26 + (label.charCodeAt(i) - 64);
-        }
-        return result;
-      };
-      const columnIndexToLabel = (index) => {
-        let n = Math.max(1, index);
-        let label = '';
-        while (n > 0) {
-          const rem = (n - 1) % 26;
-          label = String.fromCharCode(65 + rem) + label;
-          n = Math.floor((n - 1) / 26);
-        }
-        return label;
-      };
-      const shiftHelper = {
-        parseCellId(cellId) {
-          const match = /^([A-Za-z]+)([0-9]+)$/.exec(String(cellId || ''));
-          if (!match) return null;
-          return {
-            col: columnLabelToIndex(match[1].toUpperCase()),
-            row: parseInt(match[2], 10),
-          };
-        },
-        columnIndexToLabel,
-        shiftFormulaReferences: SpreadsheetApp.prototype.shiftFormulaReferences,
-      };
+      const helper = await makeShiftHelper();
 
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$B$1', 3, 3),
+        helper.shiftFormulaReferences('=$B$1', 3, 3),
         '=$B$1',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$B$1+C2', 1, 1),
+        helper.shiftFormulaReferences('=$B$1+C2', 1, 1),
         '=$B$1+D3',
       );
       assert.strictEqual(
-        shiftHelper.shiftFormulaReferences('=$A$1:$B$3', 5, 5),
+        helper.shiftFormulaReferences('=$A$1:$B$3', 5, 5),
         '=$A$1:$B$3',
       );
     });

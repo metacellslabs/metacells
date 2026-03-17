@@ -205,10 +205,17 @@ export const parserMethods = {
         i++;
         while (i < text.length) {
           var c = text.charAt(i);
-          var prev = i > 0 ? text.charAt(i - 1) : '';
           out += c;
           i++;
-          if (c === quote && prev !== '\\') break;
+          if (c === quote) {
+            var bCount = 0;
+            var pos = i - 2;
+            while (pos >= 0 && text.charAt(pos) === '\\') {
+              bCount++;
+              pos--;
+            }
+            if (bCount % 2 === 0) break;
+          }
         }
         continue;
       }
