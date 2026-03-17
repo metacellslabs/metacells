@@ -49,6 +49,13 @@ export function validateDiscoveredFormulasOnServer() {
     .filter((fileName) => !shouldIgnoreFormulaFile(fileName))
     .sort();
 
+  console.log('[formulas] auto-discovery', {
+    manifestCount: manifest.length,
+    diskCount: discoveredFiles.length,
+    manifestFiles: manifest.map((m) => m.file),
+    diskFiles: discoveredFiles,
+  });
+
   const fileHashes = [];
   for (let i = 0; i < discoveredFiles.length; i += 1) {
     const fileName = discoveredFiles[i];
@@ -67,8 +74,11 @@ export function validateDiscoveredFormulasOnServer() {
   }
 
   if (manifest.length !== discoveredFiles.length) {
+    const manifestFiles = manifest.map((m) => m.file);
+    const missing = manifestFiles.filter((f) => !discoveredFiles.includes(f));
+    const extra = discoveredFiles.filter((f) => !manifestFiles.includes(f));
     throw new Error(
-      'Formula auto-discovery manifest does not match files on disk',
+      `Formula auto-discovery manifest does not match files on disk (manifest: ${manifest.length}, disk: ${discoveredFiles.length}, missing from disk: [${missing.join(', ')}], extra on disk: [${extra.join(', ')}])`,
     );
   }
 
