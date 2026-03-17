@@ -437,6 +437,7 @@ export class SpreadsheetApp {
     this.mentionAutocompleteState = null;
     this.crossTabMentionContext = null;
     this.suppressBlurCommitOnce = false;
+    this.suppressFormulaBarBlurCommitOnce = false;
     this.computedValuesBySheet = {};
     this.computeRequestToken = 0;
     this.manualUpdateRequestToken = 0;

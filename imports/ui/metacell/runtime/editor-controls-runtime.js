@@ -64,7 +64,10 @@ function isManualAIFormulaRaw(rawValue) {
 
 function hasPendingManualAIWork(app) {
   if (!app || app.isReportActive()) return false;
-  if (typeof app.hasPendingLocalEdit === 'function' && app.hasPendingLocalEdit()) {
+  if (
+    typeof app.hasPendingLocalEdit === 'function' &&
+    app.hasPendingLocalEdit()
+  ) {
     return true;
   }
   var inputs = Array.isArray(app.inputs) ? app.inputs : [];
@@ -73,7 +76,9 @@ function hasPendingManualAIWork(app) {
     if (!input || !input.id) continue;
     var raw = app.getRawCellValue(input.id);
     if (!isManualAIFormulaRaw(raw)) continue;
-    var state = String(app.storage.getCellState(app.activeSheetId, input.id) || '');
+    var state = String(
+      app.storage.getCellState(app.activeSheetId, input.id) || '',
+    );
     if (state !== 'resolved' && state !== 'error') return true;
     var displayValue = String(
       app.storage.getCellDisplayValue(app.activeSheetId, input.id) || '',
@@ -119,9 +124,8 @@ function syncFontFamilyButtonPreview(app, fontFamily) {
   if (!app || !app.cellFontFamilyButton) return;
   var nextFontFamily = String(fontFamily || 'default');
   app.cellFontFamilyButton.textContent = getFontFamilyLabel(nextFontFamily);
-  app.cellFontFamilyButton.style.fontFamily = getFontFamilyPreviewCssValue(
-    nextFontFamily,
-  );
+  app.cellFontFamilyButton.style.fontFamily =
+    getFontFamilyPreviewCssValue(nextFontFamily);
 }
 
 function closeCellFontFamilyPicker(app) {
@@ -137,7 +141,9 @@ function openCellFontFamilyPicker(app) {
 }
 
 function normalizeBgColorValue(value) {
-  var raw = String(value == null ? '' : value).trim().toLowerCase();
+  var raw = String(value == null ? '' : value)
+    .trim()
+    .toLowerCase();
   if (!raw) return '';
   if (/^#[0-9a-f]{6}$/.test(raw)) return raw;
   if (/^#[0-9a-f]{3}$/.test(raw)) {
@@ -229,10 +235,7 @@ function syncBgColorPickerState(app, color) {
     app.cellBgColorSwatch.classList.toggle('is-empty', !normalized);
   }
   app.cellBgColorButton.classList.toggle('has-color', !!normalized);
-  app.cellBgColorButton.setAttribute(
-    'data-color-value',
-    normalized || 'none',
-  );
+  app.cellBgColorButton.setAttribute('data-color-value', normalized || 'none');
   if (app.cellBgColorCustomInput) {
     app.cellBgColorCustomInput.value = normalized || '#fff7cc';
   }
@@ -397,7 +400,11 @@ function filterNamedCellJumpItems(items, query) {
     .toLowerCase();
   if (!normalized) return items.slice();
   return items.filter(function (item) {
-    return String(item.name || '').toLowerCase().indexOf(normalized) !== -1;
+    return (
+      String(item.name || '')
+        .toLowerCase()
+        .indexOf(normalized) !== -1
+    );
   });
 }
 
@@ -440,7 +447,7 @@ function renderNamedCellJumpOptions(app, items, hasQuery) {
         "'>" +
         "<span class='named-cell-jump-name'>" +
         item.name +
-        "</span>" +
+        '</span>' +
         "<span class='named-cell-jump-location'>" +
         item.sheetName +
         '!' +
@@ -455,7 +462,9 @@ function renderNamedCellJumpOptions(app, items, hasQuery) {
 function syncNamedCellJumpActiveOption(app) {
   if (!app || !app.namedCellJumpPopover) return;
   var state = ensureNamedCellJumpState(app);
-  var options = app.namedCellJumpPopover.querySelectorAll('.named-cell-jump-option');
+  var options = app.namedCellJumpPopover.querySelectorAll(
+    '.named-cell-jump-option',
+  );
   for (var i = 0; i < options.length; i++) {
     options[i].classList.toggle('is-active', i === state.activeIndex);
   }
@@ -470,7 +479,9 @@ function syncNamedCellJumpActiveOption(app) {
 
 function setNamedCellJumpActiveIndex(app, nextIndex) {
   var state = ensureNamedCellJumpState(app);
-  var count = Array.isArray(state.filteredItems) ? state.filteredItems.length : 0;
+  var count = Array.isArray(state.filteredItems)
+    ? state.filteredItems.length
+    : 0;
   if (!count) {
     state.activeIndex = -1;
     syncNamedCellJumpActiveOption(app);
@@ -498,7 +509,12 @@ function navigateToNamedCellJumpSelection(app, index) {
   return true;
 }
 
-function syncNamedCellJumpSearch(app, shouldOpen, preserveActiveIndex, queryOverride) {
+function syncNamedCellJumpSearch(
+  app,
+  shouldOpen,
+  preserveActiveIndex,
+  queryOverride,
+) {
   if (!app || !app.namedCellJumpPopover) return [];
   var state = ensureNamedCellJumpState(app);
   var allItems = getNamedCellJumpItems(app);
@@ -527,20 +543,30 @@ function tryNavigateFromCellNameInput(app) {
   var rawQuery = String(app.cellNameInput.value || '').trim();
   if (!rawQuery) return false;
   var state = ensureNamedCellJumpState(app);
-  if (state && state.activeIndex >= 0 && navigateToNamedCellJumpSelection(app, state.activeIndex)) {
+  if (
+    state &&
+    state.activeIndex >= 0 &&
+    navigateToNamedCellJumpSelection(app, state.activeIndex)
+  ) {
     return true;
   }
   var normalizedName = rawQuery.replace(/^@/, '');
   var items = getNamedCellJumpItems(app);
   for (var i = 0; i < items.length; i++) {
-    if (String(items[i].name || '').toLowerCase() === normalizedName.toLowerCase()) {
+    if (
+      String(items[i].name || '').toLowerCase() === normalizedName.toLowerCase()
+    ) {
       app.navigateToNamedCell(items[i].name);
       closeNamedCellJumpPicker(app);
       return true;
     }
   }
   var exactCellId = rawQuery.toUpperCase();
-  if (app.parseCellId(exactCellId) && app.inputById && app.inputById[exactCellId]) {
+  if (
+    app.parseCellId(exactCellId) &&
+    app.inputById &&
+    app.inputById[exactCellId]
+  ) {
     var targetInput = app.inputById[exactCellId];
     app.setActiveInput(targetInput);
     targetInput.focus();
@@ -1048,6 +1074,22 @@ export function bindFormulaBarEvents(app) {
   app.formulaInput.addEventListener('input', (e) => {
     if (!app.activeInput) return;
     var raw = e.target.value;
+    if (!app.crossTabMentionContext) {
+      if (!app.isEditingCell(app.activeInput)) {
+        app.grid.setEditing(app.activeInput, true);
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            app.editStartRawByCell,
+            app.activeInput.id,
+          )
+        ) {
+          app.editStartRawByCell[app.activeInput.id] = app.getRawCellValue(
+            app.activeInput.id,
+          );
+        }
+      }
+      app.activeInput.value = raw;
+    }
     app.syncCrossTabMentionSourceValue(raw);
     app.syncAIDraftLock();
     app.syncAIModeUI();
@@ -1065,10 +1107,33 @@ export function bindFormulaBarEvents(app) {
       e.preventDefault();
       app.commitFormulaBarValue();
       app.activeInput.focus();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      var restoreValue = Object.prototype.hasOwnProperty.call(
+        app.editStartRawByCell,
+        app.activeInput.id,
+      )
+        ? app.editStartRawByCell[app.activeInput.id]
+        : app.getRawCellValue(app.activeInput.id);
+      app.formulaInput.value = restoreValue;
+      app.activeInput.value = restoreValue;
+      app.grid.setEditing(app.activeInput, false);
+      delete app.editStartRawByCell[app.activeInput.id];
+      app.formulaRefCursorId = null;
+      app.formulaMentionPreview = null;
+      app.syncAIDraftLock();
+      app.suppressFormulaBarBlurCommitOnce = true;
+      app.activeInput.focus();
     }
   });
   app.formulaInput.addEventListener('blur', () => {
-    app.commitFormulaBarValue();
+    var suppressCommit = app.suppressFormulaBarBlurCommitOnce;
+    app.suppressFormulaBarBlurCommitOnce = false;
+    if (!suppressCommit) {
+      app.commitFormulaBarValue();
+    }
     app.syncAIDraftLock();
     app.syncAIModeUI();
     app.hideMentionAutocompleteSoon();
@@ -1084,7 +1149,11 @@ export function setupCellNameControls(app) {
         var state = ensureNamedCellJumpState(app);
         var delta = e.key === 'ArrowDown' ? 1 : -1;
         var nextIndex =
-          state.activeIndex >= 0 ? state.activeIndex + delta : delta > 0 ? 0 : filteredItems.length - 1;
+          state.activeIndex >= 0
+            ? state.activeIndex + delta
+            : delta > 0
+              ? 0
+              : filteredItems.length - 1;
         setNamedCellJumpActiveIndex(app, nextIndex);
       }
       return;
@@ -1272,7 +1341,9 @@ export function syncCellPresentationControls(app) {
     if (disabled) closeBgColorPicker(app);
   }
   if (app.cellFontFamilyButton) {
-    var fontFamily = disabled ? 'default' : String(presentation.fontFamily || 'default');
+    var fontFamily = disabled
+      ? 'default'
+      : String(presentation.fontFamily || 'default');
     app.cellFontFamilyButton.disabled = disabled;
     syncFontFamilyButtonPreview(app, fontFamily);
     if (disabled) closeCellFontFamilyPicker(app);
@@ -1501,7 +1572,8 @@ export function refreshNamedCellJumpOptions(app) {
   if (!app.namedCellJump) return;
   syncNamedCellJumpSearch(
     app,
-    !app.namedCellJumpPopover.hidden && document.activeElement === app.cellNameInput,
+    !app.namedCellJumpPopover.hidden &&
+      document.activeElement === app.cellNameInput,
   );
 }
 
