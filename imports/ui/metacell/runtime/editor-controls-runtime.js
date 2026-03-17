@@ -1163,11 +1163,13 @@ export function setupCellNameControls(app) {
       if (!tryNavigateFromCellNameInput(app)) {
         app.applyActiveCellName();
         closeNamedCellJumpPicker(app);
+        if (app.activeInput) app.activeInput.focus();
       }
       return;
     }
     if (e.key === 'Escape') {
       closeNamedCellJumpPicker(app);
+      if (app.activeInput) app.activeInput.focus();
       app.syncCellNameInput();
     }
   });
