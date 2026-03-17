@@ -163,6 +163,97 @@ describe('metacells', function () {
       assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'G2', {}), 60);
     });
 
+    it('evaluates FILE, PDF and DOCX formulas to attachment values', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: 'Hello World',
+        A2: '# Report\n\n- item 1',
+        B1: '=FILE("report.txt", A1)',
+        B2: '=FILE("report.pdf", A1, "PDF")',
+        B3: '=FILE("doc.docx", A2, "DOCX_MD")',
+        C1: '=PDF("invoice.pdf", A1)',
+        C2: '=DOCX("summary.docx", A2)',
+        D1: '=FILE("", A1)',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      const fileResult = formulaEngine.evaluateCell('sheet-1', 'B1', {});
+      assert.ok(
+        String(fileResult).startsWith('__ATTACHMENT__:'),
+        'FILE result should be an attachment',
+      );
+      const fileData = JSON.parse(
+        String(fileResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.strictEqual(fileData.name, 'report.txt');
+      assert.strictEqual(fileData.content, 'Hello World');
+      assert.strictEqual(fileData.generated, true);
+
+      const filePdfResult = formulaEngine.evaluateCell('sheet-1', 'B2', {});
+      const filePdfData = JSON.parse(
+        String(filePdfResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.strictEqual(filePdfData.name, 'report.pdf');
+      assert.strictEqual(filePdfData.type, 'application/pdf');
+      assert.strictEqual(filePdfData.generatedAs, 'PDF');
+
+      const fileDocxResult = formulaEngine.evaluateCell('sheet-1', 'B3', {});
+      const fileDocxData = JSON.parse(
+        String(fileDocxResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.strictEqual(fileDocxData.name, 'doc.docx');
+      assert.strictEqual(
+        fileDocxData.type,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      assert.strictEqual(fileDocxData.generatedAs, 'DOCX_MD');
+
+      const pdfResult = formulaEngine.evaluateCell('sheet-1', 'C1', {});
+      const pdfData = JSON.parse(
+        String(pdfResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.strictEqual(pdfData.name, 'invoice.pdf');
+      assert.strictEqual(pdfData.type, 'application/pdf');
+      assert.strictEqual(pdfData.generatedAs, 'PDF');
+      assert.strictEqual(pdfData.content, 'Hello World');
+
+      const docxResult = formulaEngine.evaluateCell('sheet-1', 'C2', {});
+      const docxData = JSON.parse(
+        String(docxResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.strictEqual(docxData.name, 'summary.docx');
+      assert.strictEqual(
+        docxData.type,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      assert.strictEqual(docxData.generatedAs, 'DOCX_MD');
+      assert.ok(String(docxData.content).includes('Report'));
+
+      assert.strictEqual(
+        formulaEngine.evaluateCell('sheet-1', 'D1', {}),
+        '',
+        'FILE with empty name should return empty string',
+      );
+    });
+
     it('collects dependency references for all AI formula shapes', async function () {
       const { FormulaEngine } =
         await import('../imports/engine/formula-engine.js');
@@ -269,22 +360,42 @@ describe('metacells', function () {
       const b4Meta = {};
 
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B1', {}, { runtimeMeta: b1Meta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B1',
+          {},
+          { runtimeMeta: b1Meta },
+        ),
         '',
       );
       assert.strictEqual(b1Meta.displayValue, 'Params: @A1, @name are empty');
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B2', {}, { runtimeMeta: b2Meta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B2',
+          {},
+          { runtimeMeta: b2Meta },
+        ),
         '',
       );
       assert.strictEqual(b2Meta.displayValue, 'Params: @A1, @name are empty');
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B3', {}, { runtimeMeta: b3Meta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B3',
+          {},
+          { runtimeMeta: b3Meta },
+        ),
         '',
       );
       assert.strictEqual(b3Meta.displayValue, 'Params: @A1, @name are empty');
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B4', {}, { runtimeMeta: b4Meta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B4',
+          {},
+          { runtimeMeta: b4Meta },
+        ),
         '',
       );
       assert.strictEqual(b4Meta.displayValue, 'Params: @A1 are empty');
@@ -373,21 +484,30 @@ describe('metacells', function () {
       const askMeta = {};
       const eqMeta = {};
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B1', {}, { runtimeMeta: askMeta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B1',
+          {},
+          { runtimeMeta: askMeta },
+        ),
         '',
       );
       assert.strictEqual(askMeta.displayValue, 'Waiting for input');
       assert.strictEqual(
-        formulaEngine.evaluateCell('sheet-1', 'B2', {}, { runtimeMeta: eqMeta }),
+        formulaEngine.evaluateCell(
+          'sheet-1',
+          'B2',
+          {},
+          { runtimeMeta: eqMeta },
+        ),
         '',
       );
       assert.strictEqual(eqMeta.displayValue, 'Nothing yet');
     });
 
     it('persists display placeholders separately from computed values', async function () {
-      const { WorkbookStorageAdapter } = await import(
-        '../imports/engine/workbook-storage-adapter.js'
-      );
+      const { WorkbookStorageAdapter } =
+        await import('../imports/engine/workbook-storage-adapter.js');
 
       const storage = new WorkbookStorageAdapter({
         sheets: {
@@ -404,14 +524,9 @@ describe('metacells', function () {
         },
       });
 
-      storage.setComputedCellValue(
-        'sheet-1',
-        'B1',
-        '',
-        'resolved',
-        '',
-        { displayValue: 'Params: @A1 are empty' },
-      );
+      storage.setComputedCellValue('sheet-1', 'B1', '', 'resolved', '', {
+        displayValue: 'Params: @A1 are empty',
+      });
 
       assert.strictEqual(storage.getCellComputedValue('sheet-1', 'B1'), '');
       assert.strictEqual(
@@ -518,18 +633,28 @@ describe('metacells', function () {
       );
 
       const c3Collector = createCollector();
-      const c3Value = formulaEngine.evaluateCell('sheet-1', 'C3', {}, {
-        dependencyCollector: c3Collector,
-      });
+      const c3Value = formulaEngine.evaluateCell(
+        'sheet-1',
+        'C3',
+        {},
+        {
+          dependencyCollector: c3Collector,
+        },
+      );
       assert.strictEqual(c3Value, '...');
       assert.deepStrictEqual(c3Collector.snapshot().cells, [
         { sheetId: 'sheet-1', cellId: 'B1' },
       ]);
 
       const b4Collector = createCollector();
-      const b4Value = formulaEngine.evaluateCell('sheet-1', 'B4', {}, {
-        dependencyCollector: b4Collector,
-      });
+      const b4Value = formulaEngine.evaluateCell(
+        'sheet-1',
+        'B4',
+        {},
+        {
+          dependencyCollector: b4Collector,
+        },
+      );
       assert.strictEqual(b4Value, '...');
       assert.deepStrictEqual(b4Collector.snapshot().cells, [
         { sheetId: 'sheet-1', cellId: 'C3' },
@@ -701,9 +826,7 @@ describe('metacells', function () {
         helpSection.items.some((item) => String(item).includes('Telegram')),
       );
       assert.ok(
-        helpSection.items.some((item) =>
-          String(item).includes('Twitter / X'),
-        ),
+        helpSection.items.some((item) => String(item).includes('Twitter / X')),
       );
     });
 
@@ -724,9 +847,8 @@ describe('metacells', function () {
     });
 
     it('returns a readable error for invalid Telegram test settings', async function () {
-      const { testTelegramConnection } = await import(
-        '../imports/api/channels/server/handlers/telegram.js'
-      );
+      const { testTelegramConnection } =
+        await import('../imports/api/channels/server/handlers/telegram.js');
 
       await assert.rejects(
         () =>
@@ -739,9 +861,8 @@ describe('metacells', function () {
     });
 
     it('returns a readable error for invalid Twitter/X test settings', async function () {
-      const { testTwitterConnection } = await import(
-        '../imports/api/channels/server/handlers/twitter.js'
-      );
+      const { testTwitterConnection } =
+        await import('../imports/api/channels/server/handlers/twitter.js');
 
       await assert.rejects(
         () =>
@@ -754,9 +875,8 @@ describe('metacells', function () {
     });
 
     it('rejects Twitter/X attachments before calling the API', async function () {
-      const { sendTwitterMessage } = await import(
-        '../imports/api/channels/server/handlers/twitter.js'
-      );
+      const { sendTwitterMessage } =
+        await import('../imports/api/channels/server/handlers/twitter.js');
 
       await assert.rejects(
         () =>
@@ -778,17 +898,12 @@ describe('metacells', function () {
         buildChannelSendBodyFromPreparedPrompt,
         parseChannelSendCommand,
         stripChannelSendFileAndImagePlaceholders,
-      } = await import(
-        '../imports/api/channels/commands.js'
-      );
+      } = await import('../imports/api/channels/commands.js');
 
-      assert.deepStrictEqual(
-        parseChannelSendCommand('/tg hello from sheet'),
-        {
-          label: 'tg',
-          message: 'hello from sheet',
-        },
-      );
+      assert.deepStrictEqual(parseChannelSendCommand('/tg hello from sheet'), {
+        label: 'tg',
+        message: 'hello from sheet',
+      });
       assert.deepStrictEqual(parseChannelSendCommand('/tg:send:message'), {
         label: 'tg',
         message: 'message',
@@ -867,9 +982,8 @@ describe('metacells', function () {
     it('collects and injects channel mentions into AI prompts', async function () {
       const { FormulaEngine } =
         await import('../imports/engine/formula-engine.js');
-      const { formatChannelEventForPrompt } = await import(
-        '../imports/api/channels/mentioning.js'
-      );
+      const { formatChannelEventForPrompt } =
+        await import('../imports/api/channels/mentioning.js');
 
       const storageService = {
         getCellValue() {
@@ -952,9 +1066,8 @@ describe('metacells', function () {
     });
 
     it('sends file mentions as attached text content while preserving prompt text', async function () {
-      const { buildChannelSendBodyFromPreparedPrompt } = await import(
-        '../imports/api/channels/commands.js'
-      );
+      const { buildChannelSendBodyFromPreparedPrompt } =
+        await import('../imports/api/channels/commands.js');
       const { FormulaEngine } =
         await import('../imports/engine/formula-engine.js');
 
@@ -1179,10 +1292,8 @@ describe('metacells', function () {
     });
 
     it('builds OpenAI responses input for multimodal messages and extracts output text', async function () {
-      const {
-        buildOpenAIResponsesInput,
-        extractOpenAIResponsesText,
-      } = await import('../imports/api/ai/index.js');
+      const { buildOpenAIResponsesInput, extractOpenAIResponsesText } =
+        await import('../imports/api/ai/index.js');
 
       assert.deepStrictEqual(
         buildOpenAIResponsesInput([
@@ -1729,7 +1840,9 @@ describe('metacells', function () {
       let requestCount = 0;
       service.requestChat = () => {
         requestCount += 1;
-        return Promise.resolve('| Name | GDP |\n| --- | --- |\n| Japan | 4.3 |');
+        return Promise.resolve(
+          '| Name | GDP |\n| --- | --- |\n| Japan | 4.3 |',
+        );
       };
       service.enrichPromptWithFetchedUrls = (prompt) => Promise.resolve(prompt);
 
@@ -1794,11 +1907,17 @@ describe('metacells', function () {
       const matrix = await service.askTable('top states in ASIA', 2, 5, {
         onResult(value) {
           events.push('result');
-          assert.deepStrictEqual(value, [['Name', 'GDP'], ['Japan', '4.3']]);
+          assert.deepStrictEqual(value, [
+            ['Name', 'GDP'],
+            ['Japan', '4.3'],
+          ]);
         },
       });
 
-      assert.deepStrictEqual(matrix, [['Name', 'GDP'], ['Japan', '4.3']]);
+      assert.deepStrictEqual(matrix, [
+        ['Name', 'GDP'],
+        ['Japan', '4.3'],
+      ]);
       assert.deepStrictEqual(events, ['result', 'invalidate']);
     });
 
@@ -2080,9 +2199,8 @@ describe('metacells', function () {
     });
 
     it('relinks named cells when rows and columns are inserted or deleted', async function () {
-      const { remapNamedCellsForStructureEdit } = await import(
-        '../imports/ui/metacell/runtime/structure-runtime.js'
-      );
+      const { remapNamedCellsForStructureEdit } =
+        await import('../imports/ui/metacell/runtime/structure-runtime.js');
 
       const parseCellId = (cellId) => {
         const match = /^([A-Za-z]+)([0-9]+)$/.exec(
@@ -2625,7 +2743,10 @@ describe('metacells', function () {
         const saved = await Sheets.findOneAsync(sheetId);
         const decodedWorkbook = decodeWorkbookDocument(saved.workbook || {});
         assert.strictEqual(result.values.B4, '...');
-        assert.strictEqual(decodedWorkbook.sheets['sheet-1'].cells.C4.value, '3');
+        assert.strictEqual(
+          decodedWorkbook.sheets['sheet-1'].cells.C4.value,
+          '3',
+        );
         assert.strictEqual(
           decodedWorkbook.sheets['sheet-1'].cells.B4.state,
           'pending',
@@ -3073,8 +3194,14 @@ describe('metacells', function () {
 
         const saved = await Sheets.findOneAsync(sheetId);
         const decoded = decodeWorkbookDocument(saved.workbook || {});
-        assert.strictEqual(decoded.sheets['sheet-1'].cells.B5.source, 'Invoice A');
-        assert.strictEqual(decoded.sheets['sheet-1'].cells.B5.generatedBy, 'B4');
+        assert.strictEqual(
+          decoded.sheets['sheet-1'].cells.B5.source,
+          'Invoice A',
+        );
+        assert.strictEqual(
+          decoded.sheets['sheet-1'].cells.B5.generatedBy,
+          'B4',
+        );
       } finally {
         await Sheets.removeAsync({ _id: sheetId });
       }
