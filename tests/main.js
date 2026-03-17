@@ -3079,6 +3079,141 @@ describe('metacells', function () {
         await Sheets.removeAsync({ _id: sheetId });
       }
     });
+
+    const makeShiftHelper = async () => {
+      const { SpreadsheetApp } = await import(
+        '../imports/ui/metacell/runtime/index.js'
+      );
+      const columnLabelToIndex = (label) => {
+        let result = 0;
+        for (let i = 0; i < label.length; i++) {
+          result = result * 26 + (label.charCodeAt(i) - 64);
+        }
+        return result;
+      };
+      const columnIndexToLabel = (index) => {
+        let n = Math.max(1, index);
+        let label = '';
+        while (n > 0) {
+          const rem = (n - 1) % 26;
+          label = String.fromCharCode(65 + rem) + label;
+          n = Math.floor((n - 1) / 26);
+        }
+        return label;
+      };
+      return {
+        parseCellId(cellId) {
+          const match = /^\$?([A-Za-z]+)\$?([0-9]+)$/.exec(
+            String(cellId || ''),
+          );
+          if (!match) return null;
+          return {
+            col: columnLabelToIndex(match[1].toUpperCase()),
+            row: parseInt(match[2], 10),
+          };
+        },
+        columnIndexToLabel,
+        shiftFormulaReferences: SpreadsheetApp.prototype.shiftFormulaReferences,
+      };
+    };
+
+    it('shiftFormulaReferences adjusts relative references normally', async function () {
+      const helper = await makeShiftHelper();
+
+      assert.strictEqual(helper.shiftFormulaReferences('=B1', 1, 1), '=C2');
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=B1+C2', 1, 0),
+        '=B2+C3',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=A1:B3', 0, 1),
+        '=B1:C3',
+      );
+    });
+
+    it('shiftFormulaReferences respects $ absolute column reference', async function () {
+      const helper = await makeShiftHelper();
+
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$B1', 1, 1),
+        '=$B2',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$B1', 0, 3),
+        '=$B1',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$B1:$D3', 1, 1),
+        '=$B2:$D4',
+      );
+    });
+
+    it('shiftFormulaReferences respects $ absolute row reference', async function () {
+      const helper = await makeShiftHelper();
+
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=B$1', 1, 1),
+        '=C$1',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=B$1', 5, 0),
+        '=B$1',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=B$1:D$3', 2, 1),
+        '=C$1:E$3',
+      );
+    });
+
+    it('shiftFormulaReferences respects fully absolute $col$row reference', async function () {
+      const helper = await makeShiftHelper();
+
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$B$1', 3, 3),
+        '=$B$1',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$B$1+C2', 1, 1),
+        '=$B$1+D3',
+      );
+      assert.strictEqual(
+        helper.shiftFormulaReferences('=$A$1:$B$3', 5, 5),
+        '=$A$1:$B$3',
+      );
+    });
+
+    it('evaluates formulas with $ absolute references correctly', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: '10',
+        B1: '=$A$1+5',
+        C1: '=$A1',
+        D1: '=A$1',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B1', {}), 15);
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'C1', {}), '10');
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'D1', {}), '10');
+    });
   }
 });
 

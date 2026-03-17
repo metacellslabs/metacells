@@ -2390,19 +2390,45 @@ export class SpreadsheetApp {
       return rawValue;
     var body = prefix === '=' ? rawValue.substring(1) : rawValue;
     var replaced = body.replace(
-      /((?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)!)?([A-Za-z]+[0-9]+)(:([A-Za-z]+[0-9]+))?/g,
-      (_, qualifier, firstRef, rangePart, secondRef) => {
-        var shiftRef = (ref) => {
-          var parsed = this.parseCellId(ref);
-          if (!parsed) return ref;
-          var nextCol = Math.max(1, parsed.col + dCol);
-          var nextRow = Math.max(1, parsed.row + dRow);
-          return this.formatCellId(nextCol, nextRow);
+      /((?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)!)?(\$?)([A-Za-z]+)(\$?)([0-9]+)(:(\$?)([A-Za-z]+)(\$?)([0-9]+))?/g,
+      (
+        _,
+        qualifier,
+        colDollar1,
+        col1,
+        rowDollar1,
+        row1,
+        rangePart,
+        colDollar2,
+        col2,
+        rowDollar2,
+        row2,
+      ) => {
+        var shiftRef = (colDollar, col, rowDollar, row) => {
+          var parsed = this.parseCellId(col + row);
+          if (!parsed) return colDollar + col + rowDollar + row;
+          var nextCol = colDollar
+            ? parsed.col
+            : Math.max(1, parsed.col + dCol);
+          var nextRow = rowDollar
+            ? parsed.row
+            : Math.max(1, parsed.row + dRow);
+          return (
+            colDollar +
+            this.columnIndexToLabel(nextCol) +
+            rowDollar +
+            nextRow
+          );
         };
 
-        var left = shiftRef(firstRef);
-        if (rangePart && secondRef) {
-          return (qualifier || '') + left + ':' + shiftRef(secondRef);
+        var left = shiftRef(colDollar1, col1, rowDollar1, row1);
+        if (rangePart && col2) {
+          return (
+            (qualifier || '') +
+            left +
+            ':' +
+            shiftRef(colDollar2, col2, rowDollar2, row2)
+          );
         }
         return (qualifier || '') + left;
       },
