@@ -1045,9 +1045,12 @@ export function commitFormulaBarValue(app) {
 }
 
 export function bindFormulaBarEvents(app) {
+  var escaping = false;
+
   app.formulaInput.addEventListener('input', (e) => {
     if (!app.activeInput) return;
     var raw = e.target.value;
+    app.activeInput.value = raw;
     app.syncCrossTabMentionSourceValue(raw);
     app.syncAIDraftLock();
     app.syncAIModeUI();
@@ -1066,8 +1069,22 @@ export function bindFormulaBarEvents(app) {
       app.commitFormulaBarValue();
       app.activeInput.focus();
     }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      var existingRaw = app.getRawCellValue(app.activeInput.id) || '';
+      var existingAttachment = app.parseAttachmentSource(existingRaw);
+      var displayValue = existingAttachment ? String(existingAttachment.name || '') : existingRaw;
+      app.formulaInput.value = displayValue;
+      app.activeInput.value = displayValue;
+      escaping = true;
+      app.activeInput.focus();
+      setTimeout(() => {
+        escaping = false;
+      }, 0);
+    }
   });
   app.formulaInput.addEventListener('blur', () => {
+    if (escaping) return;
     app.commitFormulaBarValue();
     app.syncAIDraftLock();
     app.syncAIModeUI();
