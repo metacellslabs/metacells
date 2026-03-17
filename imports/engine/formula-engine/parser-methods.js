@@ -41,7 +41,8 @@ export const parserMethods = {
   },
 
   preprocessFormula(formula, sourceCellId) {
-    var withInlineAsk = this.preprocessInlineAskCalls(formula);
+    var withNormalizedRefs = this.normalizeAbsoluteReferences(formula);
+    var withInlineAsk = this.preprocessInlineAskCalls(withNormalizedRefs);
     var withUpdateTargets = this.preprocessUpdateTargets(
       withInlineAsk,
       sourceCellId,
@@ -51,7 +52,7 @@ export const parserMethods = {
       sourceCellId,
     );
     var withRawAtSheetRegionRefs = withRecalcTargets.replace(
-      /_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, startCellId, endCellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -66,7 +67,7 @@ export const parserMethods = {
       },
     );
     var withAtSheetRegionRefs = withRawAtSheetRegionRefs.replace(
-      /@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, startCellId, endCellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -81,7 +82,7 @@ export const parserMethods = {
       },
     );
     var withRawAtRegionRefs = withAtSheetRegionRefs.replace(
-      /_@([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /_@(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, startCellId, endCellId) => {
         return (
           'mentionRawRegionRef("' +
@@ -93,7 +94,7 @@ export const parserMethods = {
       },
     );
     var withAtRegionRefs = withRawAtRegionRefs.replace(
-      /@([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /@(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, startCellId, endCellId) => {
         return (
           'mentionRegionRef("' +
@@ -105,7 +106,7 @@ export const parserMethods = {
       },
     );
     var withRawAtSheetRefs = withAtRegionRefs.replace(
-      /_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)/g,
+      /_@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, cellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -118,7 +119,7 @@ export const parserMethods = {
       },
     );
     var withAtSheetRefs = withRawAtSheetRefs.replace(
-      /@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)/g,
+      /@(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, cellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -131,7 +132,7 @@ export const parserMethods = {
       },
     );
     var withSheetRegionRefs = withAtSheetRefs.replace(
-      /(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, startCellId, endCellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -146,7 +147,7 @@ export const parserMethods = {
       },
     );
     var withRegionRefs = withSheetRegionRefs.replace(
-      /([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)/g,
+      /(\$?[A-Za-z]+\$?[0-9]+):(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, startCellId, endCellId) => {
         return (
           'regionRef("' +
@@ -158,7 +159,7 @@ export const parserMethods = {
       },
     );
     var withSheetRefs = withRegionRefs.replace(
-      /(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!([A-Za-z]+[0-9]+)/g,
+      /(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))!(\$?[A-Za-z]+\$?[0-9]+)/g,
       (_, quoted, plain, cellId) => {
         var sheetName = quoted || plain || '';
         return (
@@ -190,6 +191,57 @@ export const parserMethods = {
               '")';
       },
     );
+  },
+
+  normalizeAbsoluteReferences(formula) {
+    var text = String(formula || '');
+    var parts = [];
+    var i = 0;
+    while (i < text.length) {
+      var ch = text.charAt(i);
+      if (ch === '"') {
+        var start = i;
+        i++;
+        while (i < text.length) {
+          if (text.charAt(i) === '"' && text.charAt(i - 1) !== '\\') {
+            i++;
+            break;
+          }
+          i++;
+        }
+        parts.push({ literal: true, value: text.slice(start, i) });
+        continue;
+      }
+      if (ch === "'" && text.charAt(i + 1) !== '(') {
+        var qstart = i;
+        i++;
+        while (i < text.length) {
+          if (text.charAt(i) === "'" && text.charAt(i - 1) !== '\\') {
+            i++;
+            break;
+          }
+          i++;
+        }
+        parts.push({ literal: true, value: text.slice(qstart, i) });
+        continue;
+      }
+      var last = parts[parts.length - 1];
+      if (last && !last.literal) {
+        last.value += ch;
+      } else {
+        parts.push({ literal: false, value: ch });
+      }
+      i++;
+    }
+    return parts
+      .map(function (part) {
+        if (part.literal) return part.value;
+        return part.value
+          .replace(/\$([A-Za-z]+)\$([0-9]+)/g, '$1$2')
+          .replace(/\$([A-Za-z]+)([0-9]+)/g, '$1$2')
+          .replace(/([A-Za-z]+)\$([0-9]+)/g, '$1$2');
+      })
+      .join('');
   },
 
   preprocessInlineAskCalls(formula) {

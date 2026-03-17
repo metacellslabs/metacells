@@ -49,7 +49,7 @@ export const referenceMethods = {
   },
 
   parseCellId(cellId) {
-    var match = /^([A-Za-z]+)([0-9]+)$/.exec(String(cellId || ''));
+    var match = /^\$?([A-Za-z]+)\$?([0-9]+)$/.exec(String(cellId || ''));
     if (!match) return null;
     return {
       col: this.columnLabelToIndex(match[1].toUpperCase()),

@@ -2390,14 +2390,25 @@ export class SpreadsheetApp {
       return rawValue;
     var body = prefix === '=' ? rawValue.substring(1) : rawValue;
     var replaced = body.replace(
-      /((?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)!)?([A-Za-z]+[0-9]+)(:([A-Za-z]+[0-9]+))?/g,
+      /((?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)!)?(\$?[A-Za-z]+\$?[0-9]+)(:(\$?[A-Za-z]+\$?[0-9]+))?/g,
       (_, qualifier, firstRef, rangePart, secondRef) => {
         var shiftRef = (ref) => {
           var parsed = this.parseCellId(ref);
           if (!parsed) return ref;
-          var nextCol = Math.max(1, parsed.col + dCol);
-          var nextRow = Math.max(1, parsed.row + dRow);
-          return this.formatCellId(nextCol, nextRow);
+          var colAbsolute = ref.charAt(0) === '$';
+          var stripped = colAbsolute ? ref.substring(1) : ref;
+          var digitIdx = stripped.search(/[0-9]/);
+          var rowAbsolute =
+            digitIdx > 0 && stripped.charAt(digitIdx - 1) === '$';
+          var nextCol = colAbsolute ? parsed.col : Math.max(1, parsed.col + dCol);
+          var nextRow = rowAbsolute ? parsed.row : Math.max(1, parsed.row + dRow);
+          var colLabel = this.columnIndexToLabel(nextCol);
+          return (
+            (colAbsolute ? '$' : '') +
+            colLabel +
+            (rowAbsolute ? '$' : '') +
+            nextRow
+          );
         };
 
         var left = shiftRef(firstRef);

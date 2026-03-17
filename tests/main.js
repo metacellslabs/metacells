@@ -3079,6 +3079,182 @@ describe('metacells', function () {
         await Sheets.removeAsync({ _id: sheetId });
       }
     });
+
+    it('parseCellId strips $ signs from absolute cell references', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const formulaEngine = new FormulaEngine(
+        {
+          getCellValue() { return ''; },
+          getCellState() { return 'resolved'; },
+          resolveNamedCell() { return null; },
+        },
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        ['A1', 'B1', 'C2'],
+      );
+
+      assert.deepStrictEqual(formulaEngine.parseCellId('A1'), { col: 1, row: 1 });
+      assert.deepStrictEqual(formulaEngine.parseCellId('$A$1'), { col: 1, row: 1 });
+      assert.deepStrictEqual(formulaEngine.parseCellId('$A1'), { col: 1, row: 1 });
+      assert.deepStrictEqual(formulaEngine.parseCellId('A$1'), { col: 1, row: 1 });
+      assert.deepStrictEqual(formulaEngine.parseCellId('$B$2'), { col: 2, row: 2 });
+      assert.strictEqual(formulaEngine.parseCellId('$'), null);
+      assert.strictEqual(formulaEngine.parseCellId(''), null);
+    });
+
+    it('normalizeAbsoluteReferences strips $ from cell references but not string literals', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const formulaEngine = new FormulaEngine(
+        {
+          getCellValue() { return ''; },
+          getCellState() { return 'resolved'; },
+          resolveNamedCell() { return null; },
+        },
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        ['A1', 'B1', 'C2'],
+      );
+
+      assert.strictEqual(formulaEngine.normalizeAbsoluteReferences('$B$1+A1'), 'B1+A1');
+      assert.strictEqual(formulaEngine.normalizeAbsoluteReferences('$B1+A$1'), 'B1+A1');
+      assert.strictEqual(formulaEngine.normalizeAbsoluteReferences('B1+A1'), 'B1+A1');
+      assert.strictEqual(formulaEngine.normalizeAbsoluteReferences('SUM($A$1:$B$2)'), 'SUM(A1:B2)');
+      assert.strictEqual(
+        formulaEngine.normalizeAbsoluteReferences('"The ref is $A$1"'),
+        '"The ref is $A$1"',
+      );
+    });
+
+    it('shiftFormulaReferences respects absolute $ references during fill', async function () {
+      const { referenceMethods } = await import(
+        '../imports/engine/formula-engine/reference-methods.js'
+      );
+
+      const engine = Object.assign(Object.create(null), referenceMethods, {
+        formatCellId(col, row) {
+          return this.columnIndexToLabel(col) + row;
+        },
+        shiftFormulaReferences(rawValue, dRow, dCol) {
+          if (!rawValue) return rawValue;
+          var prefix = rawValue.charAt(0);
+          if (
+            prefix !== '=' &&
+            prefix !== "'" &&
+            prefix !== '>' &&
+            prefix !== '#'
+          )
+            return rawValue;
+          var body = prefix === '=' ? rawValue.substring(1) : rawValue;
+          var replaced = body.replace(
+            /((?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)!)?(\$?[A-Za-z]+\$?[0-9]+)(:(\$?[A-Za-z]+\$?[0-9]+))?/g,
+            (_, qualifier, firstRef, rangePart, secondRef) => {
+              var shiftRef = (ref) => {
+                var parsed = this.parseCellId(ref);
+                if (!parsed) return ref;
+                var colAbsolute = ref.charAt(0) === '$';
+                var stripped = colAbsolute ? ref.substring(1) : ref;
+                var digitIdx = stripped.search(/[0-9]/);
+                var rowAbsolute =
+                  digitIdx > 0 && stripped.charAt(digitIdx - 1) === '$';
+                var nextCol = colAbsolute
+                  ? parsed.col
+                  : Math.max(1, parsed.col + dCol);
+                var nextRow = rowAbsolute
+                  ? parsed.row
+                  : Math.max(1, parsed.row + dRow);
+                var colLabel = this.columnIndexToLabel(nextCol);
+                return (
+                  (colAbsolute ? '$' : '') +
+                  colLabel +
+                  (rowAbsolute ? '$' : '') +
+                  nextRow
+                );
+              };
+              var left = shiftRef(firstRef);
+              if (rangePart && secondRef) {
+                return (qualifier || '') + left + ':' + shiftRef(secondRef);
+              }
+              return (qualifier || '') + left;
+            },
+          );
+          return prefix === '=' ? '=' + replaced : replaced;
+        },
+      });
+
+      // Fully absolute: neither row nor column shifts
+      assert.strictEqual(engine.shiftFormulaReferences('=$B$1', 1, 0), '=$B$1');
+      assert.strictEqual(engine.shiftFormulaReferences('=$B$1', 0, 1), '=$B$1');
+      assert.strictEqual(engine.shiftFormulaReferences('=$B$1', 3, 2), '=$B$1');
+
+      // Column absolute, row relative
+      assert.strictEqual(engine.shiftFormulaReferences('=$B1', 1, 0), '=$B2');
+      assert.strictEqual(engine.shiftFormulaReferences('=$B1', 0, 1), '=$B1');
+
+      // Row absolute, column relative
+      assert.strictEqual(engine.shiftFormulaReferences('=A$1', 1, 0), '=A$1');
+      assert.strictEqual(engine.shiftFormulaReferences('=A$1', 0, 1), '=B$1');
+
+      // Fully relative: both shift
+      assert.strictEqual(engine.shiftFormulaReferences('=A1', 1, 0), '=A2');
+      assert.strictEqual(engine.shiftFormulaReferences('=A1', 0, 1), '=B1');
+
+      // Mixed formula: absolute + relative
+      assert.strictEqual(
+        engine.shiftFormulaReferences('=$B$1+A1', 1, 0),
+        '=$B$1+A2',
+      );
+      assert.strictEqual(
+        engine.shiftFormulaReferences('=$B$1+A1', 0, 1),
+        '=$B$1+B1',
+      );
+
+      // Range with absolute references
+      assert.strictEqual(
+        engine.shiftFormulaReferences('=$A$1:$B$2', 2, 1),
+        '=$A$1:$B$2',
+      );
+      assert.strictEqual(
+        engine.shiftFormulaReferences('=A1:$B$2', 1, 0),
+        '=A2:$B$2',
+      );
+    });
+
+    it('evaluates formulas with absolute $ cell references correctly', async function () {
+      const { FormulaEngine } =
+        await import('../imports/engine/formula-engine.js');
+
+      const cells = {
+        A1: '10',
+        B1: '=$A$1+5',
+        B2: '=A$1*2',
+        B3: '=$A1+1',
+      };
+      const storageService = {
+        getCellValue(sheetId, cellId) {
+          return cells[cellId] || '';
+        },
+        getCellState() {
+          return 'resolved';
+        },
+        resolveNamedCell() {
+          return null;
+        },
+      };
+      const formulaEngine = new FormulaEngine(
+        storageService,
+        {},
+        () => [{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }],
+        Object.keys(cells),
+      );
+
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B1', {}), 15);
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B2', {}), 20);
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B3', {}), 11);
+    });
   }
 });
 
