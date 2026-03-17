@@ -72,7 +72,6 @@ Everything updates reactively.
 
 ### enhancement
 
-- [#4 Add support for $ when referencing cells and regions in MetaCells.](https://github.com/metacellslabs/MetaCells/issues/4)
 - [#5 npm license compliance check](https://github.com/metacellslabs/MetaCells/issues/5)
 
 <!-- featured-issues:end -->
