@@ -69,7 +69,6 @@ Everything updates reactively.
 ### ui/ux
 
 - [#2 Columns resize](https://github.com/metacellslabs/MetaCells/issues/2)
-- [#3 Formula bar behavior](https://github.com/metacellslabs/MetaCells/issues/3)
 
 ### enhancement
 
