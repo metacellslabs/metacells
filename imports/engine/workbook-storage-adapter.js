@@ -490,6 +490,12 @@ export class WorkbookStorageAdapter {
           next.borders.bottom !== true &&
           next.borders.left !== true))
     ) {
+      if (
+        previous &&
+        String(previous.source || '') !== String(next.source || '')
+      ) {
+        this.clearCellDependencies(sheetId, id);
+      }
       delete sheet.cells[id];
       return;
     }
