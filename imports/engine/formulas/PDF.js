@@ -1,4 +1,14 @@
 import { defineFormula } from './definition.js';
+import { buildSimplePdfBase64 } from '../pdf-utils.js';
+
+function resolveContentValue(value, helpers) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return helpers.matrixToCsv(helpers.toMatrix(value));
+}
 
 export default defineFormula({
   name: 'PDF',
@@ -10,7 +20,7 @@ export default defineFormula({
     const name = String(
       helpers.firstScalar(args[0]) == null ? '' : helpers.firstScalar(args[0]),
     ).trim();
-    const content = helpers.firstScalar(args[1]);
+    const content = resolveContentValue(args[1], helpers);
 
     if (!name) return '';
 
@@ -19,8 +29,8 @@ export default defineFormula({
       JSON.stringify({
         name,
         type: 'application/pdf',
-        content: String(content == null ? '' : content),
-        encoding: 'utf8',
+        content: buildSimplePdfBase64(content),
+        encoding: 'base64',
         generated: true,
         generatedAs: 'PDF',
       })

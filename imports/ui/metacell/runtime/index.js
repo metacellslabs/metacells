@@ -752,6 +752,7 @@ export class SpreadsheetApp {
         downloadUrl: String((payload && payload.downloadUrl) || ''),
         previewUrl: String((payload && payload.previewUrl) || ''),
         pending: !!(payload && payload.pending),
+        converting: !!(payload && payload.converting),
       })
     );
   }

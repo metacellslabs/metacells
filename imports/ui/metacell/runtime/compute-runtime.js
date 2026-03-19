@@ -162,6 +162,15 @@ function shouldHighlightEmptyMentionedCell(app, cellId, rawValue) {
   return dependents.length > 0;
 }
 
+function resolveRenderableAttachment(app, rawValue, computedValue, displayValue) {
+  if (!app || typeof app.parseAttachmentSource !== 'function') return null;
+  return (
+    app.parseAttachmentSource(rawValue) ||
+    app.parseAttachmentSource(computedValue) ||
+    app.parseAttachmentSource(displayValue)
+  );
+}
+
 export function renderCurrentSheetFromStorage(app) {
   if (app.isReportActive()) {
     app.renderReportLiveValues(true);
@@ -197,7 +206,11 @@ export function renderCurrentSheetFromStorage(app) {
     app.formulaInput.value = attachment
       ? String(
           attachment.name ||
-            (attachment.pending ? 'Select file' : 'Attached file'),
+            (attachment.converting
+              ? 'Converting file...'
+              : attachment.pending
+                ? 'Choose file'
+                : 'Attached file'),
         )
       : rawValue;
   };
@@ -237,7 +250,6 @@ export function renderCurrentSheetFromStorage(app) {
   app.inputs.forEach((input) => {
     try {
       var raw = app.getRawCellValue(input.id);
-      var attachment = app.parseAttachmentSource(raw);
       var isFormula =
         !!raw &&
         (raw.charAt(0) === '=' ||
@@ -245,6 +257,10 @@ export function renderCurrentSheetFromStorage(app) {
           raw.charAt(0) === '#' ||
           raw.charAt(0) === "'");
       var storedDisplay = app.storage.getCellDisplayValue(
+        app.activeSheetId,
+        input.id,
+      );
+      var storedComputed = app.storage.getCellComputedValue(
         app.activeSheetId,
         input.id,
       );
@@ -266,11 +282,21 @@ export function renderCurrentSheetFromStorage(app) {
         : isFormula
           ? storedDisplay
           : raw;
+      var attachment = resolveRenderableAttachment(
+        app,
+        raw,
+        storedComputed,
+        displayValue,
+      );
 
       if (attachment) {
         displayValue = String(
           attachment.name ||
-            (attachment.pending ? 'Select file' : 'Attached file'),
+            (attachment.converting
+              ? 'Converting file...'
+              : attachment.pending
+                ? 'Choose file'
+                : 'Attached file'),
         );
       }
       if (String(displayValue || '').indexOf('#AI_ERROR:') === 0) {
@@ -513,7 +539,6 @@ export function computeAll(app) {
         renderTargets.forEach((input) => {
           try {
             var raw = app.getRawCellValue(input.id);
-            var attachment = app.parseAttachmentSource(raw);
             var isFormula =
               !!raw &&
               (raw.charAt(0) === '=' ||
@@ -521,6 +546,10 @@ export function computeAll(app) {
                 raw.charAt(0) === '#' ||
                 raw.charAt(0) === "'");
             var storedDisplay = app.storage.getCellDisplayValue(
+              app.activeSheetId,
+              input.id,
+            );
+            var storedComputed = app.storage.getCellComputedValue(
               app.activeSheetId,
               input.id,
             );
@@ -547,10 +576,20 @@ export function computeAll(app) {
             var displayValue = showFormulas
               ? decorateFormulaMentionsForDisplay(raw)
               : value;
+            var attachment = resolveRenderableAttachment(
+              app,
+              raw,
+              isFormula ? value || storedComputed : storedComputed,
+              displayValue,
+            );
             if (attachment) {
               displayValue = String(
                 attachment.name ||
-                  (attachment.pending ? 'Select file' : 'Attached file'),
+                  (attachment.converting
+                    ? 'Converting file...'
+                    : attachment.pending
+                      ? 'Choose file'
+                      : 'Attached file'),
               );
             }
             if (String(displayValue || '').indexOf('#AI_ERROR:') === 0) {
@@ -681,7 +720,11 @@ export function computeAll(app) {
         app.formulaInput.value = attachment
           ? String(
               attachment.name ||
-                (attachment.pending ? 'Select file' : 'Attached file'),
+                (attachment.converting
+                  ? 'Converting file...'
+                  : attachment.pending
+                    ? 'Choose file'
+                    : 'Attached file'),
             )
           : rawValue;
       }

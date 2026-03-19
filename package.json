@@ -1,9 +1,13 @@
 {
   "name": "metacells",
   "description": "MetaCells desktop shell and Meteor application",
-  "author": "MetaCells contributors",
+  "author": {
+    "name": "MetaCells contributors",
+    "email": "team@metacells.com"
+  },
   "main": "electron/main.js",
   "private": true,
+  "version": "0.1.0",
   "scripts": {
     "start": "cross-env METACELLS_ROLE=web meteor run --port 3400 --exclude-archs web.browser.legacy --no-lint",
     "start:web": "cross-env METACELLS_ROLE=web meteor run --port 3400 --exclude-archs web.browser.legacy --no-lint",
@@ -16,14 +20,16 @@
     "desktop:dev:frontend-only": "METACELLS_DESKTOP_NO_SERVER=1 node scripts/electron-dev.js",
     "desktop:pack": "node scripts/desktop-package.js --dir",
     "desktop:dist": "node scripts/desktop-package.js",
-    "desktop:dist:mac": "node scripts/desktop-package.js --mac",
+    "desktop:dist:mac": "npm run desktop:dist:mac:arm64 && npm run desktop:dist:mac:x64",
+    "desktop:dist:mac:arm64": "node scripts/desktop-package.js --mac --arm64",
+    "desktop:dist:mac:x64": "node scripts/desktop-package.js --mac --x64",
     "desktop:dist:linux": "node scripts/desktop-package.js --linux",
     "desktop:dist:win": "node scripts/desktop-package.js --win"
   },
   "dependencies": {
     "@babel/runtime": "^7.23.5",
     "@swc/helpers": "^0.5.17",
-    "@whiskeysockets/baileys": "^6.7.21",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "audio-decode": "^2.2.3",
     "exifr": "^7.1.3",
     "fast-xml-parser": "^5.3.1",
@@ -63,6 +69,9 @@
     "appId": "com.metacells.desktop",
     "productName": "MetaCells",
     "asar": true,
+    "icon": "electron/assets/app-icon.png",
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
     "directories": {
       "output": "dist/electron"
     },
@@ -75,23 +84,42 @@
     "files": [
       "electron/**/*",
       "package.json",
-      "public/logo.png"
+      "public/logo.png",
+      "electron/assets/app-icon.png",
+      "!node_modules/**/*",
+      "!client/**/*",
+      "!imports/**/*",
+      "!server/**/*",
+      "!.meteor/**/*",
+      "!tests/**/*",
+      "!docs/**/*",
+      "!scripts/**/*",
+      "!dist/**/*",
+      "!.desktop-runtime/**/*",
+      "!README.md"
     ],
     "mac": {
       "identity": null,
+      "icon": "electron/assets/app-icon.png",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",
         "zip"
       ]
     },
+    "dmg": {
+      "backgroundColor": "#ffffff",
+      "icon": null
+    },
     "win": {
+      "icon": "electron/assets/app-icon.png",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "linux": {
+      "icon": "electron/assets/app-icon.png",
       "target": [
         "AppImage",
         "deb"

@@ -37,7 +37,18 @@ export const aiMethods = {
     var raw = String(
       this.storageService.getCellValue(targetSheetId, targetCellId) || '',
     );
-    var attachment = this.parseAttachmentSource(raw);
+    var computed =
+      this.storageService &&
+      typeof this.storageService.getCellComputedValue === 'function'
+        ? String(
+            this.storageService.getCellComputedValue(
+              targetSheetId,
+              targetCellId,
+            ) || '',
+          )
+        : '';
+    var attachment =
+      this.parseAttachmentSource(raw) || this.parseAttachmentSource(computed);
     if (!attachment) return null;
     if (typeof this.recordDependencyAttachment === 'function') {
       this.recordDependencyAttachment(options, targetSheetId, targetCellId);

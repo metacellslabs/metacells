@@ -13,6 +13,7 @@ import {
   buildArtifactPath,
   createBinaryArtifact,
   createTextArtifact,
+  getArtifactBinary,
 } from '../artifacts/index.js';
 
 const execFile = promisify(execFileCallback);
@@ -244,13 +245,21 @@ if (Meteor.isServer) {
       check(mimeType, String);
       check(base64Data, String);
 
-      const ownerId = createHash('sha256')
       const dedupeHash = createHash('sha256')
         .update(
           `${String(fileName || '')}\n${String(mimeType || '')}\n${String(base64Data || '')}`,
         )
         .digest('hex');
      
+      const owner = {
+        ownerType: 'workbook-attachment',
+        ownerId: createHash('sha256')
+          .update(
+            `${String(fileName || '')}\n${String(mimeType || '')}\n${String(base64Data || '')}`,
+          )
+          .digest('hex'),
+      };
+
       const binaryArtifact = await createBinaryArtifact({
         base64Data,
         mimeType,
@@ -264,9 +273,6 @@ if (Meteor.isServer) {
           type: 'files.extract_content',
           payload: {
             binaryArtifactId: String((binaryArtifact && binaryArtifact._id) || ''),
-            fileName,
-            mimeType,
-            base64Data,
           },
           dedupeKey: `files.extract_content:${dedupeHash}`,
           maxAttempts: 3,
@@ -277,14 +283,7 @@ if (Meteor.isServer) {
         },
       );
 
-      const owner = {
-        ownerType: 'workbook-attachment',
-        ownerId: createHash('sha256')
-          .update(
-            `${String(fileName || '')}\n${String(mimeType || '')}\n${String(base64Data || '')}`,
-          )
-          .digest('hex'),
-      };
+    
     
       const contentArtifact = await createTextArtifact({
         text: String(content || ''),

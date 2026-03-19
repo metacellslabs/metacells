@@ -1,4 +1,5 @@
 import { defineFormula } from './definition.js';
+import { buildSimplePdfBase64 } from '../pdf-utils.js';
 
 const MIME_TYPE_MAP = {
   PDF: 'application/pdf',
@@ -36,6 +37,15 @@ function resolveGeneratedAs(type) {
   return upper || null;
 }
 
+function resolveContentValue(value, helpers) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return helpers.matrixToCsv(helpers.toMatrix(value));
+}
+
 export default defineFormula({
   name: 'FILE',
   signature: 'FILE(name, content, [type])',
@@ -49,7 +59,7 @@ export default defineFormula({
     const name = String(
       helpers.firstScalar(args[0]) == null ? '' : helpers.firstScalar(args[0]),
     ).trim();
-    const content = helpers.firstScalar(args[1]);
+    const content = resolveContentValue(args[1], helpers);
     const typeArg = helpers.firstScalar(args[2]);
     const mimeType = resolveMimeType(typeArg);
     const generatedAs = resolveGeneratedAs(typeArg);
@@ -66,6 +76,10 @@ export default defineFormula({
 
     if (generatedAs) {
       attachment.generatedAs = generatedAs;
+    }
+    if (generatedAs === 'PDF') {
+      attachment.content = buildSimplePdfBase64(content);
+      attachment.encoding = 'base64';
     }
 
     return '__ATTACHMENT__:' + JSON.stringify(attachment);

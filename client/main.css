@@ -2542,6 +2542,8 @@ button:hover {
 #undo-action,
 #redo-action,
 #attach-file,
+#assistant-chat-button,
+#formula-tracker-button,
 #cell-decimals-decrease,
 #cell-decimals-increase,
 #attach-file,
@@ -2570,6 +2572,8 @@ button:hover {
 #undo-action svg,
 #redo-action svg,
 #attach-file svg,
+#assistant-chat-button svg,
+#formula-tracker-button svg,
 #cell-decimals-decrease svg,
 #cell-decimals-increase svg,
 #cell-wrap svg,
@@ -2609,6 +2613,8 @@ button:hover {
 #undo-action:hover,
 #redo-action:hover,
 #attach-file:hover,
+#assistant-chat-button:hover,
+#formula-tracker-button:hover,
 #cell-decimals-decrease:hover,
 #cell-decimals-increase:hover,
 #cell-wrap:hover,
@@ -2624,6 +2630,8 @@ button:hover {
 #undo-action:focus-visible,
 #redo-action:focus-visible,
 #attach-file:focus-visible,
+#assistant-chat-button:focus-visible,
+#formula-tracker-button:focus-visible,
 #cell-decimals-decrease:focus-visible,
 #cell-decimals-increase:focus-visible,
 #cell-wrap:focus-visible,
@@ -2913,6 +2921,10 @@ tr:first-child td:first-child {
   pointer-events: auto;
   background: #ffffff;
   z-index: 8;
+}
+
+td.formula-bar-editing input.editing {
+  text-align: left;
 }
 
 .cell-output {

@@ -175,6 +175,7 @@ describe('metacells', function () {
         B3: '=FILE("doc.docx", A2, "DOCX_MD")',
         C1: '=PDF("invoice.pdf", A1)',
         C2: '=DOCX("summary.docx", A2)',
+        C3: '=PDF("summary.pdf", A2)',
         D1: '=FILE("", A1)',
       };
       const storageService = {
@@ -213,6 +214,11 @@ describe('metacells', function () {
       );
       assert.strictEqual(filePdfData.name, 'report.pdf');
       assert.strictEqual(filePdfData.type, 'application/pdf');
+      assert.strictEqual(filePdfData.encoding, 'base64');
+      assert.ok(
+        String(filePdfData.content || '').startsWith('JVBER'),
+        'FILE(..., \"PDF\") should contain a real PDF payload',
+      );
       assert.strictEqual(filePdfData.generatedAs, 'PDF');
 
       const fileDocxResult = formulaEngine.evaluateCell('sheet-1', 'B3', {});
@@ -232,7 +238,42 @@ describe('metacells', function () {
       );
       assert.strictEqual(pdfData.name, 'invoice.pdf');
       assert.strictEqual(pdfData.type, 'application/pdf');
+      assert.strictEqual(pdfData.encoding, 'base64');
+      assert.ok(
+        String(pdfData.content || '').startsWith('JVBER'),
+        'PDF() should contain a real PDF payload',
+      );
+      assert.match(
+        Buffer.from(String(pdfData.content || ''), 'base64').toString('utf8'),
+        /Hello World/,
+      );
       assert.strictEqual(pdfData.generatedAs, 'PDF');
+
+      const multilinePdfResult = formulaEngine.evaluateCell('sheet-1', 'C3', {});
+      const multilinePdfData = JSON.parse(
+        String(multilinePdfResult).slice('__ATTACHMENT__:'.length),
+      );
+      assert.match(
+        Buffer.from(String(multilinePdfData.content || ''), 'base64').toString(
+          'utf8',
+        ),
+        /item 1/,
+      );
+
+      cells.C4 = '=PDF("markdown.pdf", "# Title\\n\\n- one\\n- **two**\\n[doc](https://example.com)")';
+      const markdownPdfResult = formulaEngine.evaluateCell('sheet-1', 'C4', {});
+      const markdownPdfData = JSON.parse(
+        String(markdownPdfResult).slice('__ATTACHMENT__:'.length),
+      );
+      const markdownPdfText = Buffer.from(
+        String(markdownPdfData.content || ''),
+        'base64',
+      ).toString('utf8');
+      assert.doesNotMatch(markdownPdfText, /# Title/);
+      assert.match(markdownPdfText, /\(Title\) Tj/);
+      assert.match(markdownPdfText, /\(\* one\) Tj/);
+      assert.match(markdownPdfText, /\(\* two\) Tj/);
+      assert.match(markdownPdfText, /\(doc \(https:\/\/example\.com\)\) Tj/);
       assert.strictEqual(pdfData.content, 'Hello World');
 
       const docxResult = formulaEngine.evaluateCell('sheet-1', 'C2', {});
@@ -1712,6 +1753,35 @@ describe('metacells', function () {
           (item) => item.sheetId === 'sheet-1' && item.cellId === 'A1',
         ),
       );
+    });
+
+    it('clears reverse dependency graph entries when deleting a source cell', async function () {
+      const { WorkbookStorageAdapter, createEmptyWorkbook } =
+        await import('../imports/engine/workbook-storage-adapter.js');
+
+      const adapter = new WorkbookStorageAdapter(createEmptyWorkbook());
+      adapter.setTabs([{ id: 'sheet-1', name: 'Sheet 1', type: 'sheet' }]);
+      adapter.setActiveTabId('sheet-1');
+      adapter.setCellSource('sheet-1', 'A1', 'seed');
+      adapter.setCellSource('sheet-1', 'B1', '=A1');
+      adapter.setCellDependencies('sheet-1', 'B1', {
+        cells: [{ sheetId: 'sheet-1', cellId: 'A1' }],
+        namedRefs: [],
+        channelLabels: [],
+        attachments: [],
+      });
+
+      let graph = adapter.getDependencyGraph();
+      assert.deepStrictEqual(graph.dependentsByCell['sheet-1:A1'], [
+        'sheet-1:B1',
+      ]);
+
+      adapter.setCellSource('sheet-1', 'B1', '');
+      graph = adapter.getDependencyGraph();
+
+      assert.strictEqual(graph.byCell['sheet-1:B1'], undefined);
+      assert.strictEqual(graph.dependentsByCell['sheet-1:A1'], undefined);
+      assert.strictEqual(adapter.getCellSource('sheet-1', 'B1'), '');
     });
 
     it('persists #REF! and hint for missing sheet dependencies', async function () {

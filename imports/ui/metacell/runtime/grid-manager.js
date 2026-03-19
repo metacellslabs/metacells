@@ -99,7 +99,38 @@ export class GridManager {
   setColumnWidth(colIndex, width) {
     var finalWidth = Math.max(MIN_COL_WIDTH, width);
     for (var r = 0; r < this.table.rows.length; r++) {
-      this.table.rows[r].cells[colIndex].style.width = finalWidth + 'px';
+      var cell = this.table.rows[r].cells[colIndex];
+      if (!cell) continue;
+      cell.style.width = finalWidth + 'px';
+      cell.style.minWidth = finalWidth + 'px';
+      cell.style.maxWidth = finalWidth + 'px';
+    }
+    return finalWidth;
+  }
+
+  lockAllColumnWidths() {
+    if (!this.table || !this.table.rows || !this.table.rows.length) return;
+    var headerRow = this.table.rows[0];
+    if (!headerRow || !headerRow.cells || !headerRow.cells.length) return;
+    for (var colIndex = 0; colIndex < headerRow.cells.length; colIndex++) {
+      var cell = headerRow.cells[colIndex];
+      if (!cell) continue;
+      this.setColumnWidth(colIndex, cell.offsetWidth);
+    }
+  }
+
+  setColumnWidthFromGuide(colIndex, guideLeftX, columnLeftX) {
+    var desiredRightX = guideLeftX + 1;
+    var desiredWidth = Math.max(MIN_COL_WIDTH, desiredRightX - columnLeftX);
+    var finalWidth = this.setColumnWidth(colIndex, desiredWidth);
+    var cell = this.table.rows[0] && this.table.rows[0].cells[colIndex];
+    if (!cell) return finalWidth;
+
+    var actualRect = cell.getBoundingClientRect();
+    var actualRightX = actualRect.right;
+    var drift = desiredRightX - actualRightX;
+    if (Math.abs(drift) > 0.5) {
+      finalWidth = this.setColumnWidth(colIndex, finalWidth + drift);
     }
     return finalWidth;
   }
@@ -168,43 +199,35 @@ export class GridManager {
         colHandle.addEventListener('mousedown', (e) => {
           e.preventDefault();
           document.body.classList.add('is-column-resizing');
-          var startGuideX =
-            this.table.rows[0].cells[index].getBoundingClientRect().right - 1;
-          var startWidth = this.table.rows[0].cells[index].offsetWidth;
-          var startTableWidth =
-            this.table.offsetWidth || this.table.scrollWidth || 0;
+          this.lockAllColumnWidths();
+          var columnRect =
+            this.table.rows[0].cells[index].getBoundingClientRect();
+          var startGuideX = columnRect.right - 1;
+          var startLeftX = columnRect.left;
           var didResize = false;
-          var rafId = 0;
-          var pendingGuideX = e.clientX;
-          var flushResize = () => {
-            rafId = 0;
-            var deltaX = pendingGuideX - startGuideX;
-            var finalWidth = this.setColumnWidth(index, startWidth + deltaX);
-            onColumnResize(index, finalWidth);
-            this.table.style.width =
-              Math.max(0, startTableWidth + deltaX) + 'px';
-            didResize = true;
-          };
-          this.showColumnResizeGuide(e.clientX);
+          var pendingGuideX = startGuideX;
+          this.showColumnResizeGuide(startGuideX);
 
           var onMove = (moveEvent) => {
             pendingGuideX = moveEvent.clientX;
             this.moveColumnResizeGuide(moveEvent.clientX);
-            if (!rafId) {
-              rafId = requestAnimationFrame(flushResize);
-            }
+            didResize = true;
           };
 
           var onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             document.body.classList.remove('is-column-resizing');
-            if (rafId) {
-              cancelAnimationFrame(rafId);
-              flushResize();
+            if (didResize) {
+              var finalWidth = this.setColumnWidthFromGuide(
+                index,
+                pendingGuideX,
+                startLeftX,
+              );
+              onColumnResize(index, finalWidth);
+              this.updateTableSize();
             }
             this.hideColumnResizeGuide();
-            if (didResize) this.updateTableSize();
           };
 
           document.addEventListener('mousemove', onMove);
@@ -214,6 +237,7 @@ export class GridManager {
         colHandle.addEventListener('dblclick', (e) => {
           e.preventDefault();
           e.stopPropagation();
+          this.lockAllColumnWidths();
           var fittedWidth = this.autoFitColumnWidth(index);
           onColumnResize(index, fittedWidth);
           this.updateTableSize();
@@ -352,11 +376,26 @@ export class GridManager {
   updateTableSize() {
     if (!this.table.rows.length) return;
 
-    var totalWidth = 0;
     var headerRow = this.table.rows[0];
-    for (var c = 0; c < headerRow.cells.length; c++) {
-      totalWidth += headerRow.cells[c].offsetWidth;
+    var wrap = this.table.parentElement;
+
+    // Clear previous fixed size so the table can expand to the new natural
+    // width after column resize before we measure it again.
+    this.table.style.width = '';
+    this.table.style.height = '';
+
+    var totalWidth = 0;
+    if (headerRow && headerRow.cells.length) {
+      var firstCellRect = headerRow.cells[0].getBoundingClientRect();
+      var lastCellRect =
+        headerRow.cells[headerRow.cells.length - 1].getBoundingClientRect();
+      totalWidth = Math.ceil(lastCellRect.right - firstCellRect.left);
     }
+    totalWidth = Math.max(
+      totalWidth,
+      Math.ceil(this.table.scrollWidth || 0),
+      wrap ? Math.ceil(wrap.clientWidth || 0) : 0,
+    );
 
     var totalHeight = 0;
     for (var r = 0; r < this.table.rows.length; r++) {
@@ -370,6 +409,9 @@ export class GridManager {
   setEditing(input, editing) {
     input.classList.toggle('editing', editing);
     input.parentElement.classList.toggle('editing', editing);
+    if (!editing) {
+      input.parentElement.classList.remove('formula-bar-editing');
+    }
   }
 
   focusCellByArrow(input, key) {
@@ -553,12 +595,33 @@ export class GridManager {
     var pending = !!meta.pending;
     var name = this.escapeHtml(String(meta.name || ''));
     var previewUrl = String(meta.previewUrl || '');
+    var downloadUrl = this.buildAttachmentHref(meta);
+    var hasDirectFileUrl = !!String(
+      meta.downloadUrl || meta.previewUrl || meta.url || '',
+    ).trim();
+    var generated = meta.generated === true;
     var isImage =
       String(meta.type || '')
         .toLowerCase()
         .indexOf('image/') === 0 && !!previewUrl;
     if (pending) {
-      return "<div class='attachment-chip pending full'><button type='button' class='attachment-select'>Choose file</button></div>";
+      return (
+        "<div class='attachment-chip pending full'><button type='button' class='attachment-select'>" +
+        (meta.converting ? 'Converting the file...' : 'Choose file') +
+        '</button></div>'
+      );
+    }
+    if (generated && downloadUrl) {
+      if (!hasDirectFileUrl) {
+        return this.renderDownloadAttachmentLink(
+          String(meta.name || 'Attached file'),
+          downloadUrl,
+        );
+      }
+      return this.renderInternalAttachmentLink(
+        String(meta.name || 'Attached file'),
+        downloadUrl,
+      );
     }
     return (
       "<div class='attachment-chip" +
@@ -585,6 +648,46 @@ export class GridManager {
           "' /></div>"
         : '') +
       "<button type='button' class='attachment-remove' title='Remove attachment'>×</button></div>"
+    );
+  }
+
+  renderDownloadAttachmentLink(label, href) {
+    var name = String(label || 'attachment');
+    var safeName = this.escapeHtml(name);
+    var safeHref = this.escapeHtml(String(href || ''));
+    return (
+      "<span class='embedded-attachment-link'>" +
+      "<a class='embedded-attachment-download' href='" +
+      safeHref +
+      "' download='" +
+      safeName +
+      "'>" +
+      safeName +
+      '</a>' +
+      '</span>'
+    );
+  }
+
+  buildAttachmentHref(attachment) {
+    var meta = attachment || {};
+    var directUrl = String(
+      meta.downloadUrl || meta.previewUrl || meta.url || '',
+    ).trim();
+    if (directUrl) return directUrl;
+
+    var content = meta.content;
+    if (content == null || content === '') return '';
+
+    var mimeType = String(meta.type || 'application/octet-stream').trim();
+    var encoding = String(meta.encoding || 'utf8').trim().toLowerCase();
+    if (encoding === 'base64') {
+      return 'data:' + mimeType + ';base64,' + String(content);
+    }
+    return (
+      'data:' +
+      mimeType +
+      ';charset=utf-8,' +
+      encodeURIComponent(String(content))
     );
   }
 

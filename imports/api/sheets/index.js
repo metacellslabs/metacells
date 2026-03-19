@@ -1279,7 +1279,9 @@ registerAIQueueSheetRuntimeHooks({
   loadSheetDocumentStorage: async (sheetId) => {
     const sheetDocument = await normalizeSheetDocument(sheetId);
     if (!sheetDocument) return null;
-    return decodeWorkbookDocument(sheetDocument.workbook || {});
+    return hydrateWorkbookAttachmentArtifacts(
+      decodeWorkbookDocument(sheetDocument.workbook || {}),
+    );
   },
 });
 

@@ -12,24 +12,11 @@ import {
   CHANNEL_POLL_INTERVAL_MS,
 } from '../mentioning.js';
 import { getActiveChannelPayloadMap } from '../runtime-state.js';
-import { insertChannelEvent, buildChannelEventPreview } from '../events.js';
 import {
-  testImapConnection,
-  sendImapMessage,
-  handleImapEvent,
-  pollImapMessages,
-} from './handlers/imap.js';
-import {
-  testTelegramConnection,
-  sendTelegramMessage,
-} from './handlers/telegram.js';
-import {
-  testTwitterConnection,
-  sendTwitterMessage,
-} from './handlers/twitter.js';
-
-const activeChannelPolls = new Set();
-import { ChannelEvents } from '../events.js';
+  insertChannelEvent,
+  buildChannelEventPreview,
+  ChannelEvents,
+} from '../events.js';
 import { getRegisteredChannelHandlerById } from './handlers/index.js';
 
 const activeChannelPolls = new Set();
@@ -60,31 +47,6 @@ function normalizeChannelSettings(connector, currentSettings) {
   return next;
 }
 
-function getChannelHandler(connectorId) {
-  if (connectorId === 'imap-email') {
-    return {
-      testConnection: testImapConnection,
-      send: sendImapMessage,
-      eventHandler: handleImapEvent,
-      poll: pollImapMessages,
-    };
-  }
-  if (connectorId === 'telegram') {
-    return {
-      testConnection: testTelegramConnection,
-      send: sendTelegramMessage,
-      eventHandler: async () => ({ event: '', message: null }),
-      poll: null,
-    };
-  }
-  if (connectorId === 'twitter') {
-    return {
-      testConnection: testTwitterConnection,
-      send: sendTwitterMessage,
-      eventHandler: async () => ({ event: '', message: null }),
-      poll: null,
-    };
-  }
 function normalizeSearchOptions(options) {
   const source = options && typeof options === 'object' ? options : {};
   return {

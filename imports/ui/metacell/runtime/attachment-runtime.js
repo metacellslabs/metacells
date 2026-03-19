@@ -6,7 +6,11 @@ function getAttachmentDisplayValue(app, rawValue) {
   if (!attachment) return raw;
   return String(
     attachment.name ||
-      (attachment.pending ? 'Select file' : 'Attached file'),
+      (attachment.converting
+        ? 'Converting file...'
+        : attachment.pending
+          ? 'Choose file'
+          : 'Attached file'),
   );
 }
 
@@ -131,6 +135,16 @@ export function setupAttachmentControls(app) {
       }
 
       try {
+        var convertingSource = app.buildAttachmentSource({
+          name: file.name || 'Attached file',
+          type: file.type || '',
+          pending: true,
+          converting: true,
+        });
+        app.applyRawCellUpdate(ctx.sheetId, ctx.cellId, convertingSource);
+        syncActiveAttachmentValue(app, ctx.cellId, convertingSource);
+        revealAttachmentCell(app, ctx.sheetId, ctx.cellId);
+        refreshAttachmentUi(app, ctx.sheetId);
         var base64 = await file
           .arrayBuffer()
           .then((buffer) => arrayBufferToBase64(app, buffer));
@@ -138,7 +152,7 @@ export function setupAttachmentControls(app) {
         var attachmentSource = app.buildAttachmentSource({
           name: file.name || 'Attached file',
           type: file.type || '',
-          content: '',
+          content: extracted && extracted.content,
           contentArtifactId: extracted && extracted.contentArtifactId,
           binaryArtifactId: extracted && extracted.binaryArtifactId,
           downloadUrl: extracted && extracted.downloadUrl,

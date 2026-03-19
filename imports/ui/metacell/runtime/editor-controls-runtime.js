@@ -1051,6 +1051,7 @@ export function commitFormulaBarValue(app) {
   var existingRaw = String(app.getRawCellValue(app.activeInput.id) || '');
   var existingAttachment = app.parseAttachmentSource(existingRaw);
   if (existingAttachment && raw === String(existingAttachment.name || '')) {
+    app.activeInput.parentElement.classList.remove('formula-bar-editing');
     return;
   }
   if (app.aiService && typeof app.aiService.setEditDraftLock === 'function') {
@@ -1063,6 +1064,7 @@ export function commitFormulaBarValue(app) {
     return;
 
   app.activeInput.value = raw;
+  app.activeInput.parentElement.classList.remove('formula-bar-editing');
   app.commitRawCellEdit(
     app.activeInput.id,
     raw,
@@ -1088,6 +1090,7 @@ export function bindFormulaBarEvents(app) {
           );
         }
       }
+      app.activeInput.parentElement.classList.add('formula-bar-editing');
       app.activeInput.value = raw;
     }
     app.syncCrossTabMentionSourceValue(raw);
@@ -1119,6 +1122,7 @@ export function bindFormulaBarEvents(app) {
         : app.getRawCellValue(app.activeInput.id);
       app.formulaInput.value = restoreValue;
       app.activeInput.value = restoreValue;
+      app.activeInput.parentElement.classList.remove('formula-bar-editing');
       app.grid.setEditing(app.activeInput, false);
       delete app.editStartRawByCell[app.activeInput.id];
       app.formulaRefCursorId = null;

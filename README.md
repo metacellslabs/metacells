@@ -61,6 +61,17 @@ Each cell can:
 
 Everything updates reactively.
 
+Newer workbook patterns also supported:
+
+```text
+'Write with @@brief and @idea
+'Audit _@idea
+!@idea
+=update(@target, "#compare @idea with competitors;4;6")
+=B1>5 && recalc(B1>5, @target)
+/x shipping update is live
+```
+
 ---
 ## 🔥 Hot fixes wanted
 
@@ -172,12 +183,52 @@ File:@policy:[Upload policy PDF]
 
 AI prompts can read the file automatically.
 
+### Reports can collect inputs directly
+
+MetaCells report views can render controls that write back into cells.
+
+```text
+Input:@case:[Enter your business case]
+File:@policy:[Upload policy PDF]
+```
+
+This makes it possible to build guided AI workflows and internal tools without leaving the workbook.
+
+### Cells can generate files
+
+You can turn any cell content into a downloadable attachment.
+
+```text
+=pdf("invoice.pdf", A1)
+=FILE("invoice.pdf", A1, "PDF")
+```
+
+This is useful when another cell already contains the text you want to package, including content extracted from an uploaded file.
+
+```text
+File:@policy:[Upload policy PDF]
+=PDF("policy-copy.pdf", @policy)
+```
+
 ### Cells can trigger actions
 
 ```text
 /tg Launch update is live
+/x shipping update is live
 /sf:send:{"to":"team@example.com","subj":"Report","body":"See @summary"}
 ```
+
+### Mentioning is first-class
+
+MetaCells supports several ways to reference workbook context:
+
+- `@idea` for the computed value of a named cell
+- `@@brief` for hidden AI context
+- `_@idea` for the raw source of a cell
+- `!@idea` for an internal report link
+- `A1:B5` for a region
+- `@policy` for extracted file contents from a file cell
+- `https://...` inside AI prompts to fetch page content into the prompt
 
 ---
 
@@ -196,6 +247,15 @@ Cells reference each other with:
 ```
 
 Everything updates reactively across the workbook.
+
+Formulas can also drive workflow control:
+
+```text
+=update(@target, newValue)
+=recalc(condition, @target)
+```
+
+This makes it possible to build chained flows and conditional reruns directly in the sheet model.
 
 ---
 
@@ -272,6 +332,8 @@ Build platform-specific self-contained packages:
 
 ```bash
 npm run desktop:dist:mac
+npm run desktop:dist:mac:arm64
+npm run desktop:dist:mac:x64
 npm run desktop:dist:linux
 npm run desktop:dist:win
 ```
@@ -328,3 +390,12 @@ Supported providers:
 - Together
 - Fireworks
 - xAI
+
+The Settings page includes:
+
+- AI provider configuration
+- communication channel setup and testing
+- job/worker controls
+- general and advanced runtime settings
+
+In the Electron app, Settings is also available from the native application menu.
