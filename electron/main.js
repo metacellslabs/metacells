@@ -485,7 +485,7 @@ function showBackendError(window, url, errorText) {
     window,
     'MetaCells backend is not reachable',
     `<p>The desktop shell is trying to open <code>${escapeHtml(url)}</code>, but that server is not responding.</p>
-<p>For this build, start the Meteor app first with <code>npm start</code>, launch Electron in development with <code>npm run desktop:dev</code>, or package a self-contained app with <code>npm run desktop:dist:mac</code>.</p>`,
+<p>For this build, start the app server first with <code>npm run start:server</code>, launch Electron in development with <code>npm run desktop:dev</code>, or package a self-contained app with <code>npm run desktop:dist:mac</code>.</p>`,
     errorText,
   );
 }
@@ -719,14 +719,13 @@ async function startBundledBackend(window, runtimeRoot) {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       PORT: String(appPort),
-      ROOT_URL: appUrl,
       MONGO_URL: mongoUrl,
       BIND_IP: '127.0.0.1',
       METACELLS_ROLE: 'web',
       NODE_ENV: 'production',
     },
   });
-  pipeLogs(path.join(logsDir, 'server.log'), serverProcess, 'meteor');
+  pipeLogs(path.join(logsDir, 'server.log'), serverProcess, 'server');
 
   backendState = {
     appUrl,

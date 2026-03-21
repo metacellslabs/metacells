@@ -1,4 +1,4 @@
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../../lib/rpc-client.js';
 import { AI_MODE } from './constants.js';
 import { traceCellUpdateClient } from '../../../lib/cell-update-profile.js';
 import { describeCellSchedule } from '../../../lib/cell-schedule.js';
@@ -483,7 +483,7 @@ export function computeAll(app) {
     forceRefreshAI: !!options.forceRefreshAI,
     manualTriggerAI: isManualTrigger,
   });
-  Meteor.callAsync('sheets.computeGrid', app.sheetDocumentId, activeSheetId, {
+  rpc('sheets.computeGrid', app.sheetDocumentId, activeSheetId, {
     forceRefreshAI: !!options.forceRefreshAI,
     manualTriggerAI: isManualTrigger,
     traceId: trace && trace.id ? trace.id : '',
@@ -527,6 +527,21 @@ export function computeAll(app) {
       if (result && result.workbook) {
         renderCurrentSheetFromStorage(app);
         finishManualUpdate();
+        // Fallback polling: if the server still returned '...' placeholders for
+        // any AI cells (e.g. a race between concurrent requests), retry until
+        // the actual answer arrives (max 30 retries, 1 s apart).
+        var pendingValues = result && result.values ? result.values : {};
+        var hasPendingAI = Object.keys(pendingValues).some(function (k) {
+          return pendingValues[k] === '...';
+        });
+        if (hasPendingAI) {
+          var pollCount = (options && options._pollCount) || 0;
+          if (pollCount < 30) {
+            setTimeout(function () {
+              computeAll(app, { _pollCount: pollCount + 1 });
+            }, 1000);
+          }
+        }
         return;
       }
       var computedValues = app.computedValuesBySheet[activeSheetId] || {};

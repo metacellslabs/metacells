@@ -1,6 +1,7 @@
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
-import { Mongo } from 'meteor/mongo';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { check, Match } from '../../../lib/check.js';
+import { Collection } from '../../../lib/collections.js';
+import { registerMethods, getMethodHandler } from '../../../lib/rpc.js';
 import { Sheets } from '../sheets/index.js';
 import {
   decodeWorkbookDocument,
@@ -27,7 +28,7 @@ import {
 } from '../artifacts/index.js';
 
 const assistantToolRegistry = [];
-export const AssistantConversations = new Mongo.Collection(
+export const AssistantConversations = new Collection(
   'assistant_conversations',
 );
 
@@ -943,69 +944,51 @@ function makeTabId(kind) {
 }
 
 async function persistAssistantWorkbook(sheetDocumentId, workbook) {
-  const saveWorkbook =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['sheets.saveWorkbook'];
-  const computeGrid =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['sheets.computeGrid'];
+  const saveWorkbook = getMethodHandler('sheets.saveWorkbook');
+  const computeGrid = getMethodHandler('sheets.computeGrid');
   if (typeof saveWorkbook !== 'function' || typeof computeGrid !== 'function') {
     throw new Error('Workbook persistence methods are unavailable');
   }
-  await saveWorkbook.apply({}, [sheetDocumentId, workbook]);
+  await saveWorkbook(sheetDocumentId, workbook);
   const activeTabId = String(workbook.activeTabId || '') || 'sheet-1';
-  const result = await computeGrid.apply({}, [
+  const result = await computeGrid(
     sheetDocumentId,
     activeTabId,
     { workbookSnapshot: workbook, forceRefreshAI: false, manualTriggerAI: false },
-  ]);
+  );
   return result && result.workbook ? decodeWorkbookDocument(result.workbook) : decodeWorkbookDocument(workbook);
 }
 
 async function sendAssistantChannelMessage(channelLabel, payload, channelId) {
-  const sendByLabel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.sendByLabel'];
+  const sendByLabel = getMethodHandler('channels.sendByLabel');
   if (typeof sendByLabel === 'function') {
-    return sendByLabel.apply({}, [channelLabel, payload]);
+    return sendByLabel(channelLabel, payload);
   }
-  const sendChannel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.send'];
+  const sendChannel = getMethodHandler('channels.send');
   if (typeof sendChannel !== 'function') {
     throw new Error('Channel send method is unavailable');
   }
-  return sendChannel.apply({}, [channelId, payload]);
+  return sendChannel(channelId, payload);
 }
 
 async function searchAssistantChannel(channelLabel, payload, channelId) {
-  const searchByLabel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.searchByLabel'];
+  const searchByLabel = getMethodHandler('channels.searchByLabel');
   if (typeof searchByLabel === 'function') {
-    return searchByLabel.apply({}, [
+    return searchByLabel(
       channelLabel,
       String((payload && payload.query) || ''),
       payload,
-    ]);
+    );
   }
-  const searchChannel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.search'];
+  const searchChannel = getMethodHandler('channels.search');
   if (typeof searchChannel !== 'function') {
     throw new Error('Channel search method is unavailable');
   }
-  return searchChannel.apply({}, [
+  return searchChannel(
     channelId,
     String((payload && payload.query) || ''),
     payload,
-  ]);
+  );
 }
 
 function normalizeChannelPayloadValue(key, value) {
@@ -1568,117 +1551,112 @@ async function handleAssistantChat({
 
 registerBuiltInAssistantTools();
 
-if (Meteor.isServer) {
-  Meteor.methods({
-    async 'assistant.chat'(payload) {
-      check(payload, Match.Where(isPlainObject));
-      check(payload.sheetDocumentId, String);
-      check(payload.message, String);
-      const result = await handleAssistantChat(payload);
-      await saveAssistantConversationMessages(
-        payload.sheetDocumentId,
-        Array.isArray(result && result.conversation) ? result.conversation : [],
-        {
-          lastMessageAt: new Date(),
-        },
+registerMethods({
+  async 'assistant.chat'(payload) {
+    check(payload, Match.Where(isPlainObject));
+    check(payload.sheetDocumentId, String);
+    check(payload.message, String);
+    const result = await handleAssistantChat(payload);
+    await saveAssistantConversationMessages(
+      payload.sheetDocumentId,
+      Array.isArray(result && result.conversation) ? result.conversation : [],
+      {
+        lastMessageAt: new Date(),
+      },
+    );
+    return result;
+  },
+  async 'assistant.getManifest'(sheetDocumentId, workbookSnapshot) {
+    check(sheetDocumentId, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { workbook: 1 } },
+    );
+    if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
+    return buildAssistantManifest(
+      sheetDocumentId,
+      workbookSnapshot || sheetDoc.workbook || {},
+    );
+  },
+  async 'assistant.getConversation'(sheetDocumentId) {
+    check(sheetDocumentId, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { _id: 1 } },
+    );
+    if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
+    const doc = await loadAssistantConversationDoc(sheetDocumentId);
+    return {
+      messages:
+        Array.isArray(doc && doc.messages) ? doc.messages.slice() : [],
+      uploads: Array.isArray(doc && doc.uploads)
+        ? doc.uploads.map((item) => serializeAssistantUpload(item, false))
+        : [],
+      updatedAt:
+        doc && doc.updatedAt instanceof Date
+          ? doc.updatedAt.toISOString()
+          : String((doc && doc.updatedAt) || ''),
+    };
+  },
+  async 'assistant.uploadFile'(sheetDocumentId, fileName, mimeType, base64Data) {
+    check(sheetDocumentId, String);
+    check(fileName, String);
+    check(mimeType, String);
+    check(base64Data, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { _id: 1 } },
+    );
+    if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
+    const extractContent = getMethodHandler('files.extractContent');
+    if (typeof extractContent !== 'function') {
+      throw new Meteor.Error(
+        'files-unavailable',
+        'File extraction method is unavailable',
       );
-      return result;
-    },
-    async 'assistant.getManifest'(sheetDocumentId, workbookSnapshot) {
-      check(sheetDocumentId, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { workbook: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      return buildAssistantManifest(
-        sheetDocumentId,
-        workbookSnapshot || sheetDoc.workbook || {},
-      );
-    },
-    async 'assistant.getConversation'(sheetDocumentId) {
-      check(sheetDocumentId, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { _id: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      const doc = await loadAssistantConversationDoc(sheetDocumentId);
-      return {
-        messages:
-          Array.isArray(doc && doc.messages) ? doc.messages.slice() : [],
-        uploads: Array.isArray(doc && doc.uploads)
-          ? doc.uploads.map((item) => serializeAssistantUpload(item, false))
-          : [],
-        updatedAt:
-          doc && doc.updatedAt instanceof Date
-            ? doc.updatedAt.toISOString()
-            : String((doc && doc.updatedAt) || ''),
-      };
-    },
-    async 'assistant.uploadFile'(sheetDocumentId, fileName, mimeType, base64Data) {
-      check(sheetDocumentId, String);
-      check(fileName, String);
-      check(mimeType, String);
-      check(base64Data, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { _id: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      const extractContent =
-        Meteor.server &&
-        Meteor.server.method_handlers &&
-        Meteor.server.method_handlers['files.extractContent'];
-      if (typeof extractContent !== 'function') {
-        throw new Meteor.Error(
-          'files-unavailable',
-          'File extraction method is unavailable',
-        );
-      }
-      const extracted = await extractContent.apply({}, [
-        fileName,
-        mimeType,
-        base64Data,
-      ]);
-      const upload = await appendAssistantConversationUpload(sheetDocumentId, {
-        id:
-          'assistant-upload-' +
-          Date.now() +
-          '-' +
-          Math.random().toString(36).slice(2, 10),
-        name: String((extracted && extracted.name) || fileName || 'Attached file'),
-        type: String((extracted && extracted.type) || mimeType || ''),
-        contentArtifactId: String(
-          (extracted && extracted.contentArtifactId) || '',
-        ),
-        binaryArtifactId: String(
-          (extracted && extracted.binaryArtifactId) || '',
-        ),
-        downloadUrl: String((extracted && extracted.downloadUrl) || ''),
-        previewUrl: String((extracted && extracted.previewUrl) || ''),
-        createdAt: new Date().toISOString(),
-      });
-      return serializeAssistantUpload(upload, false);
-    },
-    async 'assistant.clearConversation'(sheetDocumentId) {
-      check(sheetDocumentId, String);
-      await AssistantConversations.removeAsync({
-        sheetDocumentId: String(sheetDocumentId || ''),
-      });
-      return { ok: true };
-    },
-    async 'assistant.removeUpload'(sheetDocumentId, uploadId) {
-      check(sheetDocumentId, String);
-      check(uploadId, String);
-      const uploads = await removeAssistantConversationUpload(
-        sheetDocumentId,
-        uploadId,
-      );
-      return {
-        ok: true,
-        uploads: uploads.map((item) => serializeAssistantUpload(item, false)),
-      };
-    },
-  });
-}
+    }
+    const extracted = await extractContent(
+      fileName,
+      mimeType,
+      base64Data,
+    );
+    const upload = await appendAssistantConversationUpload(sheetDocumentId, {
+      id:
+        'assistant-upload-' +
+        Date.now() +
+        '-' +
+        Math.random().toString(36).slice(2, 10),
+      name: String((extracted && extracted.name) || fileName || 'Attached file'),
+      type: String((extracted && extracted.type) || mimeType || ''),
+      contentArtifactId: String(
+        (extracted && extracted.contentArtifactId) || '',
+      ),
+      binaryArtifactId: String(
+        (extracted && extracted.binaryArtifactId) || '',
+      ),
+      downloadUrl: String((extracted && extracted.downloadUrl) || ''),
+      previewUrl: String((extracted && extracted.previewUrl) || ''),
+      createdAt: new Date().toISOString(),
+    });
+    return serializeAssistantUpload(upload, false);
+  },
+  async 'assistant.clearConversation'(sheetDocumentId) {
+    check(sheetDocumentId, String);
+    await AssistantConversations.removeAsync({
+      sheetDocumentId: String(sheetDocumentId || ''),
+    });
+    return { ok: true };
+  },
+  async 'assistant.removeUpload'(sheetDocumentId, uploadId) {
+    check(sheetDocumentId, String);
+    check(uploadId, String);
+    const uploads = await removeAssistantConversationUpload(
+      sheetDocumentId,
+      uploadId,
+    );
+    return {
+      ok: true,
+      uploads: uploads.map((item) => serializeAssistantUpload(item, false)),
+    };
+  },
+});

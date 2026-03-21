@@ -6,7 +6,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const desktopUrl = process.env.METACELLS_DESKTOP_URL || 'http://127.0.0.1:3400';
 const shouldStartServer = process.env.METACELLS_DESKTOP_NO_SERVER !== '1';
 
-let meteorProcess = null;
+let serverProcess = null;
 let electronProcess = null;
 let shuttingDown = false;
 
@@ -56,15 +56,15 @@ function shutdown(code) {
   shuttingDown = true;
 
   terminate(electronProcess);
-  terminate(meteorProcess);
+  terminate(serverProcess);
 
   setTimeout(() => process.exit(code), 250);
 }
 
-function startMeteor() {
-  meteorProcess = spawn(
-    'meteor',
-    ['run', '--port', '3400', '--exclude-archs', 'web.browser.legacy', '--no-lint'],
+function startServer() {
+  serverProcess = spawn(
+    'node',
+    ['server.js'],
     {
       cwd: projectRoot,
       stdio: 'inherit',
@@ -75,7 +75,7 @@ function startMeteor() {
     },
   );
 
-  meteorProcess.on('exit', (code) => {
+  serverProcess.on('exit', (code) => {
     if (!shuttingDown && code !== 0) {
       shutdown(code || 1);
     }
@@ -103,7 +103,7 @@ async function main() {
   process.on('SIGTERM', () => shutdown(0));
 
   if (shouldStartServer) {
-    startMeteor();
+    startServer();
     await waitForServer(desktopUrl);
   }
 

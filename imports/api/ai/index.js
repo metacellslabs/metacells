@@ -1,5 +1,6 @@
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { check, Match } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import { FormulaEngine } from '../../engine/formula-engine.js';
 import { AIService } from '../../ui/metacell/runtime/ai-service.js';
 import { StorageService } from '../../engine/storage-service.js';
@@ -266,13 +267,13 @@ function createStablePayloadHash(text) {
 }
 
 function scheduleQueueDrain() {
-  Meteor.defer(() => {
+  setTimeout(() => {
     drainQueue().catch((error) => {
       log('queue.drain.error', {
         message: error && error.message ? error.message : String(error),
       });
     });
-  });
+  }, 0);
 }
 
 function normalizeTaskDependencies(dependencies) {
@@ -704,7 +705,7 @@ async function drainQueue() {
             queued: aiQueuedTasks.length,
             active: aiQueueActiveCount,
           });
-          Meteor.setTimeout(() => {
+          setTimeout(() => {
             drainQueue().catch((retryError) => {
               log('queue.retry.error', {
                 taskKey: task.key,
@@ -950,95 +951,166 @@ export async function notifyQueuedSheetDependenciesChanged(
   }
 }
 
-if (Meteor.isServer) {
-  Meteor.methods({
-    'ai.setSourceEditLock'(
+registerMethods({
+  'ai.setSourceEditLock'(
+    sheetDocumentId,
+    activeSheetId,
+    sourceCellId,
+    locked,
+    ownerId,
+    sequence,
+  ) {
+    check(sheetDocumentId, String);
+    check(activeSheetId, String);
+    check(sourceCellId, String);
+    check(locked, Boolean);
+    check(ownerId, editLockOwnerMatch);
+    check(sequence, editLockSeqMatch);
+
+    const key = createSourceLockKey({
       sheetDocumentId,
       activeSheetId,
       sourceCellId,
-      locked,
-      ownerId,
-      sequence,
-    ) {
-      check(sheetDocumentId, String);
-      check(activeSheetId, String);
-      check(sourceCellId, String);
-      check(locked, Boolean);
-      check(ownerId, editLockOwnerMatch);
-      check(sequence, editLockSeqMatch);
+    });
+    if (!key) return false;
 
-      const key = createSourceLockKey({
-        sheetDocumentId,
-        activeSheetId,
-        sourceCellId,
-      });
-      if (!key) return false;
+    const owner = String(ownerId || '');
+    const seq = Number.isFinite(sequence) ? sequence : 0;
+    const current = aiLockStateByKey.get(key);
+    if (current && current.owner === owner && seq < current.sequence) {
+      return false;
+    }
 
-      const owner = String(ownerId || '');
-      const seq = Number.isFinite(sequence) ? sequence : 0;
-      const current = aiLockStateByKey.get(key);
-      if (current && current.owner === owner && seq < current.sequence) {
-        return false;
-      }
+    if (locked) {
+      aiLockStateByKey.set(key, { owner, sequence: seq, locked: true });
+      aiLockedSources.add(key);
+      log('source.locked', { key });
+    } else {
+      aiLockStateByKey.set(key, { owner, sequence: seq, locked: false });
+      aiLockedSources.delete(key);
+      log('source.unlocked', { key });
+      scheduleQueueDrain();
+    }
+    return true;
+  },
 
-      if (locked) {
-        aiLockStateByKey.set(key, { owner, sequence: seq, locked: true });
-        aiLockedSources.add(key);
-        log('source.locked', { key });
-      } else {
-        aiLockStateByKey.set(key, { owner, sequence: seq, locked: false });
-        aiLockedSources.delete(key);
-        log('source.unlocked', { key });
-        scheduleQueueDrain();
-      }
-      return true;
-    },
+  async 'ai.getModel'() {
+    log('method.ai.getModel', {});
+    return fetchModelFromServer();
+  },
 
-    async 'ai.getModel'() {
-      log('method.ai.getModel', {});
-      return fetchModelFromServer();
-    },
+  async 'ai.requestChat'(messages, queueMeta) {
+    check(messages, [
+      {
+        role: String,
+        content: Match.OneOf(String, [Match.Any]),
+      },
+    ]);
+    check(queueMeta, queueMetaMatch);
 
-    async 'ai.requestChat'(messages, queueMeta) {
-      check(messages, [
-        {
-          role: String,
-          content: Match.OneOf(String, [Match.Any]),
-        },
-      ]);
-      check(queueMeta, queueMetaMatch);
+    return enqueueAIChatRequest(messages, queueMeta, { timeoutMs: 180_000 });
+  },
 
-      return enqueueAIChatRequest(messages, queueMeta, { timeoutMs: 180_000 });
-    },
+  async 'ai.fetchUrlMarkdown'(url) {
+    check(url, String);
 
-    async 'ai.fetchUrlMarkdown'(url) {
-      check(url, String);
-
-      log('method.ai.fetchUrlMarkdown.start', { url });
-      const response = await fetch(url);
-      if (!response.ok) {
-        const body = await response.text();
-        log('method.ai.fetchUrlMarkdown.error', {
-          url,
-          status: response.status,
-          body: body.slice(0, 500),
-        });
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const html = await response.text();
-      const markdown = htmlToMarkdown(html);
-      const finalMarkdown =
-        markdown.length > URL_MARKDOWN_MAX_CHARS
-          ? markdown.slice(0, URL_MARKDOWN_MAX_CHARS)
-          : markdown;
-      log('method.ai.fetchUrlMarkdown.success', {
+    log('method.ai.fetchUrlMarkdown.start', { url });
+    const response = await fetch(url);
+    if (!response.ok) {
+      const body = await response.text();
+      log('method.ai.fetchUrlMarkdown.error', {
         url,
-        htmlLength: html.length,
-        markdownLength: finalMarkdown.length,
-        preview: finalMarkdown.slice(0, 500),
+        status: response.status,
+        body: body.slice(0, 500),
       });
-      return finalMarkdown;
-    },
-  });
-}
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const markdown = htmlToMarkdown(html);
+    const finalMarkdown =
+      markdown.length > URL_MARKDOWN_MAX_CHARS
+        ? markdown.slice(0, URL_MARKDOWN_MAX_CHARS)
+        : markdown;
+    log('method.ai.fetchUrlMarkdown.success', {
+      url,
+      htmlLength: html.length,
+      markdownLength: finalMarkdown.length,
+      preview: finalMarkdown.slice(0, 500),
+    });
+    return finalMarkdown;
+  },
+
+  async 'ai.fetchProviderModels'(baseUrl, apiKey) {
+    check(baseUrl, String);
+    check(apiKey, Match.Maybe(String));
+
+    let effectiveUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
+    if (!effectiveUrl) {
+      throw new Meteor.Error('invalid-url', 'Base URL is required');
+    }
+
+    const alias = String(
+      process.env.METACELLS_CONTAINER_HOST_ALIAS || '',
+    ).trim();
+    if (alias) {
+      try {
+        const parsed = new URL(effectiveUrl);
+        const host = String(parsed.hostname || '').trim().toLowerCase();
+        if (
+          host === 'localhost' ||
+          host === '127.0.0.1' ||
+          host === '[::1]'
+        ) {
+          parsed.hostname = alias;
+          effectiveUrl = parsed.toString().replace(/\/$/, '');
+        }
+      } catch (e) {}
+    }
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+
+    log('method.ai.fetchProviderModels.start', {
+      url: effectiveUrl,
+    });
+
+    const response = await fetch(`${effectiveUrl}/models`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      log('method.ai.fetchProviderModels.error', {
+        status: response.status,
+        body: body.slice(0, 500),
+      });
+      throw new Meteor.Error(
+        'fetch-models-error',
+        `HTTP ${response.status}: ${body.slice(0, 200)}`,
+      );
+    }
+
+    const data = await response.json();
+    const models = (
+      data && Array.isArray(data.data) ? data.data : []
+    )
+      .map((m) => ({
+        id: String((m && m.id) || ''),
+        name: String((m && (m.name || m.id)) || ''),
+        owned_by: String((m && m.owned_by) || ''),
+      }))
+      .filter((m) => m.id)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    log('method.ai.fetchProviderModels.success', {
+      count: models.length,
+      preview: models.slice(0, 5).map((m) => m.id),
+    });
+
+    return models;
+  },
+});

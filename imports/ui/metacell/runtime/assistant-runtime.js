@@ -1,4 +1,4 @@
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../../lib/rpc-client.js';
 
 function getAssistantDraftStorageKey(app) {
   return 'metacells:assistant:draft:' + String(app.sheetDocumentId || 'local');
@@ -48,7 +48,7 @@ function openAssistantFilePicker(app) {
 }
 
 function loadAssistantConversation(app) {
-  return Meteor.callAsync('assistant.getConversation', app.sheetDocumentId)
+  return rpc('assistant.getConversation', app.sheetDocumentId)
     .then(function (result) {
       app.assistantMessages =
         result && Array.isArray(result.messages) ? result.messages : [];
@@ -82,7 +82,7 @@ function formatAssistantMessageTime(item) {
 }
 
 function refreshAssistantManifest(app) {
-  return Meteor.callAsync(
+  return rpc(
     'assistant.getManifest',
     app.sheetDocumentId,
     app.getWorkbookSnapshot(),
@@ -152,7 +152,7 @@ function ensureAssistantPanel(app) {
       return;
     }
     if (action === 'clear') {
-      Meteor.callAsync('assistant.clearConversation', app.sheetDocumentId).catch(
+      rpc('assistant.clearConversation', app.sheetDocumentId).catch(
         function () {},
       );
       app.assistantMessages = [];
@@ -171,7 +171,7 @@ function ensureAssistantPanel(app) {
       event.stopPropagation();
       var uploadId = String(actionTarget.getAttribute('data-upload-id') || '');
       if (!uploadId) return;
-      Meteor.callAsync('assistant.removeUpload', app.sheetDocumentId, uploadId)
+      rpc('assistant.removeUpload', app.sheetDocumentId, uploadId)
         .then(function (result) {
           app.assistantUploads =
             result && Array.isArray(result.uploads) ? result.uploads : [];
@@ -206,7 +206,7 @@ function ensureAssistantPanel(app) {
       if (!providerId) return;
       app.assistantBusy = true;
       renderAssistantPanel(app);
-      Meteor.callAsync('settings.setActiveAIProvider', providerId)
+      rpc('settings.setActiveAIProvider', providerId)
         .then(function () {
           return refreshAssistantManifest(app);
         })
@@ -236,7 +236,7 @@ function ensureAssistantPanel(app) {
       file
         .arrayBuffer()
         .then(function (buffer) {
-          return Meteor.callAsync(
+          return rpc(
             'assistant.uploadFile',
             app.sheetDocumentId,
             String(file.name || 'Attached file'),
@@ -464,7 +464,7 @@ function submitAssistantPrompt(app) {
   textarea.value = '';
   saveAssistantDraft(app, '');
   renderAssistantPanel(app);
-  Meteor.callAsync('assistant.chat', {
+  rpc('assistant.chat', {
     sheetDocumentId: app.sheetDocumentId,
     workbookSnapshot: app.getWorkbookSnapshot(),
     message: value,

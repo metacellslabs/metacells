@@ -1,4 +1,4 @@
-import { Meteor } from 'meteor/meteor';
+import { Meteor } from '../../../../../lib/meteor-compat.js';
 import { getArtifactBinary } from '../../../artifacts/index.js';
 import { defineChannelHandler } from '../handler-definition.js';
 

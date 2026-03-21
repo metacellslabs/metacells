@@ -1,7 +1,7 @@
-import { Mongo } from 'meteor/mongo';
+import { Collection } from '../../../lib/collections.js';
 import { randomUUID } from 'node:crypto';
 
-export const ChannelEvents = new Mongo.Collection('channel_events');
+export const ChannelEvents = new Collection('channel_events');
 
 function firstNonEmptyString(...values) {
   for (let i = 0; i < values.length; i += 1) {

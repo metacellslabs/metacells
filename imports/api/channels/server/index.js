@@ -1,5 +1,6 @@
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
+import { Meteor } from '../../../../lib/meteor-compat.js';
+import { check, Match } from '../../../../lib/check.js';
+import { registerMethods } from '../../../../lib/rpc.js';
 import { getRegisteredChannelConnectorById } from '../connectors/index.js';
 import {
   AppSettings,
@@ -589,11 +590,11 @@ async function reconcileChannelSubscriptions() {
 }
 
 export function startChannelPollingWorker() {
-  if (!Meteor.isServer || channelPollingWorkerStarted) return;
+  if (channelPollingWorkerStarted) return;
   channelPollingWorkerStarted = true;
   logChannelRuntime('worker.started', { intervalMs: CHANNEL_POLL_INTERVAL_MS });
-  Meteor.startup(() => {
-    Meteor.setTimeout(() => {
+  setTimeout(() => {
+    setTimeout(() => {
       reconcileChannelSubscriptions().catch((error) => {
         logChannelRuntime('subscribe.startup.failed', {
           message: error && error.message ? error.message : String(error),
@@ -605,7 +606,7 @@ export function startChannelPollingWorker() {
         });
       });
     }, 5000);
-    Meteor.setInterval(() => {
+    setInterval(() => {
       reconcileChannelSubscriptions().catch((error) => {
         logChannelRuntime('subscribe.interval.failed', {
           message: error && error.message ? error.message : String(error),
@@ -624,8 +625,7 @@ export function isChannelPollingWorkerStarted() {
   return channelPollingWorkerStarted;
 }
 
-if (Meteor.isServer) {
-  registerAIQueueSheetRuntimeHooks({
+registerAIQueueSheetRuntimeHooks({
     loadChannelPayloads: async () => getActiveChannelPayloadMap(),
   });
 
@@ -637,7 +637,7 @@ if (Meteor.isServer) {
     });
   });
 
-  Meteor.methods({
+  registerMethods({
     async 'settings.upsertCommunicationChannel'(channel) {
       check(channel, {
         id: String,
@@ -1007,4 +1007,3 @@ if (Meteor.isServer) {
       };
     },
   });
-}

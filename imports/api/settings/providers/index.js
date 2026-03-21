@@ -1,5 +1,29 @@
 import { validateAIProviderDefinition } from './definition.js';
 
+import _CUSTOM from './CUSTOM.js';
+import _DEEPSEEK from './DEEPSEEK.js';
+import _FIREWORKS from './FIREWORKS.js';
+import _GROQ from './GROQ.js';
+import _LM_STUDIO from './LM_STUDIO.js';
+import _OLLAMA from './OLLAMA.js';
+import _OPENAI from './OPENAI.js';
+import _OPENROUTER from './OPENROUTER.js';
+import _TOGETHER from './TOGETHER.js';
+import _XAI from './XAI.js';
+
+const ALL_MODULES = {
+  './CUSTOM.js': { default: _CUSTOM },
+  './DEEPSEEK.js': { default: _DEEPSEEK },
+  './FIREWORKS.js': { default: _FIREWORKS },
+  './GROQ.js': { default: _GROQ },
+  './LM_STUDIO.js': { default: _LM_STUDIO },
+  './OLLAMA.js': { default: _OLLAMA },
+  './OPENAI.js': { default: _OPENAI },
+  './OPENROUTER.js': { default: _OPENROUTER },
+  './TOGETHER.js': { default: _TOGETHER },
+  './XAI.js': { default: _XAI },
+};
+
 function shouldIgnoreProviderFile(key) {
   return /(?:^|\/)(?:index|definition)\.js$/i.test(String(key || ''));
 }
@@ -26,20 +50,15 @@ function buildDiscoveryHash(key, definition) {
 }
 
 function discoverAIProviders() {
-  const context = import.meta.webpackContext('./', {
-    recursive: false,
-    regExp: /\.js$/,
-  });
   const providers = [];
   const manifest = [];
   const seenIds = {};
 
-  context
-    .keys()
+  Object.keys(ALL_MODULES)
     .sort()
     .forEach((key) => {
       if (shouldIgnoreProviderFile(key)) return;
-      const moduleExports = context(key);
+      const moduleExports = ALL_MODULES[key];
       const definition = validateAIProviderDefinition(
         moduleExports && moduleExports.default,
         key,

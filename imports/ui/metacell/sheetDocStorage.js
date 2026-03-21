@@ -1,4 +1,4 @@
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../lib/rpc-client.js';
 import { WorkbookStorageAdapter } from './runtime/workbook-storage-adapter.js';
 
 class SheetDocStorageCore extends WorkbookStorageAdapter {
@@ -22,7 +22,7 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       this.saveInFlight = true;
-      Meteor.callAsync('sheets.saveWorkbook', this.sheetId, this.snapshot())
+      rpc('sheets.saveWorkbook', this.sheetId, this.snapshot())
         .then(() => {
           this.persistedRevision = Math.max(
             this.persistedRevision,

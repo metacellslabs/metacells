@@ -1,5 +1,5 @@
 // Description: Application controller that wires UI, storage, grid rendering, tabs, formulas, and AI updates.
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../../lib/rpc-client.js';
 import {
   buildChannelSendAttachmentsFromPreparedPrompt,
   buildChannelSendBodyFromPreparedPrompt,
@@ -781,7 +781,7 @@ export class SpreadsheetApp {
     if (releaseKey) {
       var releaseParts = releaseKey.split(':');
       this.editLockSequence += 1;
-      Meteor.callAsync(
+      rpc(
         'ai.setSourceEditLock',
         releaseParts[0],
         releaseParts[1],
@@ -795,7 +795,7 @@ export class SpreadsheetApp {
     if (nextKey) {
       var lockParts = nextKey.split(':');
       this.editLockSequence += 1;
-      Meteor.callAsync(
+      rpc(
         'ai.setSourceEditLock',
         lockParts[0],
         lockParts[1],
@@ -1024,7 +1024,7 @@ export class SpreadsheetApp {
       this.formulaInput.value = raw;
     }
 
-    Meteor.callAsync('channels.sendByLabel', command.label, outboundPayload)
+    rpc('channels.sendByLabel', command.label, outboundPayload)
       .then(() => {
         this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
           value: `Sent to /${command.label}`,

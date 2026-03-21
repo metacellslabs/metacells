@@ -1175,7 +1175,31 @@ export async function computeSheetSnapshot({
 
   rawStorage.markDependencyGraphAuthoritative(true, 'compute');
 
-  await saveSnapshot(valuesBySheet, errorsBySheet, processedEventIdsBySheet);
+  // Wait for pending AI requests to complete before returning.
+  // Without this, AI cells return '...' placeholders and the client never
+  // receives the actual result (onInvalidate persists to DB later, but the
+  // RPC response has already been sent).
+  const hadPendingAI =
+    typeof aiService.hasPendingRequests === 'function' &&
+    aiService.hasPendingRequests();
+  if (hadPendingAI) {
+    await aiService.waitForPendingRequests();
+
+    // After waiting:
+    // - OWN requests: onInvalidate already updated rawStorage with correct AI results.
+    //   this.cache[cacheKey] has the answer, re-evaluation picks it up.
+    // - SHARED requests (concurrent): SHARED_AI_RESULT_CACHE has the answer,
+    //   loadCache() finds it, re-evaluation picks it up.
+    //
+    // Re-run evaluateWorkbook() so valuesBySheet gets the correct (non-'...') values.
+    // This also ensures rawStorage is updated for shared-request cases.
+    evaluateWorkbook();
+    rawStorage.markDependencyGraphAuthoritative(true, 'compute');
+
+    await saveSnapshot(valuesBySheet, errorsBySheet, processedEventIdsBySheet);
+  } else {
+    await saveSnapshot(valuesBySheet, errorsBySheet, processedEventIdsBySheet);
+  }
   return {
     values: valuesBySheet[activeSheetId] || {},
     valuesBySheet,

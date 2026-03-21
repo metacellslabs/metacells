@@ -1,5 +1,6 @@
-import { Meteor } from 'meteor/meteor';
-import { check } from 'meteor/check';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { check } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import { randomUUID } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -238,8 +239,7 @@ registerJobHandler('files.extract_content', {
   },
 });
 
-if (Meteor.isServer) {
-  Meteor.methods({
+registerMethods({
     async 'files.extractContent'(fileName, mimeType, base64Data) {
       check(fileName, String);
       check(mimeType, String);
@@ -310,4 +310,3 @@ if (Meteor.isServer) {
       };
     },
   });
-}

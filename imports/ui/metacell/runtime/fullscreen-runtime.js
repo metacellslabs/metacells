@@ -1,4 +1,3 @@
-import { Meteor } from 'meteor/meteor';
 import { AI_MODE } from './constants.js';
 import {
   getWindowOrigin,
@@ -103,7 +102,7 @@ export function publishCurrentReport(app) {
 export function exportCurrentReportPdf(app) {
   if (!app.isReportActive()) return;
   app.setReportMode('view');
-  Meteor.defer(() => {
+  setTimeout(() => {
     printWindow();
-  });
+  }, 0);
 }

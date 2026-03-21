@@ -1,4 +1,4 @@
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../../lib/rpc-client.js';
 
 function getAttachmentDisplayValue(app, rawValue) {
   var raw = String(rawValue == null ? '' : rawValue);
@@ -192,7 +192,7 @@ export function readAttachedFileContent(app, file, preparedBase64) {
       : file.arrayBuffer().then((buffer) => arrayBufferToBase64(app, buffer));
   return base64Promise
     .then((base64) =>
-      Meteor.callAsync(
+      rpc(
         'files.extractContent',
         String(file.name || 'Attached file'),
         String(file.type || ''),

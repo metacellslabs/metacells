@@ -1,8 +1,8 @@
 import { validateDiscoveredFormulasOnServer } from './validate-formulas.js';
 import { validateDiscoveredAIProvidersOnServer } from './validate-ai-providers.js';
 import { validateDiscoveredChannelConnectorsOnServer } from './validate-channel-connectors.js';
-import { registerArtifactRoute } from '../../api/artifacts/server.js';
-import { registerChannelEventAttachmentRoute } from '../../api/channels/events-server.js';
+import { createArtifactMiddleware } from '../../api/artifacts/server.js';
+import { createChannelEventAttachmentMiddleware } from '../../api/channels/events-server.js';
 import {
   registerJobsRuntimeHooks,
   startJobsWorker,
@@ -34,8 +34,8 @@ console.log('[channels] registry.validated', {
   count: channelConnectorHashes.length,
   files: channelConnectorHashes,
 });
-registerArtifactRoute();
-registerChannelEventAttachmentRoute();
+createArtifactMiddleware();
+createChannelEventAttachmentMiddleware();
 console.log('[runtime] role', { role: getRuntimeRole() });
 registerJobsRuntimeHooks({
   isWorkerEnabled: () => getJobSettingsSync().workerEnabled,

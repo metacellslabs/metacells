@@ -1,5 +1,35 @@
 import { validateChannelConnectorDefinition } from './definition.js';
 
+import _FACEBOOK from './FACEBOOK.js';
+import _GITHUB from './GITHUB.js';
+import _GMAIL from './GMAIL.js';
+import _GOOGLEDRIVE from './GOOGLEDRIVE.js';
+import _HACKERNEWS from './HACKERNEWS.js';
+import _IMAP from './IMAP.js';
+import _INSTAGRAM from './INSTAGRAM.js';
+import _LINKEDIN from './LINKEDIN.js';
+import _REDDIT from './REDDIT.js';
+import _SHELL from './SHELL.js';
+import _TELEGRAM from './TELEGRAM.js';
+import _TWITTER from './TWITTER.js';
+import _WHATSAPP from './WHATSAPP.js';
+
+const ALL_MODULES = {
+  './FACEBOOK.js': { default: _FACEBOOK },
+  './GITHUB.js': { default: _GITHUB },
+  './GMAIL.js': { default: _GMAIL },
+  './GOOGLEDRIVE.js': { default: _GOOGLEDRIVE },
+  './HACKERNEWS.js': { default: _HACKERNEWS },
+  './IMAP.js': { default: _IMAP },
+  './INSTAGRAM.js': { default: _INSTAGRAM },
+  './LINKEDIN.js': { default: _LINKEDIN },
+  './REDDIT.js': { default: _REDDIT },
+  './SHELL.js': { default: _SHELL },
+  './TELEGRAM.js': { default: _TELEGRAM },
+  './TWITTER.js': { default: _TWITTER },
+  './WHATSAPP.js': { default: _WHATSAPP },
+};
+
 function formatConnectorCapabilities(connector) {
   const capabilities =
     connector && typeof connector === 'object' && connector.capabilities
@@ -51,20 +81,15 @@ function buildDiscoveryHash(key, definition) {
 }
 
 function discoverChannelConnectors() {
-  const context = import.meta.webpackContext('./', {
-    recursive: false,
-    regExp: /\.js$/,
-  });
   const connectors = [];
   const manifest = [];
   const seenIds = {};
 
-  context
-    .keys()
+  Object.keys(ALL_MODULES)
     .sort()
     .forEach((key) => {
       if (shouldIgnoreConnectorFile(key)) return;
-      const moduleExports = context(key);
+      const moduleExports = ALL_MODULES[key];
       const definition = validateChannelConnectorDefinition(
         moduleExports && moduleExports.default,
         key,

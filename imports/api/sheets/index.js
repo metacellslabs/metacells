@@ -1,25 +1,26 @@
-import { Mongo } from 'meteor/mongo';
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
+import { Collection } from '../../../lib/collections.js';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { check, Match } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import {
   computeSheetSnapshot,
   invalidateWorkbookDependencies,
   isDependencyGraphAuthoritative,
   rebuildWorkbookDependencyGraph,
-} from './server/compute';
+} from './server/compute.js';
 import {
   hydrateWorkbookAttachmentArtifacts,
   getArtifactText,
   stripWorkbookAttachmentInlineData,
 } from '../artifacts/index.js';
-import { decodeStorageMap } from './storage-codec';
+import { decodeStorageMap } from './storage-codec.js';
 import {
   buildWorkbookFromFlatStorage,
   decodeSheetDocumentStorage,
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
   flattenWorkbook,
-} from './workbook-codec';
+} from './workbook-codec.js';
 import {
   notifyQueuedSheetDependenciesChanged,
   registerAIQueueSheetRuntimeHooks,
@@ -47,7 +48,7 @@ import {
   buildComputedFormulaTestWorkbook,
 } from './formula-test-workbook.js';
 
-export const Sheets = new Mongo.Collection('sheets');
+export const Sheets = new Collection('sheets');
 
 const isPlainObject = Match.Where((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -1313,324 +1314,252 @@ async function removeWorkbookSchedulesAfterDelete(sheetId) {
   }
 }
 
-if (Meteor.isServer) {
-  Meteor.startup(async () => {
-    const result = await migrateAllSheetsToWorkbook();
-    console.log('[sheets] workbook migration complete', result);
-  });
+export async function initSheets() {
+  const result = await migrateAllSheetsToWorkbook();
+  console.log('[sheets] workbook migration complete', result);
+}
 
-  Meteor.publish('sheets.list', function publishSheetsList() {
+registerMethods({
+  async 'sheets.list'() {
     return Sheets.find(
       {},
       {
         fields: { name: 1, createdAt: 1, updatedAt: 1 },
         sort: { updatedAt: -1, createdAt: -1 },
       },
-    );
-  });
+    ).fetchAsync();
+  },
 
-  Meteor.publish('sheets.one', function publishSheet(sheetId) {
+  async 'sheets.one'(sheetId) {
     check(sheetId, String);
 
-    return Sheets.find(
+    return Sheets.findOneAsync(
       { _id: sheetId },
       {
         fields: { name: 1, workbook: 1, createdAt: 1, updatedAt: 1 },
       },
     );
-  });
+  },
 
-  Meteor.methods({
-    async 'sheets.create'(name) {
-      check(name, Match.Maybe(String));
+  async 'sheets.create'(name) {
+    check(name, Match.Maybe(String));
 
-      const now = new Date();
-      const count = (await Sheets.find().countAsync()) + 1;
-      const sheetName = String(name || '').trim() || `Metacell ${count}`;
-      const workbook = buildWorkbookFromFlatStorage({});
+    const now = new Date();
+    const count = (await Sheets.find().countAsync()) + 1;
+    const sheetName = String(name || '').trim() || `Metacell ${count}`;
+    const workbook = buildWorkbookFromFlatStorage({});
 
-      return Sheets.insertAsync({
-        name: sheetName,
-        workbook: encodeWorkbookForDocument(workbook),
-        createdAt: now,
-        updatedAt: now,
-      });
-    },
+    return Sheets.insertAsync({
+      name: sheetName,
+      workbook: encodeWorkbookForDocument(workbook),
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
 
-    async 'sheets.createFormulaTestWorkbook'(name) {
-      check(name, Match.Maybe(String));
+  async 'sheets.createFormulaTestWorkbook'(name) {
+    check(name, Match.Maybe(String));
 
-      const now = new Date();
-      const workbook = await buildComputedFormulaTestWorkbook();
-      const sheetName = String(name || '').trim() || 'Formula Test Bench';
+    const now = new Date();
+    const workbook = await buildComputedFormulaTestWorkbook();
+    const sheetName = String(name || '').trim() || 'Formula Test Bench';
 
-      return Sheets.insertAsync({
-        name: sheetName,
-        workbook: encodeWorkbookForDocument(workbook),
-        createdAt: now,
-        updatedAt: now,
-      });
-    },
+    return Sheets.insertAsync({
+      name: sheetName,
+      workbook: encodeWorkbookForDocument(workbook),
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
 
-    async 'sheets.createFinancialModelWorkbook'(name) {
-      check(name, Match.Maybe(String));
+  async 'sheets.createFinancialModelWorkbook'(name) {
+    check(name, Match.Maybe(String));
 
-      const now = new Date();
-      const workbook = await buildComputedFinancialModelWorkbook();
-      const sheetName =
-        String(name || '').trim() || 'AI Startup Financial Model';
+    const now = new Date();
+    const workbook = await buildComputedFinancialModelWorkbook();
+    const sheetName =
+      String(name || '').trim() || 'AI Startup Financial Model';
 
-      return Sheets.insertAsync({
-        name: sheetName,
-        workbook: encodeWorkbookForDocument(workbook),
-        createdAt: now,
-        updatedAt: now,
-      });
-    },
+    return Sheets.insertAsync({
+      name: sheetName,
+      workbook: encodeWorkbookForDocument(workbook),
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
 
-    async 'sheets.rename'(sheetId, name) {
-      check(sheetId, String);
-      check(name, String);
+  async 'sheets.rename'(sheetId, name) {
+    check(sheetId, String);
+    check(name, String);
 
-      const nextName = String(name || '').trim();
-      if (!nextName) {
-        throw new Meteor.Error('invalid-name', 'Workbook name is required');
-      }
+    const nextName = String(name || '').trim();
+    if (!nextName) {
+      throw new Meteor.Error('invalid-name', 'Workbook name is required');
+    }
 
-      await Sheets.updateAsync(
-        { _id: sheetId },
-        {
-          $set: {
-            name: nextName,
-            updatedAt: new Date(),
-          },
+    await Sheets.updateAsync(
+      { _id: sheetId },
+      {
+        $set: {
+          name: nextName,
+          updatedAt: new Date(),
         },
-      );
-    },
+      },
+    );
+  },
 
-    async 'sheets.remove'(sheetId) {
-      check(sheetId, String);
-      await removeWorkbookSchedulesAfterDelete(sheetId);
-      await Sheets.removeAsync({ _id: sheetId });
-    },
+  async 'sheets.remove'(sheetId) {
+    check(sheetId, String);
+    await removeWorkbookSchedulesAfterDelete(sheetId);
+    await Sheets.removeAsync({ _id: sheetId });
+  },
 
-    async 'sheets.migrateAllToWorkbook'() {
-      return migrateAllSheetsToWorkbook();
-    },
+  async 'sheets.migrateAllToWorkbook'() {
+    return migrateAllSheetsToWorkbook();
+  },
 
-    async 'sheets.rebuildDependencyGraph'(sheetId) {
-      check(sheetId, String);
-      const workbook = await rebuildSheetDependencyGraph(sheetId);
-      if (!workbook) {
-        throw new Meteor.Error('not-found', 'Workbook not found');
-      }
-      return { rebuilt: true };
-    },
+  async 'sheets.rebuildDependencyGraph'(sheetId) {
+    check(sheetId, String);
+    const workbook = await rebuildSheetDependencyGraph(sheetId);
+    if (!workbook) {
+      throw new Meteor.Error('not-found', 'Workbook not found');
+    }
+    return { rebuilt: true };
+  },
 
-    async 'sheets.rebuildAllDependencyGraphs'() {
-      return rebuildAllSheetDependencyGraphs();
-    },
+  async 'sheets.rebuildAllDependencyGraphs'() {
+    return rebuildAllSheetDependencyGraphs();
+  },
 
-    async 'sheets.saveWorkbook'(sheetId, workbook) {
-      check(sheetId, String);
-      check(workbook, isPlainObject);
+  async 'sheets.saveWorkbook'(sheetId, workbook) {
+    check(sheetId, String);
+    check(workbook, isPlainObject);
 
-      const sheetDocument = await normalizeSheetDocument(sheetId);
-      const previousWorkbook = decodeWorkbookDocument(
-        (sheetDocument && sheetDocument.workbook) || {},
-      );
-      const nextWorkbook = mergeWorkbookForCompute(previousWorkbook, workbook);
-      const changes = collectChangedDependencySignals(
-        previousWorkbook,
-        nextWorkbook,
-      );
-      const invalidatedWorkbook = decodeWorkbookDocument(
-        invalidateWorkbookDependencies(nextWorkbook, changes),
-      );
-      const repairedWorkbook =
-        rebuildWorkbookDependencyGraph(invalidatedWorkbook);
-      const persistedWorkbook =
-        stripWorkbookAttachmentInlineData(repairedWorkbook);
+    const sheetDocument = await normalizeSheetDocument(sheetId);
+    const previousWorkbook = decodeWorkbookDocument(
+      (sheetDocument && sheetDocument.workbook) || {},
+    );
+    const nextWorkbook = mergeWorkbookForCompute(previousWorkbook, workbook);
+    const changes = collectChangedDependencySignals(
+      previousWorkbook,
+      nextWorkbook,
+    );
+    const invalidatedWorkbook = decodeWorkbookDocument(
+      invalidateWorkbookDependencies(nextWorkbook, changes),
+    );
+    const repairedWorkbook =
+      rebuildWorkbookDependencyGraph(invalidatedWorkbook);
+    const persistedWorkbook =
+      stripWorkbookAttachmentInlineData(repairedWorkbook);
 
-      await Sheets.updateAsync(
-        { _id: sheetId },
-        {
-          $set: {
-            workbook: encodeWorkbookForDocument(persistedWorkbook),
-            updatedAt: new Date(),
-          },
-          $unset: {
-            storage: '',
-          },
+    await Sheets.updateAsync(
+      { _id: sheetId },
+      {
+        $set: {
+          workbook: encodeWorkbookForDocument(persistedWorkbook),
+          updatedAt: new Date(),
         },
-      );
-
-      if (changes.length) {
-        await notifyQueuedSheetDependenciesChanged(sheetId, changes);
-      }
-      await syncWorkbookSchedulesAfterPersist(
-        {
-          sheetDocumentId: sheetId,
-          previousWorkbook,
-          nextWorkbook: persistedWorkbook,
+        $unset: {
+          storage: '',
         },
-        'Failed to sync workbook schedules after save',
-      );
-    },
+      },
+    );
 
-    async 'sheets.computeGrid'(sheetId, activeSheetId, options) {
-      check(sheetId, String);
-      check(activeSheetId, String);
-      check(options, Match.Maybe(isPlainObject));
-      const profiler = createServerCellUpdateProfiler(
-        options && options.traceId ? options.traceId : '',
-        {
-          sheetId,
-          activeSheetId,
-        },
-      );
-      if (profiler) profiler.step('computeGrid.start');
-
-      const sheetDocument = await normalizeSheetDocument(sheetId);
-      if (profiler) profiler.step('normalize.done');
-
-      if (!sheetDocument) {
-        throw new Meteor.Error('not-found', 'Workbook not found');
-      }
-
-      const persistedWorkbook = decodeWorkbookDocument(
-        sheetDocument.workbook || {},
-      );
-      const sourceWorkbook =
-        options &&
-        options.workbookSnapshot &&
-        typeof options.workbookSnapshot === 'object'
-          ? mergeWorkbookForCompute(persistedWorkbook, options.workbookSnapshot)
-          : persistedWorkbook;
-      if (profiler) profiler.step('merge.done');
-      const repairedWorkbook = isDependencyGraphAuthoritative(sourceWorkbook)
-        ? sourceWorkbook
-        : rebuildWorkbookDependencyGraph(sourceWorkbook);
-      if (profiler)
-        profiler.step('graph_repair.done', {
-          repaired: !isDependencyGraphAuthoritative(sourceWorkbook),
-        });
-      const hydratedWorkbook =
-        await hydrateWorkbookAttachmentArtifacts(repairedWorkbook);
-      if (profiler) profiler.step('hydrate.done');
-      const channelPayloads = await getActiveChannelPayloadMap();
-      if (profiler) profiler.step('channel_payloads.done');
-      const changedSignals = collectChangedDependencySignals(
-        persistedWorkbook,
-        sourceWorkbook,
-      );
-
-      const result = await computeSheetSnapshot({
+    if (changes.length) {
+      await notifyQueuedSheetDependenciesChanged(sheetId, changes);
+    }
+    await syncWorkbookSchedulesAfterPersist(
+      {
         sheetDocumentId: sheetId,
-        workbookData: hydratedWorkbook,
+        previousWorkbook,
+        nextWorkbook: persistedWorkbook,
+      },
+      'Failed to sync workbook schedules after save',
+    );
+  },
+
+  async 'sheets.computeGrid'(sheetId, activeSheetId, options) {
+    check(sheetId, String);
+    check(activeSheetId, String);
+    check(options, Match.Maybe(isPlainObject));
+    const profiler = createServerCellUpdateProfiler(
+      options && options.traceId ? options.traceId : '',
+      {
+        sheetId,
         activeSheetId,
-        channelPayloads,
-        forceRefreshAI: !!(options && options.forceRefreshAI),
-        manualTriggerAI: !!(options && options.manualTriggerAI),
-        changedSignals,
-        persistWorkbook: async (nextWorkbook) => {
-          const normalizedNextWorkbook = decodeWorkbookDocument(nextWorkbook);
-          const latestSheetDocument = await Sheets.findOneAsync(
-            { _id: sheetId },
-            { fields: { workbook: 1 } },
-          );
-          const latestPersistedWorkbook = decodeWorkbookDocument(
-            (latestSheetDocument && latestSheetDocument.workbook) || {},
-          );
-          const mergedPersistWorkbook = mergeWorkbookForCompute(
-            normalizedNextWorkbook,
-            latestPersistedWorkbook,
-          );
-          const changes = collectChangedDependencySignals(
-            latestPersistedWorkbook,
-            mergedPersistWorkbook,
-          );
-          const persistedNextWorkbook = stripWorkbookAttachmentInlineData(
-            mergedPersistWorkbook,
-          );
-          if (profiler)
-            profiler.step('persist.start', { changes: changes.length });
-          await Sheets.updateAsync(
-            { _id: sheetId },
-            {
-              $set: {
-                workbook: encodeWorkbookForDocument(persistedNextWorkbook),
-                updatedAt: new Date(),
-              },
-              $unset: {
-                storage: '',
-              },
-            },
-          );
-          if (changes.length) {
-            await notifyQueuedSheetDependenciesChanged(sheetId, changes);
-          }
-          await syncWorkbookSchedulesAfterPersist(
-            {
-              sheetDocumentId: sheetId,
-              previousWorkbook: sourceWorkbook,
-              nextWorkbook: persistedNextWorkbook,
-            },
-            'Failed to sync workbook schedules after compute persist',
-          );
-          if (profiler)
-            profiler.step('persist.done', { changes: changes.length });
-        },
+      },
+    );
+    if (profiler) profiler.step('computeGrid.start');
+
+    const sheetDocument = await normalizeSheetDocument(sheetId);
+    if (profiler) profiler.step('normalize.done');
+
+    if (!sheetDocument) {
+      throw new Meteor.Error('not-found', 'Workbook not found');
+    }
+
+    const persistedWorkbook = decodeWorkbookDocument(
+      sheetDocument.workbook || {},
+    );
+    const sourceWorkbook =
+      options &&
+      options.workbookSnapshot &&
+      typeof options.workbookSnapshot === 'object'
+        ? mergeWorkbookForCompute(persistedWorkbook, options.workbookSnapshot)
+        : persistedWorkbook;
+    if (profiler) profiler.step('merge.done');
+    const repairedWorkbook = isDependencyGraphAuthoritative(sourceWorkbook)
+      ? sourceWorkbook
+      : rebuildWorkbookDependencyGraph(sourceWorkbook);
+    if (profiler)
+      profiler.step('graph_repair.done', {
+        repaired: !isDependencyGraphAuthoritative(sourceWorkbook),
       });
-      const nextWorkbookAfterChannelHistory =
-        result && result.workbook
-          ? await (async () => {
-              const mentionedLabels = [
-                ...new Set(
-                  Object.values(
-                    (
-                      decodeWorkbookDocument(result.workbook || {}).sheets || {}
-                    ),
-                  )
-                    .flatMap((sheet) =>
-                      Object.values((sheet && sheet.cells) || {}).flatMap(
-                        (cell) =>
-                          extractChannelMentionLabels(
-                            String((cell && cell.source) || ''),
-                          ),
-                      ),
-                    )
-                    .map((label) => normalizeChannelLabel(label))
-                    .filter(Boolean),
-                ),
-              ];
-              let nextWorkbook = result.workbook;
-              for (let i = 0; i < mentionedLabels.length; i += 1) {
-                nextWorkbook = await runChannelBatchForWorkbook({
-                  sheetDocumentId: sheetId,
-                  workbook: nextWorkbook,
-                  channelLabel: mentionedLabels[i],
-                  channelPayloads,
-                  historyOnly: true,
-                });
-              }
-              return nextWorkbook;
-            })()
-          : result && result.workbook;
-      if (nextWorkbookAfterChannelHistory && result) {
-        const previousWorkbookBeforeChannelHistory = decodeWorkbookDocument(
-          result.workbook || {},
+    const hydratedWorkbook =
+      await hydrateWorkbookAttachmentArtifacts(repairedWorkbook);
+    if (profiler) profiler.step('hydrate.done');
+    const channelPayloads = await getActiveChannelPayloadMap();
+    if (profiler) profiler.step('channel_payloads.done');
+    const changedSignals = collectChangedDependencySignals(
+      persistedWorkbook,
+      sourceWorkbook,
+    );
+
+    const result = await computeSheetSnapshot({
+      sheetDocumentId: sheetId,
+      workbookData: hydratedWorkbook,
+      activeSheetId,
+      channelPayloads,
+      forceRefreshAI: !!(options && options.forceRefreshAI),
+      manualTriggerAI: !!(options && options.manualTriggerAI),
+      changedSignals,
+      persistWorkbook: async (nextWorkbook) => {
+        const normalizedNextWorkbook = decodeWorkbookDocument(nextWorkbook);
+        const latestSheetDocument = await Sheets.findOneAsync(
+          { _id: sheetId },
+          { fields: { workbook: 1 } },
         );
-        result.workbook = nextWorkbookAfterChannelHistory;
+        const latestPersistedWorkbook = decodeWorkbookDocument(
+          (latestSheetDocument && latestSheetDocument.workbook) || {},
+        );
+        const mergedPersistWorkbook = mergeWorkbookForCompute(
+          normalizedNextWorkbook,
+          latestPersistedWorkbook,
+        );
+        const changes = collectChangedDependencySignals(
+          latestPersistedWorkbook,
+          mergedPersistWorkbook,
+        );
+        const persistedNextWorkbook = stripWorkbookAttachmentInlineData(
+          mergedPersistWorkbook,
+        );
+        if (profiler)
+          profiler.step('persist.start', { changes: changes.length });
         await Sheets.updateAsync(
           { _id: sheetId },
           {
             $set: {
-              workbook: encodeWorkbookForDocument(
-                stripWorkbookAttachmentInlineData(
-                  decodeWorkbookDocument(nextWorkbookAfterChannelHistory),
-                ),
-              ),
+              workbook: encodeWorkbookForDocument(persistedNextWorkbook),
               updatedAt: new Date(),
             },
             $unset: {
@@ -1638,27 +1567,97 @@ if (Meteor.isServer) {
             },
           },
         );
+        if (changes.length) {
+          await notifyQueuedSheetDependenciesChanged(sheetId, changes);
+        }
         await syncWorkbookSchedulesAfterPersist(
           {
             sheetDocumentId: sheetId,
-            previousWorkbook: previousWorkbookBeforeChannelHistory,
-            nextWorkbook: nextWorkbookAfterChannelHistory,
+            previousWorkbook: sourceWorkbook,
+            nextWorkbook: persistedNextWorkbook,
           },
-          'Failed to sync workbook schedules after channel history persist',
+          'Failed to sync workbook schedules after compute persist',
         );
-      }
-      if (profiler)
-        profiler.step('compute.done', {
-          values:
-            result && result.values ? Object.keys(result.values).length : 0,
-        });
+        if (profiler)
+          profiler.step('persist.done', { changes: changes.length });
+      },
+    });
+    const nextWorkbookAfterChannelHistory =
+      result && result.workbook
+        ? await (async () => {
+            const mentionedLabels = [
+              ...new Set(
+                Object.values(
+                  (
+                    decodeWorkbookDocument(result.workbook || {}).sheets || {}
+                  ),
+                )
+                  .flatMap((sheet) =>
+                    Object.values((sheet && sheet.cells) || {}).flatMap(
+                      (cell) =>
+                        extractChannelMentionLabels(
+                          String((cell && cell.source) || ''),
+                        ),
+                    ),
+                  )
+                  .map((label) => normalizeChannelLabel(label))
+                  .filter(Boolean),
+              ),
+            ];
+            let nextWorkbook = result.workbook;
+            for (let i = 0; i < mentionedLabels.length; i += 1) {
+              nextWorkbook = await runChannelBatchForWorkbook({
+                sheetDocumentId: sheetId,
+                workbook: nextWorkbook,
+                channelLabel: mentionedLabels[i],
+                channelPayloads,
+                historyOnly: true,
+              });
+            }
+            return nextWorkbook;
+          })()
+        : result && result.workbook;
+    if (nextWorkbookAfterChannelHistory && result) {
+      const previousWorkbookBeforeChannelHistory = decodeWorkbookDocument(
+        result.workbook || {},
+      );
+      result.workbook = nextWorkbookAfterChannelHistory;
+      await Sheets.updateAsync(
+        { _id: sheetId },
+        {
+          $set: {
+            workbook: encodeWorkbookForDocument(
+              stripWorkbookAttachmentInlineData(
+                decodeWorkbookDocument(nextWorkbookAfterChannelHistory),
+              ),
+            ),
+            updatedAt: new Date(),
+          },
+          $unset: {
+            storage: '',
+          },
+        },
+      );
+      await syncWorkbookSchedulesAfterPersist(
+        {
+          sheetDocumentId: sheetId,
+          previousWorkbook: previousWorkbookBeforeChannelHistory,
+          nextWorkbook: nextWorkbookAfterChannelHistory,
+        },
+        'Failed to sync workbook schedules after channel history persist',
+      );
+    }
+    if (profiler)
+      profiler.step('compute.done', {
+        values:
+          result && result.values ? Object.keys(result.values).length : 0,
+      });
 
-      if (result && result.workbook) {
-        result.workbook = stripWorkbookAttachmentInlineData(result.workbook);
-      }
-      if (profiler) profiler.step('computeGrid.done');
+    if (result && result.workbook) {
+      result.workbook = stripWorkbookAttachmentInlineData(result.workbook);
+    }
+    if (profiler) profiler.step('computeGrid.done');
 
-      return result;
-    },
-  });
-}
+    return result;
+  },
+});

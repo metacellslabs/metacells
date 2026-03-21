@@ -1,43 +1,31 @@
-import { Mongo } from 'meteor/mongo';
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
+import { Collection } from '../../../lib/collections.js';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { check, Match } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import {
-  getRegisteredAIProviders,
   getRegisteredAIProviderById,
 } from './providers/index.js';
 import {
-  getRegisteredChannelConnectors,
   getRegisteredChannelConnectorById,
 } from '../channels/connectors/index.js';
+import {
+  DEFAULT_AI_PROVIDERS,
+  DEFAULT_CHANNEL_CONNECTORS,
+  DEFAULT_JOB_SETTINGS,
+} from './client-defaults.js';
 
-export const AppSettings = new Mongo.Collection('app_settings');
+export { DEFAULT_AI_PROVIDERS, DEFAULT_CHANNEL_CONNECTORS, DEFAULT_JOB_SETTINGS };
+
+export const AppSettings = new Collection('app_settings');
 
 export const DEFAULT_SETTINGS_ID = 'default';
-export const DEFAULT_AI_PROVIDERS = getRegisteredAIProviders();
 export const DEFAULT_DEEPSEEK_PROVIDER =
   getRegisteredAIProviderById('deepseek');
 export const DEFAULT_LM_STUDIO_PROVIDER =
   getRegisteredAIProviderById('lm-studio');
-export const DEFAULT_CHANNEL_CONNECTORS = getRegisteredChannelConnectors();
-export const DEFAULT_JOB_SETTINGS = {
-  workerEnabled: true,
-  aiChatConcurrency: 3,
-  aiChatMaxAttempts: 3,
-  aiChatRetryDelayMs: 750,
-  aiChatTimeoutMs: 180000,
-  aiChatLeaseTimeoutMs: 60000,
-  aiChatHeartbeatIntervalMs: 15000,
-  fileExtractConcurrency: 1,
-  fileExtractMaxAttempts: 3,
-  fileExtractRetryDelayMs: 1000,
-  fileExtractTimeoutMs: 120000,
-  fileExtractLeaseTimeoutMs: 60000,
-  fileExtractHeartbeatIntervalMs: 15000,
-};
 let cachedJobSettings = { ...DEFAULT_JOB_SETTINGS };
 
 function getContainerHostAlias() {
-  if (!Meteor.isServer) return '';
   return String(process.env.METACELLS_CONTAINER_HOST_ALIAS || '').trim();
 }
 
@@ -381,17 +369,18 @@ export function getJobSettingsSync() {
   return normalizeJobSettings(cachedJobSettings);
 }
 
-if (Meteor.isServer) {
-  Meteor.startup(async () => {
-    const settings = await ensureDefaultSettings();
-    updateCachedJobSettings(settings && settings.jobSettings);
-    const resetUrl = await resetLMStudioBaseUrlInDb();
-    console.log('[settings] lmStudioBaseUrl.reset', { baseUrl: resetUrl });
-  });
+export async function initSettings() {
+  const settings = await ensureDefaultSettings();
+  updateCachedJobSettings(settings && settings.jobSettings);
+  const resetUrl = await resetLMStudioBaseUrlInDb();
+  console.log('[settings] lmStudioBaseUrl.reset', { baseUrl: resetUrl });
+}
 
-  Meteor.publish('settings.default', function publishDefaultSettings() {
-    return AppSettings.find(
-      { _id: DEFAULT_SETTINGS_ID },
+
+registerMethods({
+  async 'settings.get'() {
+    return AppSettings.findOneAsync(
+      DEFAULT_SETTINGS_ID,
       {
         fields: {
           aiProviders: 1,
@@ -403,169 +392,167 @@ if (Meteor.isServer) {
         },
       },
     );
-  });
+  },
 
-  Meteor.methods({
-    async 'settings.resetLMStudioBaseUrl'() {
-      return resetLMStudioBaseUrlInDb();
-    },
+  async 'settings.resetLMStudioBaseUrl'() {
+    return resetLMStudioBaseUrlInDb();
+  },
 
-    async 'settings.upsertAIProvider'(provider) {
-      check(provider, {
-        id: String,
-        name: String,
-        type: String,
-        baseUrl: String,
-        model: Match.Maybe(String),
-        apiKey: Match.Maybe(String),
-        enabled: Boolean,
-      });
+  async 'settings.upsertAIProvider'(provider) {
+    check(provider, {
+      id: String,
+      name: String,
+      type: String,
+      baseUrl: String,
+      model: Match.Maybe(String),
+      apiKey: Match.Maybe(String),
+      enabled: Boolean,
+    });
 
-      await ensureDefaultSettings();
+    await ensureDefaultSettings();
 
-      const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
-      const nextProviders = normalizeProviders(current && current.aiProviders);
-      const fallback =
-        getRegisteredAIProviderById(provider.id) ||
-        getDefaultProviderByType(provider.type);
-      const nextProvider = normalizeProvider(provider, fallback);
+    const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
+    const nextProviders = normalizeProviders(current && current.aiProviders);
+    const fallback =
+      getRegisteredAIProviderById(provider.id) ||
+      getDefaultProviderByType(provider.type);
+    const nextProvider = normalizeProvider(provider, fallback);
 
-      const index = nextProviders.findIndex(
-        (item) => item && item.id === nextProvider.id,
-      );
-      if (index === -1) {
-        nextProviders.push(nextProvider);
-      } else {
-        nextProviders[index] = nextProvider;
-      }
+    const index = nextProviders.findIndex(
+      (item) => item && item.id === nextProvider.id,
+    );
+    if (index === -1) {
+      nextProviders.push(nextProvider);
+    } else {
+      nextProviders[index] = nextProvider;
+    }
 
-      await AppSettings.updateAsync(
-        { _id: DEFAULT_SETTINGS_ID },
-        {
-          $set: {
-            aiProviders: nextProviders,
-            updatedAt: new Date(),
-          },
-        },
-      );
-    },
-
-    async 'settings.setActiveAIProvider'(providerId) {
-      check(providerId, String);
-
-      await ensureDefaultSettings();
-      const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
-      const providers = normalizeProviders(current && current.aiProviders);
-      const exists = providers.some((item) => item && item.id === providerId);
-      if (!exists) {
-        throw new Meteor.Error('provider-not-found', 'AI provider not found');
-      }
-
-      await AppSettings.updateAsync(
-        { _id: DEFAULT_SETTINGS_ID },
-        {
-          $set: {
-            activeAIProviderId: String(providerId),
-            updatedAt: new Date(),
-          },
-        },
-      );
-    },
-
-    async 'settings.updateJobSettings'(jobSettings) {
-      check(jobSettings, {
-        workerEnabled: Boolean,
-        aiChatConcurrency: Number,
-        aiChatMaxAttempts: Number,
-        aiChatRetryDelayMs: Number,
-        aiChatTimeoutMs: Number,
-        aiChatLeaseTimeoutMs: Number,
-        aiChatHeartbeatIntervalMs: Number,
-        fileExtractConcurrency: Number,
-        fileExtractMaxAttempts: Number,
-        fileExtractRetryDelayMs: Number,
-        fileExtractTimeoutMs: Number,
-        fileExtractLeaseTimeoutMs: Number,
-        fileExtractHeartbeatIntervalMs: Number,
-      });
-
-      await ensureDefaultSettings();
-      const nextJobSettings = normalizeJobSettings(jobSettings);
-
-      await AppSettings.updateAsync(
-        { _id: DEFAULT_SETTINGS_ID },
-        {
-          $set: {
-            jobSettings: nextJobSettings,
-            updatedAt: new Date(),
-          },
-        },
-      );
-
-      updateCachedJobSettings(nextJobSettings);
-      import('../jobs/index.js')
-        .then((module) => {
-          if (module && typeof module.pokeJobsWorker === 'function') {
-            module.pokeJobsWorker();
-          }
-        })
-        .catch(() => {});
-      return nextJobSettings;
-    },
-
-    async 'settings.addCommunicationChannel'(connectorId) {
-      check(connectorId, String);
-
-      await ensureDefaultSettings();
-      const connector = getDefaultChannelConnectorById(connectorId);
-      if (!connector) {
-        throw new Meteor.Error(
-          'channel-connector-not-found',
-          'Communication channel connector not found',
-        );
-      }
-
-      const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
-      const nextChannels = normalizeChannels(
-        current && current.communicationChannels,
-      );
-      const existing = nextChannels.find(
-        (item) => item && item.connectorId === connector.id,
-      );
-      if (!existing) {
-        nextChannels.push({
-          id: `${connector.id}-${Date.now()}`,
-          connectorId: connector.id,
-          type: connector.type,
-          label: String(
-            connector.settingsFields.find((field) => field.key === 'label')
-              ?.defaultValue || connector.name,
-          ),
-          enabled: true,
-          status: 'pending',
-          settings: normalizeChannelSettings(connector, {}),
-          createdAt: new Date(),
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          aiProviders: nextProviders,
           updatedAt: new Date(),
-          lastTestMessage: '',
-          lastTestAt: null,
-          lastSeenUid: 0,
-          lastEventId: '',
-          lastEventPreview: null,
-          lastEventAt: null,
-          lastPolledAt: null,
-          watchError: '',
-        });
-      }
-
-      await AppSettings.updateAsync(
-        { _id: DEFAULT_SETTINGS_ID },
-        {
-          $set: {
-            communicationChannels: nextChannels,
-            updatedAt: new Date(),
-          },
         },
+      },
+    );
+  },
+
+  async 'settings.setActiveAIProvider'(providerId) {
+    check(providerId, String);
+
+    await ensureDefaultSettings();
+    const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
+    const providers = normalizeProviders(current && current.aiProviders);
+    const exists = providers.some((item) => item && item.id === providerId);
+    if (!exists) {
+      throw new Meteor.Error('provider-not-found', 'AI provider not found');
+    }
+
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          activeAIProviderId: String(providerId),
+          updatedAt: new Date(),
+        },
+      },
+    );
+  },
+
+  async 'settings.updateJobSettings'(jobSettings) {
+    check(jobSettings, {
+      workerEnabled: Boolean,
+      aiChatConcurrency: Number,
+      aiChatMaxAttempts: Number,
+      aiChatRetryDelayMs: Number,
+      aiChatTimeoutMs: Number,
+      aiChatLeaseTimeoutMs: Number,
+      aiChatHeartbeatIntervalMs: Number,
+      fileExtractConcurrency: Number,
+      fileExtractMaxAttempts: Number,
+      fileExtractRetryDelayMs: Number,
+      fileExtractTimeoutMs: Number,
+      fileExtractLeaseTimeoutMs: Number,
+      fileExtractHeartbeatIntervalMs: Number,
+    });
+
+    await ensureDefaultSettings();
+    const nextJobSettings = normalizeJobSettings(jobSettings);
+
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          jobSettings: nextJobSettings,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    updateCachedJobSettings(nextJobSettings);
+    import('../jobs/index.js')
+      .then((module) => {
+        if (module && typeof module.pokeJobsWorker === 'function') {
+          module.pokeJobsWorker();
+        }
+      })
+      .catch(() => {});
+    return nextJobSettings;
+  },
+
+  async 'settings.addCommunicationChannel'(connectorId) {
+    check(connectorId, String);
+
+    await ensureDefaultSettings();
+    const connector = getDefaultChannelConnectorById(connectorId);
+    if (!connector) {
+      throw new Meteor.Error(
+        'channel-connector-not-found',
+        'Communication channel connector not found',
       );
-    },
-  });
-}
+    }
+
+    const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
+    const nextChannels = normalizeChannels(
+      current && current.communicationChannels,
+    );
+    const existing = nextChannels.find(
+      (item) => item && item.connectorId === connector.id,
+    );
+    if (!existing) {
+      nextChannels.push({
+        id: `${connector.id}-${Date.now()}`,
+        connectorId: connector.id,
+        type: connector.type,
+        label: String(
+          connector.settingsFields.find((field) => field.key === 'label')
+            ?.defaultValue || connector.name,
+        ),
+        enabled: true,
+        status: 'pending',
+        settings: normalizeChannelSettings(connector, {}),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastTestMessage: '',
+        lastTestAt: null,
+        lastSeenUid: 0,
+        lastEventId: '',
+        lastEventPreview: null,
+        lastEventAt: null,
+        lastPolledAt: null,
+        watchError: '',
+      });
+    }
+
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          communicationChannels: nextChannels,
+          updatedAt: new Date(),
+        },
+      },
+    );
+  },
+});

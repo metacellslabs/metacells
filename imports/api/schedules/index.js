@@ -1,7 +1,8 @@
 import crypto from 'crypto';
-import { Meteor } from 'meteor/meteor';
-import { Mongo } from 'meteor/mongo';
-import { Match, check } from 'meteor/check';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { Collection } from '../../../lib/collections.js';
+import { Match, check } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import {
   computeCellScheduleNextRun,
   hasEnabledCellSchedule,
@@ -23,7 +24,7 @@ import { getActiveChannelPayloadMap } from '../channels/runtime-state.js';
 import { hydrateWorkbookAttachmentArtifacts, stripWorkbookAttachmentInlineData } from '../artifacts/index.js';
 import { computeSheetSnapshot } from '../sheets/server/compute.js';
 
-export const CellSchedules = new Mongo.Collection('cell_schedules');
+export const CellSchedules = new Collection('cell_schedules');
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -579,8 +580,7 @@ registerJobHandler('schedules.run_cell', {
   run: runScheduledCellJob,
 });
 
-if (Meteor.isServer) {
-  Meteor.methods({
+registerMethods({
     async 'schedules.getCell'(sheetDocumentId, sheetId, cellId) {
       check(sheetDocumentId, String);
       check(sheetId, String);
@@ -588,4 +588,3 @@ if (Meteor.isServer) {
       return CellSchedules.findOneAsync(scheduleDocId(sheetDocumentId, sheetId, cellId));
     },
   });
-}

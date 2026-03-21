@@ -1,11 +1,12 @@
-import { Meteor } from 'meteor/meteor';
-import { Mongo } from 'meteor/mongo';
-import { check, Match } from 'meteor/check';
-import { Random } from 'meteor/random';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { Collection } from '../../../lib/collections.js';
+import { check, Match } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
+import crypto from 'crypto';
 
-export const Jobs = new Mongo.Collection('jobs');
-export const JobLogs = new Mongo.Collection('job_logs');
-export const DeadLetterJobs = new Mongo.Collection('dead_letter_jobs');
+export const Jobs = new Collection('jobs');
+export const JobLogs = new Collection('job_logs');
+export const DeadLetterJobs = new Collection('dead_letter_jobs');
 
 export const JOB_STATUS = {
   QUEUED: 'queued',
@@ -189,7 +190,6 @@ export function deferJobExecution(delayMs, reason) {
 }
 
 async function appendJobLog(jobOrFields, event, details = {}) {
-  if (!Meteor.isServer) return;
   const source =
     jobOrFields && typeof jobOrFields === 'object' ? jobOrFields : {};
   const entry = {
@@ -215,7 +215,7 @@ async function appendJobLog(jobOrFields, event, details = {}) {
 }
 
 async function appendDeadLetter(job, error, reason) {
-  if (!Meteor.isServer || !job) return;
+  if (!job) return;
   const deadLetter = {
     jobId: String(job._id || ''),
     type: String(job.type || ''),
@@ -246,17 +246,17 @@ async function appendDeadLetter(job, error, reason) {
 }
 
 function scheduleDrain(type) {
-  Meteor.defer(() => {
+  setTimeout(() => {
     drainJobs(type).catch((error) => {
       log('drain.error', { type, message: toErrorMessage(error) });
     });
-  });
+  }, 0);
 }
 
 function stopJobHeartbeat(jobId) {
   const timer = heartbeatTimersByJobId.get(String(jobId || ''));
   if (timer) {
-    Meteor.clearInterval(timer);
+    clearInterval(timer);
     heartbeatTimersByJobId.delete(String(jobId || ''));
   }
 }
@@ -306,7 +306,7 @@ function startJobHeartbeat(job) {
     parseInt(job && job.heartbeatIntervalMs, 10) ||
       DEFAULT_HEARTBEAT_INTERVAL_MS,
   );
-  const timer = Meteor.setInterval(() => {
+  const timer = setInterval(() => {
     heartbeatJobLease(job).catch((error) => {
       log('heartbeat.error', {
         jobId: job && job._id,
@@ -341,7 +341,7 @@ async function claimNextJob(type) {
         timeoutMs,
         leaseTimeoutMs,
         heartbeatIntervalMs,
-        lockToken: Random.id(),
+        lockToken: crypto.randomUUID(),
         lockUntil: new Date(now.getTime() + leaseTimeoutMs),
       },
       $inc: { attempts: 1 },
@@ -626,7 +626,7 @@ async function executeClaimedJob(type, job, handler) {
       parseInt(runningJob.timeoutMs, 10) || DEFAULT_TIMEOUT_MS,
     );
     const timeoutPromise = new Promise((_, reject) => {
-      timeoutTimer = Meteor.setTimeout(() => {
+      timeoutTimer = setTimeout(() => {
         reject(new Error(`Job timed out after ${timeoutMs} ms`));
       }, timeoutMs);
     });
@@ -645,7 +645,7 @@ async function executeClaimedJob(type, job, handler) {
     await requeueFailedJob(job, error);
   } finally {
     if (timeoutTimer) {
-      Meteor.clearTimeout(timeoutTimer);
+      clearTimeout(timeoutTimer);
     }
     stopHeartbeat();
     setActiveCount(type, getActiveCount(type) - 1);
@@ -654,7 +654,6 @@ async function executeClaimedJob(type, job, handler) {
 }
 
 async function drainJobs(type) {
-  if (!Meteor.isServer) return;
   if (!isWorkerEnabled()) {
     return;
   }
@@ -759,7 +758,7 @@ async function recoverExpiredLeases() {
 
 function startRecoverySweep() {
   if (recoverySweepTimer) return;
-  recoverySweepTimer = Meteor.setInterval(() => {
+  recoverySweepTimer = setInterval(() => {
     recoverExpiredLeases()
       .then(() => {
         pokeJobsWorker();
@@ -828,7 +827,7 @@ export function registerJobHandler(type, options) {
     description: String(options.description || ''),
   });
 
-  if (Meteor.isServer && jobsWorkerStarted) {
+  if (jobsWorkerStarted) {
     scheduleDrain(normalizedType);
   }
 }
@@ -958,7 +957,7 @@ export async function waitForJobResult(jobId, options = {}) {
     if (job.status === JOB_STATUS.CANCELLED) {
       throw new Error(String(job.lastError || 'Job cancelled'));
     }
-    await new Promise((resolve) => Meteor.setTimeout(resolve, pollIntervalMs));
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
   throw new Error(`Timed out waiting for job ${jobId}`);
@@ -970,7 +969,7 @@ export async function enqueueDurableJobAndWait(options = {}, waitOptions = {}) {
 }
 
 export function startJobsWorker() {
-  if (!Meteor.isServer || jobsWorkerStarted) return;
+  if (jobsWorkerStarted) return;
   jobsWorkerStarted = true;
   recoverInterruptedJobs()
     .then(() => {
@@ -990,7 +989,7 @@ export function isJobsWorkerStarted() {
 }
 
 export function pokeJobsWorker() {
-  if (!Meteor.isServer || !jobsWorkerStarted) return;
+  if (!jobsWorkerStarted) return;
   Array.from(jobHandlers.keys()).forEach((type) => {
     scheduleDrain(type);
   });
@@ -1003,79 +1002,77 @@ export function registerJobsRuntimeHooks(hooks) {
   }
 }
 
-if (Meteor.isServer) {
-  Meteor.methods({
-    async 'jobs.get'(jobId) {
-      check(jobId, String);
-      return Jobs.findOneAsync(jobId);
-    },
-    async 'jobs.logs'(jobId, limit = 100) {
-      check(jobId, String);
-      check(limit, Match.Optional(Number));
-      return JobLogs.find(
-        { jobId },
-        {
-          sort: { createdAt: -1 },
-          limit: Math.max(1, Math.min(500, parseInt(limit, 10) || 100)),
-        },
-      ).fetchAsync();
-    },
-    async 'jobs.deadLetters'(type = '', limit = 100) {
-      check(type, Match.Optional(String));
-      check(limit, Match.Optional(Number));
-      const selector = String(type || '').trim()
-        ? { type: String(type || '').trim() }
-        : {};
-      return DeadLetterJobs.find(selector, {
-        sort: { failedAt: -1 },
+registerMethods({
+  async 'jobs.get'(jobId) {
+    check(jobId, String);
+    return Jobs.findOneAsync(jobId);
+  },
+  async 'jobs.logs'(jobId, limit = 100) {
+    check(jobId, String);
+    check(limit, Match.Optional(Number));
+    return JobLogs.find(
+      { jobId },
+      {
+        sort: { createdAt: -1 },
         limit: Math.max(1, Math.min(500, parseInt(limit, 10) || 100)),
-      }).fetchAsync();
-    },
-    async 'jobs.cancel'(jobId) {
-      check(jobId, String);
-      const now = nowDate();
-      const current = await Jobs.findOneAsync(jobId);
-      if (!current) {
-        throw new Meteor.Error('job-not-found', 'Job not found');
-      }
-      if (
-        [
-          JOB_STATUS.COMPLETED,
-          JOB_STATUS.FAILED,
-          JOB_STATUS.CANCELLED,
-        ].includes(String(current.status || ''))
-      ) {
-        return current;
-      }
+      },
+    ).fetchAsync();
+  },
+  async 'jobs.deadLetters'(type = '', limit = 100) {
+    check(type, Match.Optional(String));
+    check(limit, Match.Optional(Number));
+    const selector = String(type || '').trim()
+      ? { type: String(type || '').trim() }
+      : {};
+    return DeadLetterJobs.find(selector, {
+      sort: { failedAt: -1 },
+      limit: Math.max(1, Math.min(500, parseInt(limit, 10) || 100)),
+    }).fetchAsync();
+  },
+  async 'jobs.cancel'(jobId) {
+    check(jobId, String);
+    const now = nowDate();
+    const current = await Jobs.findOneAsync(jobId);
+    if (!current) {
+      throw new Meteor.Error('job-not-found', 'Job not found');
+    }
+    if (
+      [
+        JOB_STATUS.COMPLETED,
+        JOB_STATUS.FAILED,
+        JOB_STATUS.CANCELLED,
+      ].includes(String(current.status || ''))
+    ) {
+      return current;
+    }
 
-      await Jobs.updateAsync(
-        { _id: jobId },
-        {
-          $set: {
-            status: JOB_STATUS.CANCELLED,
-            updatedAt: now,
-            completedAt: now,
-            lastError: 'Cancelled manually',
-            lockUntil: null,
-          },
-          $unset: {
-            leaseTimeoutMs: '',
-            heartbeatIntervalMs: '',
-            lockToken: '',
-          },
+    await Jobs.updateAsync(
+      { _id: jobId },
+      {
+        $set: {
+          status: JOB_STATUS.CANCELLED,
+          updatedAt: now,
+          completedAt: now,
+          lastError: 'Cancelled manually',
+          lockUntil: null,
         },
-      );
-      stopJobHeartbeat(jobId);
-      await appendJobLog(current, 'cancelled', {
-        reason: 'manual-cancel',
-      });
-      return Jobs.findOneAsync(jobId);
-    },
-    async 'jobs.enqueue'(type, payload) {
-      check(type, String);
-      check(payload, jobPayloadMatch);
-      const job = await enqueueDurableJob({ type, payload });
-      return job && job._id;
-    },
-  });
-}
+        $unset: {
+          leaseTimeoutMs: '',
+          heartbeatIntervalMs: '',
+          lockToken: '',
+        },
+      },
+    );
+    stopJobHeartbeat(jobId);
+    await appendJobLog(current, 'cancelled', {
+      reason: 'manual-cancel',
+    });
+    return Jobs.findOneAsync(jobId);
+  },
+  async 'jobs.enqueue'(type, payload) {
+    check(type, String);
+    check(payload, jobPayloadMatch);
+    const job = await enqueueDurableJob({ type, payload });
+    return job && job._id;
+  },
+});

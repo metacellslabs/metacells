@@ -1,5 +1,5 @@
 import { AI_MODE, STORAGE_KEYS } from '../../engine/constants.js';
-import { decodeStorageMap } from './storage-codec';
+import { decodeStorageMap } from './storage-codec.js';
 import { normalizeCellSchedule } from '../../lib/cell-schedule.js';
 
 const FORMULA_PREFIXES = {

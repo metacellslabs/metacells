@@ -63,18 +63,34 @@ function copyExecutable(fromPath, toPath) {
   fs.chmodSync(toPath, 0o755);
 }
 
-async function stageMeteorBundle(tempRoot) {
-  const buildOutput = path.join(tempRoot, 'meteor-build');
-  await run('meteor', ['build', buildOutput, '--directory', '--server-only']);
-
-  const sourceBundleRoot = path.join(buildOutput, 'bundle');
+async function stageServerBundle() {
   ensureDir(stagedBackendRoot);
-  fs.cpSync(sourceBundleRoot, path.join(stagedBackendRoot, 'bundle'), {
-    recursive: true,
-  });
+  const bundleRoot = path.join(stagedBackendRoot, 'bundle');
+  ensureDir(bundleRoot);
 
-  const serverDir = path.join(stagedBackendRoot, 'bundle', 'programs', 'server');
-  await run('meteor', ['npm', 'install', '--omit=dev'], { cwd: serverDir });
+  // Copy server entry point and server sources
+  const filesToCopy = ['server.js', 'package.json', 'package-lock.json'];
+  for (const file of filesToCopy) {
+    const src = path.join(projectRoot, file);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(bundleRoot, file));
+    }
+  }
+
+  // Copy server directory
+  const serverSrc = path.join(projectRoot, 'server');
+  if (fs.existsSync(serverSrc)) {
+    fs.cpSync(serverSrc, path.join(bundleRoot, 'server'), { recursive: true });
+  }
+
+  // Copy built client assets (vite build output)
+  const distSrc = path.join(projectRoot, 'dist');
+  if (fs.existsSync(distSrc)) {
+    fs.cpSync(distSrc, path.join(bundleRoot, 'dist'), { recursive: true });
+  }
+
+  // Install production dependencies in the bundle
+  await run('npm', ['install', '--omit=dev'], { cwd: bundleRoot });
 }
 
 async function stageMongoBinary() {
@@ -110,21 +126,16 @@ function writeManifest(mongoInfo) {
 }
 
 async function main() {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'metacells-desktop-'));
   removeDirRobust(runtimeRoot);
   ensureDir(runtimeRoot);
 
-  try {
-    await stageMeteorBundle(tempRoot);
-    const mongoInfo = await stageMongoBinary();
-    writeManifest(mongoInfo);
-    console.log('[desktop:prepare] ready', {
-      runtimeRoot,
-      mongoVersion,
-    });
-  } finally {
-    removeDirRobust(tempRoot);
-  }
+  await stageServerBundle();
+  const mongoInfo = await stageMongoBinary();
+  writeManifest(mongoInfo);
+  console.log('[desktop:prepare] ready', {
+    runtimeRoot,
+    mongoVersion,
+  });
 }
 
 main().catch((error) => {

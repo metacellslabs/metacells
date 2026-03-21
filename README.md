@@ -266,13 +266,7 @@ This makes it possible to build chained flows and conditional reruns directly in
 Requirements:
 
 - Node.js 20+
-- Meteor 3.4+
-
-Install Meteor:
-
-```bash
-curl https://install.meteor.com/ | sh
-```
+- MongoDB (external instance or the app will use an embedded one for Electron)
 
 Install dependencies:
 
@@ -280,10 +274,17 @@ Install dependencies:
 npm install
 ```
 
-Start the app:
+Start the server:
 
 ```bash
 npm start
+```
+
+For development, run the Vite dev server and Express backend separately:
+
+```bash
+npm run start:server   # Express API server
+npm run start:client   # Vite dev server
 ```
 
 Open:
@@ -300,15 +301,15 @@ npm run start:worker
 
 ### Run with Electron
 
-Electron is configured as a desktop shell for the Meteor app.
+Electron is configured as a desktop shell for the Express server.
 
-Development mode starts Meteor and Electron together:
+Development mode starts the server and Electron together:
 
 ```bash
 npm run desktop:dev
 ```
 
-If you already have the Meteor app running elsewhere, point Electron at that URL:
+If you already have the server running elsewhere, point Electron at that URL:
 
 ```bash
 METACELLS_DESKTOP_URL=http://127.0.0.1:3400 npm run desktop:dev:frontend-only
@@ -320,6 +321,12 @@ Install dependencies first:
 
 ```bash
 npm install
+```
+
+Build the client assets:
+
+```bash
+npm run build
 ```
 
 Build a self-contained desktop app for the current host platform:
@@ -350,15 +357,13 @@ Artifacts are written to:
 dist/electron
 ```
 
-These package commands now prepare a bundled local backend before packaging:
+The package commands prepare a bundled local backend before packaging:
 
-- Meteor server bundle
-- Meteor Node runtime
+- Express server bundle with production dependencies
+- Vite-built client assets
 - MongoDB server binary for the current host OS/architecture
 
 The first packaging run may take longer because it downloads the MongoDB binary.
-
-If you build a Meteor server bundle manually, write it outside the app source tree or keep `.meteorignore` in place. Otherwise Meteor may try to parse generated files under `_build/` as application source on the next `meteor run`.
 
 ### Run with Docker
 

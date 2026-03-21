@@ -1,6 +1,46 @@
 import { formulaHelpers } from './helpers.js';
 import { validateFormulaDefinition } from './definition.js';
 
+import _AVERAGE from './AVERAGE.js';
+import _COUNT from './COUNT.js';
+import _COUNTA from './COUNTA.js';
+import _COUNTIF from './COUNTIF.js';
+import _DATEDIF from './DATEDIF.js';
+import _DOCX from './DOCX.js';
+import _FILE from './FILE.js';
+import _FILTER from './FILTER.js';
+import _IF from './IF.js';
+import _INDEX_FORMULA from './INDEX_FORMULA.js';
+import _LEN from './LEN.js';
+import _PDF from './PDF.js';
+import _SUM from './SUM.js';
+import _SUMIF from './SUMIF.js';
+import _TODAY from './TODAY.js';
+import _TRIM from './TRIM.js';
+import _VLOOKUP from './VLOOKUP.js';
+import _XLOOKUP from './XLOOKUP.js';
+
+const ALL_MODULES = {
+  './AVERAGE.js': { default: _AVERAGE },
+  './COUNT.js': { default: _COUNT },
+  './COUNTA.js': { default: _COUNTA },
+  './COUNTIF.js': { default: _COUNTIF },
+  './DATEDIF.js': { default: _DATEDIF },
+  './DOCX.js': { default: _DOCX },
+  './FILE.js': { default: _FILE },
+  './FILTER.js': { default: _FILTER },
+  './IF.js': { default: _IF },
+  './INDEX_FORMULA.js': { default: _INDEX_FORMULA },
+  './LEN.js': { default: _LEN },
+  './PDF.js': { default: _PDF },
+  './SUM.js': { default: _SUM },
+  './SUMIF.js': { default: _SUMIF },
+  './TODAY.js': { default: _TODAY },
+  './TRIM.js': { default: _TRIM },
+  './VLOOKUP.js': { default: _VLOOKUP },
+  './XLOOKUP.js': { default: _XLOOKUP },
+};
+
 function shouldIgnoreFormulaFile(key) {
   return /(?:^|\/)(?:index|definition|helpers)\.js$/i.test(String(key || ''));
 }
@@ -23,21 +63,16 @@ function buildDiscoveryHash(key, definition) {
 }
 
 function discoverFormulaModules() {
-  const context = import.meta.webpackContext('./', {
-    recursive: false,
-    regExp: /\.js$/,
-  });
   const formulas = [];
   const manifest = [];
   const seenNames = {};
 
-  context
-    .keys()
+  Object.keys(ALL_MODULES)
     .sort()
     .forEach((key) => {
       if (shouldIgnoreFormulaFile(key)) return;
 
-      const moduleExports = context(key);
+      const moduleExports = ALL_MODULES[key];
       const definition = validateFormulaDefinition(
         moduleExports && moduleExports.default,
         key,

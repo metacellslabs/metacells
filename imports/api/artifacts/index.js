@@ -1,8 +1,9 @@
-import { Meteor } from 'meteor/meteor';
-import { Mongo } from 'meteor/mongo';
+import { Meteor } from '../../../lib/meteor-compat.js';
+import { Collection } from '../../../lib/collections.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import { createHash, randomUUID } from 'node:crypto';
 
-export const Artifacts = new Mongo.Collection('artifacts');
+export const Artifacts = new Collection('artifacts');
 
 export function buildArtifactPath(artifactId) {
   return `/artifacts/${encodeURIComponent(String(artifactId || ''))}`;
@@ -28,12 +29,6 @@ function buildArtifactHash(prefix, payload) {
 }
 
 async function getArtifactBinaryStorage() {
-  if (!Meteor.isServer) {
-    throw new Meteor.Error(
-      'artifacts-server-only',
-      'Binary artifact storage is server-only',
-    );
-  }
   const { promises: fs } = await import('node:fs');
   const appRootRaw = String(process.env.PWD || process.cwd() || '');
   const appRoot = appRootRaw.replace(/\/+$/g, '');
@@ -219,10 +214,8 @@ export function stripWorkbookAttachmentInlineData(workbookValue) {
   return workbook;
 }
 
-if (Meteor.isServer) {
-  Meteor.methods({
-    async 'artifacts.get'(artifactId) {
-      return getArtifactById(String(artifactId || ''));
-    },
-  });
-}
+registerMethods({
+  async 'artifacts.get'(artifactId) {
+    return getArtifactById(String(artifactId || ''));
+  },
+});
