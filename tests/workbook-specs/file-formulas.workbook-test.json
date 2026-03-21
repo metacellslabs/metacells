@@ -1,0 +1,133 @@
+{
+  "name": "File Formulas",
+  "workbook": {
+    "activeTabId": "sheet-1",
+    "tabs": [
+      {
+        "id": "sheet-1",
+        "name": "Main",
+        "type": "sheet",
+        "cells": [
+          { "address": "A1", "value": "Hello World" },
+          { "address": "A2", "value": "# Monthly Report\n\n## Revenue\n- Growth: 25%" },
+          { "address": "B1", "name": "text_file", "formula": "=FILE(\"report.txt\", A1)" },
+          { "address": "C1", "name": "pdf_file", "formula": "=PDF(\"report.pdf\", A1)" },
+          { "address": "D1", "name": "docx_file", "formula": "=DOCX(\"report.docx\", A2)" },
+          { "address": "E1", "name": "typed_file", "formula": "=FILE(\"data.pdf\", A1, \"PDF\")" },
+          { "address": "F1", "name": "docx_md_file", "formula": "=FILE(\"doc.docx\", A2, \"DOCX_MD\")" }
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "FILE formula creates a text file attachment",
+      "steps": [
+        {
+          "expect": {
+            "target": "text_file",
+            "contains": "report.txt",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "text_file",
+            "contains": "Hello World",
+            "state": "resolved"
+          }
+        }
+      ]
+    },
+    {
+      "name": "PDF formula creates a PDF file attachment",
+      "steps": [
+        {
+          "expect": {
+            "target": "pdf_file",
+            "contains": "report.pdf",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "pdf_file",
+            "contains": "application/pdf",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "pdf_file",
+            "contains": "Hello World",
+            "state": "resolved"
+          }
+        }
+      ]
+    },
+    {
+      "name": "DOCX formula creates a DOCX file attachment from Markdown",
+      "steps": [
+        {
+          "expect": {
+            "target": "docx_file",
+            "contains": "report.docx",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "docx_file",
+            "contains": "DOCX_MD",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "docx_file",
+            "contains": "Monthly Report",
+            "state": "resolved"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FILE formula with PDF type is equivalent to PDF formula",
+      "steps": [
+        {
+          "expect": {
+            "target": "typed_file",
+            "contains": "data.pdf",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "typed_file",
+            "contains": "application/pdf",
+            "state": "resolved"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FILE formula with DOCX_MD type is equivalent to DOCX formula",
+      "steps": [
+        {
+          "expect": {
+            "target": "docx_md_file",
+            "contains": "doc.docx",
+            "state": "resolved"
+          }
+        },
+        {
+          "expect": {
+            "target": "docx_md_file",
+            "contains": "DOCX_MD",
+            "state": "resolved"
+          }
+        }
+      ]
+    }
+  ]
+}

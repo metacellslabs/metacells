@@ -1,0 +1,31 @@
+node_modules
+.env
+.DS_Store
+meteor/local
+npm-debug.log
+_build/
+.tmp-ci/
+.vscode/
+dist/
+.data/
+.desktop-runtime/
+.desktop-cache/
+
+# Meteor Modern-Tools build context directories
+_build
+*/build-assets
+*/build-chunks
+.rsdoctor
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Builds
+dist/
+build/
+.electron/
+*.log
+
+# IDE
+.idea/
+.vscode/
