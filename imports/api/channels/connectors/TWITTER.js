@@ -47,11 +47,11 @@ export default defineChannelConnector({
   ],
   sendParams: ['body'],
   mentioningFormulas: [
-    '/x hello from Metacells',
     '/x:send:shipping update is live',
+    '/x:send:hello from Metacells',
   ],
   help: [
-    'Configure an X user access token with write access, then use `/x hello` or `/x:send:hello` in a cell to publish a post once on commit.',
+    'Configure an X user access token with write access, then use `/x:send:hello` in a cell to publish a post once on commit.',
     'This first version sends text-only posts. Workbook attachments are not uploaded to X yet.',
     'The API base URL defaults to `https://api.x.com` and should usually be left unchanged.',
   ],

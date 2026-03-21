@@ -8,6 +8,7 @@ import {
   rebuildWorkbookDependencyGraph,
 } from './server/compute';
 import {
+  buildAttachmentSourceValue,
   hydrateWorkbookAttachmentArtifacts,
   getArtifactText,
   stripWorkbookAttachmentInlineData,
@@ -34,6 +35,7 @@ import {
 import { getActiveChannelPayloadMap } from '../channels/runtime-state.js';
 import {
   buildChannelAttachmentPath,
+  buildUnifiedChannelEvent,
   ChannelEvents,
 } from '../channels/events.js';
 import { FormulaEngine } from '../../engine/formula-engine.js';
@@ -70,6 +72,109 @@ function stripChannelMentionsFromPrompt(text) {
     .replace(/(^|[^A-Za-z0-9_:/])\/([A-Za-z][A-Za-z0-9_-]*)\b/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function parseBareChannelLogSpec(rawValue) {
+  const match = /^\s*\/([A-Za-z][A-Za-z0-9_-]*)\s*$/.exec(
+    String(rawValue == null ? '' : rawValue),
+  );
+  if (!match) return null;
+  const label = normalizeChannelLabel(match[1]);
+  if (!label) return null;
+  return { label, days: 30 };
+}
+
+function stringifyChannelParty(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (typeof value === 'object') {
+    return String(
+      value.name ||
+        value.email ||
+        value.username ||
+        value.handle ||
+        value.id ||
+        '',
+    ).trim();
+  }
+  return '';
+}
+
+function firstNonEmptyChannelText(...values) {
+  for (let i = 0; i < values.length; i += 1) {
+    const text = String(values[i] == null ? '' : values[i]).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function formatUnifiedChannelEventRow(eventPayload) {
+  const unified = buildUnifiedChannelEvent(eventPayload, {
+    eventId:
+      eventPayload && (eventPayload.eventId || eventPayload._id)
+        ? String(eventPayload.eventId || eventPayload._id)
+        : '',
+  });
+  const message =
+    unified && unified.message && typeof unified.message === 'object'
+      ? unified.message
+      : {};
+  const channel =
+    unified && unified.channel && typeof unified.channel === 'object'
+      ? unified.channel
+      : {};
+  const attachments = Array.isArray(unified && unified.attachments)
+    ? unified.attachments
+    : [];
+  const date = firstNonEmptyChannelText(
+    message.date,
+    eventPayload && eventPayload.date,
+    eventPayload && eventPayload.createdAt instanceof Date
+      ? eventPayload.createdAt.toISOString()
+      : '',
+  );
+  const from = firstNonEmptyChannelText(
+    Array.isArray(message.from)
+      ? message.from.map(stringifyChannelParty).filter(Boolean).join(', ')
+      : '',
+    channel.subchannel,
+    channel.label,
+  );
+  const text = firstNonEmptyChannelText(
+    message.text,
+    message.subject,
+    message.summary,
+    unified && unified.event,
+  );
+  const firstAttachment =
+    attachments.find(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        (item.binaryArtifactId || item.downloadUrl || item.name),
+    ) || null;
+  const file = firstAttachment
+    ? buildAttachmentSourceValue({
+        name: String(firstAttachment.name || 'Attached file'),
+        type: String(firstAttachment.type || 'application/octet-stream'),
+        content: '',
+        contentArtifactId: String(firstAttachment.contentArtifactId || ''),
+        binaryArtifactId: String(firstAttachment.binaryArtifactId || ''),
+        downloadUrl: String(firstAttachment.downloadUrl || ''),
+        previewUrl: String(
+          firstAttachment.previewUrl || firstAttachment.downloadUrl || '',
+        ),
+        pending: false,
+        converting: false,
+      })
+    : attachments
+        .map((item) => String((item && item.name) || '').trim())
+        .filter(Boolean)
+        .join(', ');
+  return [date, from, text, file];
 }
 
 function inferChannelFeedFilterMode(promptText) {
@@ -730,12 +835,15 @@ function collectChannelBatchTasks(
         source.charAt(0) === '#'
           ? formulaEngine.parseChannelFeedPromptSpec(source)
           : null;
+      const channelLogSpec = parseBareChannelLogSpec(source);
       const listSpec =
         source.charAt(0) === '>'
           ? formulaEngine.parseListShortcutSpec(source)
           : null;
       const formulaKind = channelFeedSpec
         ? 'channel-feed'
+        : channelLogSpec
+          ? 'channel-log'
         : source.charAt(0) === "'"
           ? 'ask'
           : source.charAt(0) === '>'
@@ -744,15 +852,22 @@ function collectChannelBatchTasks(
               ? 'table'
               : '';
       if (!formulaKind) return;
-      if (historyOnly && formulaKind !== 'channel-feed') return;
       if (
-        formulaKind === 'channel-feed' &&
+        historyOnly &&
+        formulaKind !== 'channel-feed' &&
+        formulaKind !== 'channel-log'
+      )
+        return;
+      if (
+        (formulaKind === 'channel-feed' || formulaKind === 'channel-log') &&
         normalizeChannelLabel(
-          channelFeedSpec &&
-            Array.isArray(channelFeedSpec.labels) &&
-            channelFeedSpec.labels.length
-            ? channelFeedSpec.labels[0]
-            : '',
+          formulaKind === 'channel-log'
+            ? channelLogSpec && channelLogSpec.label
+            : channelFeedSpec &&
+                Array.isArray(channelFeedSpec.labels) &&
+                channelFeedSpec.labels.length
+              ? channelFeedSpec.labels[0]
+              : '',
         ) !== target
       ) {
         return;
@@ -784,6 +899,9 @@ function collectChannelBatchTasks(
         includeAttachments = !!(
           channelFeedSpec && channelFeedSpec.includeAttachments
         );
+      } else if (formulaKind === 'channel-log') {
+        promptTemplate = `/${target}`;
+        days = channelLogSpec && channelLogSpec.days ? channelLogSpec.days : 30;
       } else if (formulaKind === 'table') {
         const spec = formulaEngine.parseTablePromptSpec(source);
         promptTemplate = spec && spec.prompt ? spec.prompt : '';
@@ -855,8 +973,13 @@ async function runChannelBatchForWorkbook({
     currentPayload && (currentPayload.eventId || currentPayload._id)
       ? String(currentPayload.eventId || currentPayload._id)
       : '';
-  const batchedTasks = tasks.filter((task) => task.formulaKind !== 'channel-feed');
+  const batchedTasks = tasks.filter(
+    (task) =>
+      task.formulaKind !== 'channel-feed' &&
+      task.formulaKind !== 'channel-log',
+  );
   const feedTasks = tasks.filter((task) => task.formulaKind === 'channel-feed');
+  const logTasks = tasks.filter((task) => task.formulaKind === 'channel-log');
 
   if (batchedTasks.length) {
     const messages = [];
@@ -994,6 +1117,36 @@ async function runChannelBatchForWorkbook({
           ? { [target]: currentEventId }
           : {},
       });
+    });
+  }
+
+  for (let index = 0; index < logTasks.length; index += 1) {
+    const task = logTasks[index];
+    const eventDocs = await loadChannelEventsForWindow(target, task.days, null);
+    const rows = [];
+    let latestProcessedEventId = '';
+    const newestFirstDocs = eventDocs.slice().reverse();
+    for (let eventIndex = 0; eventIndex < newestFirstDocs.length; eventIndex += 1) {
+      const eventPayload = newestFirstDocs[eventIndex];
+      if (!eventPayload) continue;
+      rows.push(formatUnifiedChannelEventRow(eventPayload));
+      if (!latestProcessedEventId) {
+        latestProcessedEventId = String(
+          eventPayload.eventId || eventPayload._id || '',
+        );
+      }
+    }
+
+    formulaEngine.spillMatrixToSheet(task.sheetId, task.cellId, rows, {
+      preserveSourceCell: true,
+    });
+
+    storageService.setCellRuntimeState(task.sheetId, task.cellId, {
+      state: 'resolved',
+      error: '',
+      lastProcessedChannelEventIds: latestProcessedEventId
+        ? { [target]: latestProcessedEventId }
+        : {},
     });
   }
 

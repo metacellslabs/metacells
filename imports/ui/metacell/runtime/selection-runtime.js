@@ -200,8 +200,9 @@ export function applyDependencyHighlight(app) {
   });
 }
 
-export function collectDependencyHintsFromRaw(app, rawValue) {
+export function collectDependencyHintsFromRaw(app, rawValue, sheetIdOverride) {
   var raw = String(rawValue || '');
+  var targetSheetId = String(sheetIdOverride || app.activeSheetId || '');
   var result = {
     cells: [],
     namedRefs: [],
@@ -267,7 +268,7 @@ export function collectDependencyHintsFromRaw(app, rawValue) {
           col <= Math.max(start.col, end.col);
           col++
         ) {
-          addCell(app.activeSheetId, app.columnIndexToLabel(col) + row);
+          addCell(targetSheetId, app.columnIndexToLabel(col) + row);
         }
       }
       return _;
@@ -284,7 +285,7 @@ export function collectDependencyHintsFromRaw(app, rawValue) {
   );
 
   raw.replace(/(?:_?@)?([A-Za-z]+[0-9]+)/g, (_, cellId) => {
-    addCell(app.activeSheetId, cellId);
+    addCell(targetSheetId, cellId);
     return _;
   });
 

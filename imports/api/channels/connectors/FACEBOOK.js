@@ -54,11 +54,11 @@ export default defineChannelConnector({
   ],
   sendParams: ['body'],
   mentioningFormulas: [
-    '/fb hello from MetaCells',
     '/fb:send:shipping update is live',
+    '/fb:send:hello from MetaCells',
   ],
   help: [
-    'Configure a Facebook Page access token and Page ID to publish text posts to a Page.',
+    'Configure a Facebook Page access token and Page ID, then use `/fb:send:hello` to publish a text post once on commit.',
     'This first version posts plain text through the Graph API Page feed endpoint.',
     'Media upload, comments, reactions, and inbound event polling are not included yet.',
   ],

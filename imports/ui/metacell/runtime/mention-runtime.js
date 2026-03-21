@@ -328,6 +328,9 @@ export function setAvailableChannels(app, channels) {
           return !!(channel && channel.label);
         })
     : [];
+  if (typeof app.syncChannelBindingControl === 'function') {
+    app.syncChannelBindingControl();
+  }
   if (app.mentionAutocompleteState && app.mentionAutocompleteState.input) {
     updateMentionAutocomplete(app, app.mentionAutocompleteState.input);
   }

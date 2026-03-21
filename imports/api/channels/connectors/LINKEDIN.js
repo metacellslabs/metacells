@@ -54,11 +54,11 @@ export default defineChannelConnector({
   ],
   sendParams: ['body'],
   mentioningFormulas: [
-    '/linkedin shipping update is live',
     '/linkedin:send:our new release is live',
+    '/linkedin:send:shipping update is live',
   ],
   help: [
-    'Configure a LinkedIn member access token with `w_member_social` to publish a text post.',
+    'Configure a LinkedIn member access token with `w_member_social`, then use `/linkedin:send:...` to publish a text post once on commit.',
     'If the token also supports OpenID `/userinfo`, MetaCells can resolve the member author automatically from the token `sub` claim.',
     'If `/userinfo` is not available for the token, set `Author URN` manually as `urn:li:person:...`.',
     'This first version sends text-only posts. Media upload is not included yet.',

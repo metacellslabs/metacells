@@ -214,12 +214,15 @@ export function bindGridInputEvents(app) {
           (app.selectionRange.startCol !== app.selectionRange.endCol ||
             app.selectionRange.startRow !== app.selectionRange.endRow)
         );
+        if (isEditing) {
+          return;
+        }
         if (!isEditing && !hasTextSelection) {
           e.preventDefault();
           app.clearSelectedCells();
           return;
         }
-        if (isEditing && hasMultiCellSelection) {
+        if (hasMultiCellSelection) {
           e.preventDefault();
           app.clearSelectedCells();
           return;

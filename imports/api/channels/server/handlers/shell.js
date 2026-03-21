@@ -46,6 +46,15 @@ function logShell(event, payload) {
   console.log(`[channels.shell] ${event}`, payload);
 }
 
+function parseShellExitCode(error) {
+  if (!error) return null;
+  if (Number.isInteger(error.code)) return error.code;
+  if (/^\d+$/.test(String(error.code || ''))) {
+    return Number(error.code);
+  }
+  return null;
+}
+
 async function runShellCommand(validated, command) {
   const shellCommand = String(command || '').trim();
   if (!shellCommand) {
@@ -59,15 +68,25 @@ async function runShellCommand(validated, command) {
       maxBuffer: 1024 * 1024 * 4,
     });
     return {
+      ok: true,
+      exitCode: 0,
       stdout: String(result.stdout || '').trim(),
       stderr: String(result.stderr || '').trim(),
+      message: '',
     };
   } catch (error) {
-    throw new Error(
-      formatNestedError(error) ||
-        String(error && error.stderr ? error.stderr : '').trim() ||
-        'Shell command failed',
-    );
+    const stdout = String(error && error.stdout ? error.stdout : '').trim();
+    const stderr = String(error && error.stderr ? error.stderr : '').trim();
+    const message = String(
+      formatNestedError(error) || stderr || stdout || 'Shell command failed',
+    ).trim();
+    return {
+      ok: false,
+      exitCode: parseShellExitCode(error),
+      stdout,
+      stderr,
+      message,
+    };
   }
 }
 
@@ -81,8 +100,12 @@ export async function testShellConnection(settings) {
   });
   const result = await runShellCommand(validated, probeCommand);
   return {
-    ok: true,
-    message: result.stdout || result.stderr || 'Shell command completed',
+    ok: result.ok !== false,
+    message:
+      result.stdout ||
+      result.stderr ||
+      result.message ||
+      'Shell command completed',
   };
 }
 
@@ -99,10 +122,12 @@ export async function sendShellMessage(payload) {
 
   const result = await runShellCommand(validated, command);
   return {
-    ok: true,
+    ok: result.ok !== false,
     command,
+    exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
+    message: result.message || '',
   };
 }
 

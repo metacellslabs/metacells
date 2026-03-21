@@ -1,7 +1,8 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -9,6 +10,52 @@ const DEFAULT_URL = 'http://127.0.0.1:3400';
 
 let backendState = null;
 let mainWindow = null;
+
+function getBootstrapLogPath() {
+  let userDataRoot = null;
+
+  try {
+    if (app && typeof app.getPath === 'function') {
+      userDataRoot = app.getPath('userData');
+    }
+  } catch (_error) {
+    userDataRoot = null;
+  }
+
+  if (!userDataRoot) {
+    const appDataRoot =
+      process.env.APPDATA ||
+      process.env.LOCALAPPDATA ||
+      path.join(os.homedir(), 'AppData', 'Roaming');
+    userDataRoot = path.join(appDataRoot, 'metacells');
+  }
+
+  const logDir = path.join(userDataRoot, 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  return path.join(logDir, 'desktop-bootstrap.log');
+}
+
+function writeBootstrapLog(message, error = null) {
+  try {
+    const timestamp = new Date().toISOString();
+    const suffix = error
+      ? `\n${error && error.stack ? error.stack : String(error)}`
+      : '';
+    fs.appendFileSync(getBootstrapLogPath(), `[${timestamp}] ${message}${suffix}\n`);
+  } catch (_error) {
+    // Ignore bootstrap log failures because this path is only for debugging startup.
+  }
+}
+
+function showFatalStartupError(title, error) {
+  const detail = error && error.stack ? error.stack : String(error);
+  writeBootstrapLog(title, error);
+  try {
+    dialog.showErrorBox(title, detail);
+  } catch (_error) {
+    // Ignore dialog failures; the bootstrap log already captured the issue.
+  }
+}
 
 function getBaseAppUrl() {
   return backendState?.appUrl || getDesktopUrl();
@@ -469,12 +516,14 @@ function buildStartupPage(stage) {
 }
 
 function showPage(window, title, body, footer = '') {
+  if (!window || window.isDestroyed()) return;
   window.loadURL(
     `data:text/html;charset=UTF-8,${encodeURIComponent(buildPage(title, body, footer))}`,
   );
 }
 
 function showStartupStatus(window, stage) {
+  if (!window || window.isDestroyed()) return;
   window.loadURL(
     `data:text/html;charset=UTF-8,${encodeURIComponent(buildStartupPage(stage))}`,
   );
@@ -485,7 +534,7 @@ function showBackendError(window, url, errorText) {
     window,
     'MetaCells backend is not reachable',
     `<p>The desktop shell is trying to open <code>${escapeHtml(url)}</code>, but that server is not responding.</p>
-<p>For this build, start the Meteor app first with <code>npm start</code>, launch Electron in development with <code>npm run desktop:dev</code>, or package a self-contained app with <code>npm run desktop:dist:mac</code>.</p>`,
+<p>For this build, start the Meteor app first with <code>npm start</code>, launch Electron in development with <code>npm run desktop:dev</code>, or package a self-contained app with <code>npm run desktop:dist</code> or the matching platform target.</p>`,
     errorText,
   );
 }
@@ -600,6 +649,12 @@ function createWindow() {
     },
   );
 
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
+
   return window;
 }
 
@@ -677,6 +732,10 @@ function pipeLogs(logPath, child, name) {
   const stream = fs.createWriteStream(logPath, { flags: 'a' });
   if (child.stdout) child.stdout.pipe(stream);
   if (child.stderr) child.stderr.pipe(stream);
+  child.on('error', (error) => {
+    stream.write(`\n[${name}] spawn error\n${error && error.stack ? error.stack : String(error)}\n`);
+    writeBootstrapLog(`${name} spawn error`, error);
+  });
   child.on('exit', (code, signal) => {
     stream.write(`\n[${name}] exited code=${code} signal=${signal}\n`);
     stream.end();
@@ -700,6 +759,7 @@ async function startBundledBackend(window, runtimeRoot) {
 
   showStartupStatus(window, 'database');
   const mongoBinary = path.join(runtimeRoot, manifest.mongo.binary);
+  writeBootstrapLog(`Starting MongoDB from ${mongoBinary}`);
   const mongoProcess = spawn(
     mongoBinary,
     ['--dbpath', mongoDataDir, '--port', String(mongoPort), '--bind_ip', '127.0.0.1', '--nounixsocket'],
@@ -712,6 +772,7 @@ async function startBundledBackend(window, runtimeRoot) {
 
   showStartupStatus(window, 'backend');
   const serverEntry = path.join(runtimeRoot, manifest.backend.main);
+  writeBootstrapLog(`Starting backend from ${serverEntry}`);
   const serverProcess = spawn(getBundledNodeLaunchBinary(), [serverEntry], {
     cwd: path.dirname(serverEntry),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -754,12 +815,25 @@ function stopBundledBackend() {
 async function resolveLaunchUrl(window) {
   const runtimeRoot = getBundledRuntimeRoot();
   if (runtimeRoot) {
+    writeBootstrapLog(`Using bundled runtime ${runtimeRoot}`);
     return startBundledBackend(window, runtimeRoot);
   }
+  writeBootstrapLog(`Using external desktop URL ${getDesktopUrl()}`);
   return getDesktopUrl();
 }
 
+process.on('uncaughtException', (error) => {
+  showFatalStartupError('MetaCells desktop crashed during startup', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  showFatalStartupError('MetaCells desktop failed during startup', error);
+});
+
+writeBootstrapLog(`Main process module loaded (platform=${process.platform}, packaged=${app.isPackaged})`);
+
 app.whenReady().then(async () => {
+  writeBootstrapLog(`Electron app ready (packaged=${app.isPackaged}, platform=${process.platform})`);
   installApplicationMenu();
   mainWindow = createWindow();
   showStartupStatus(mainWindow, 'preparing');
@@ -767,6 +841,7 @@ app.whenReady().then(async () => {
   try {
     const targetUrl = await resolveLaunchUrl(mainWindow);
     showStartupStatus(mainWindow, 'finalizing');
+    if (!mainWindow || mainWindow.isDestroyed()) return;
     await mainWindow.loadURL(targetUrl);
     if (!app.isPackaged) {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -784,6 +859,7 @@ app.whenReady().then(async () => {
       mainWindow = createWindow();
       try {
         const targetUrl = backendState?.appUrl || (await resolveLaunchUrl(mainWindow));
+        if (!mainWindow || mainWindow.isDestroyed()) return;
         await mainWindow.loadURL(targetUrl);
       } catch (error) {
         showBackendError(

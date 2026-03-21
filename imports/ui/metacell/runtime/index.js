@@ -56,6 +56,7 @@ import {
   setupCellPresentationControls as setupCellPresentationControlsRuntime,
   setupCellNameControls as setupCellNameControlsRuntime,
   setupDisplayModeControls as setupDisplayModeControlsRuntime,
+  syncDisplayModeControl as syncDisplayModeControlRuntime,
   syncAIModeUI as syncAIModeUIRuntime,
   syncCellFormatControl as syncCellFormatControlRuntime,
   syncCellPresentationControls as syncCellPresentationControlsRuntime,
@@ -149,6 +150,7 @@ import {
   positionFloatingAttachmentPreview as positionFloatingAttachmentPreviewRuntime,
   readAttachedFileContent as readAttachedFileContentRuntime,
   setupAttachmentControls as setupAttachmentControlsRuntime,
+  syncChannelBindingControl as syncChannelBindingControlRuntime,
   setupAttachmentLinkPreview as setupAttachmentLinkPreviewRuntime,
   showFloatingAttachmentPreview as showFloatingAttachmentPreviewRuntime,
 } from './attachment-runtime.js';
@@ -331,6 +333,63 @@ function getChannelCommandResultText(result, fallbackLabel) {
   return `Sent to /${String(fallbackLabel || '').trim()}`;
 }
 
+function formatChannelCommandLogTimestamp(date) {
+  var value = date instanceof Date ? date : new Date();
+  var year = value.getFullYear();
+  var month = String(value.getMonth() + 1).padStart(2, '0');
+  var day = String(value.getDate()).padStart(2, '0');
+  var hours = String(value.getHours()).padStart(2, '0');
+  var minutes = String(value.getMinutes()).padStart(2, '0');
+  var seconds = String(value.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function normalizeChannelCommandLogText(value) {
+  return String(value == null ? '' : value)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function appendChannelCommandLog(previousDisplayValue, entry) {
+  var source = String(previousDisplayValue == null ? '' : previousDisplayValue).trim();
+  var line = String(entry == null ? '' : entry).trim();
+  if (!line) return source;
+  if (!source || /^Sending to \//.test(source) || source === '#ERROR') return line;
+  return `${source}\n${line}`;
+}
+
+function buildChannelCommandLogEntry(timestamp, messageText, resultText) {
+  var summary = normalizeChannelCommandLogText(resultText);
+  return (
+    `[${formatChannelCommandLogTimestamp(timestamp)}] ` +
+    `${normalizeChannelCommandLogText(messageText) || '(empty message)'} -> ` +
+    `${summary || 'Sent'}`
+  );
+}
+
+function buildChannelSendPayloadSignature(payload) {
+  var source = payload && typeof payload === 'object' ? payload : {};
+  var attachments = Array.isArray(source.attachments) ? source.attachments : [];
+  return JSON.stringify({
+    to: normalizeChannelSendRecipients(source.to),
+    subj: String(source.subj || ''),
+    body: String(source.body || ''),
+    command: String(source.command || ''),
+    attachments: attachments.map(function (item) {
+      var attachment = item && typeof item === 'object' ? item : {};
+      return {
+        name: String(attachment.name || ''),
+        type: String(attachment.type || ''),
+        binaryArtifactId: String(attachment.binaryArtifactId || ''),
+        contentArtifactId: String(attachment.contentArtifactId || ''),
+        downloadUrl: String(attachment.downloadUrl || ''),
+      };
+    }),
+  });
+}
+
+var CHANNEL_COMMAND_REPEAT_DEDUPE_WINDOW_MS = 5000;
+
 function splitChannelCommandResultLines(text) {
   return String(text == null ? '' : text)
     .split(/\r?\n/)
@@ -383,6 +442,10 @@ export class SpreadsheetApp {
     );
     this.attachFileButton = document.querySelector('#attach-file');
     this.attachFileInput = document.querySelector('#attach-file-input');
+    this.bindChannelModeSelect = document.querySelector(
+      '#bind-channel-mode-select',
+    );
+    this.bindChannelSelect = document.querySelector('#bind-channel-select');
     this.aiModeButton = document.querySelector('#ai-mode');
     this.aiModePopover = document.querySelector('#ai-mode-popover');
     this.aiModeOptions = Array.prototype.slice.call(
@@ -520,6 +583,10 @@ export class SpreadsheetApp {
     this.manualUpdateRequestToken = 0;
     this.isManualAIUpdating = false;
     this.currentServerEditLockKey = '';
+    this.channelCommandInFlightByCell = {};
+    this.channelCommandInFlightSignatureByCell = {};
+    this.channelCommandQueuedByCell = {};
+    this.channelCommandLastSettledByCell = {};
     this.displayMode =
       this.displayModeButton &&
       String(
@@ -534,6 +601,10 @@ export class SpreadsheetApp {
     this.floatingAttachmentPreview = null;
     this.attachmentPreviewTimer = null;
     this.attachmentPreviewAnchor = null;
+    this.attachmentContentOverlay = null;
+    this.attachmentContentTitle = null;
+    this.attachmentContentBody = null;
+    this.handleAttachmentContentOverlayKeydown = null;
     this.handleAttachmentPreviewMouseOver = null;
     this.handleAttachmentPreviewMouseOut = null;
     this.handleAttachmentPreviewScroll = null;
@@ -642,12 +713,7 @@ export class SpreadsheetApp {
         ? this.captureRenderedRowHeights()
         : null;
     this.displayMode = mode === 'formulas' ? 'formulas' : 'values';
-    if (this.displayModeButton) {
-      this.displayModeButton.setAttribute(
-        'data-display-mode-current',
-        this.displayMode,
-      );
-    }
+    syncDisplayModeControlRuntime(this);
     this.renderCurrentSheetFromStorage();
     if (preservedHeights) {
       this.applyRenderedRowHeights(preservedHeights);
@@ -710,6 +776,11 @@ export class SpreadsheetApp {
     if (!this.attachFileButton) return;
     this.attachFileButton.disabled =
       this.isReportActive() || !this.hasSingleSelectedCell();
+    this.syncChannelBindingControl();
+  }
+
+  syncChannelBindingControl() {
+    syncChannelBindingControlRuntime(this);
   }
 
   syncRegionRecordingControls() {
@@ -873,6 +944,18 @@ export class SpreadsheetApp {
     return this.storage.getCellValue(this.activeSheetId, cellId);
   }
 
+  syncCellDependencyHints(sheetId, cellId, rawValue) {
+    var targetSheetId = String(sheetId || '');
+    var normalizedCellId = String(cellId || '').toUpperCase();
+    var raw = String(rawValue == null ? '' : rawValue);
+    if (!targetSheetId || !normalizedCellId) return;
+    this.storage.setCellDependencies(
+      targetSheetId,
+      normalizedCellId,
+      collectDependencyHintsFromRawRuntime(this, raw, targetSheetId),
+    );
+  }
+
   getCellFormat(cellId) {
     return this.storage.getCellFormat(this.activeSheetId, cellId);
   }
@@ -899,12 +982,20 @@ export class SpreadsheetApp {
       );
     }
 
-    this.storage.setCellValue(
+   this.storage.setCellValue(
       this.activeSheetId,
       normalizedCellId,
       nextRaw,
       meta,
     );
+    this.syncCellDependencyHints(this.activeSheetId, normalizedCellId, nextRaw);
+    var attachment = this.parseAttachmentSource(nextRaw);
+    if (!attachment || (!attachment.pending && !attachment.converting)) {
+      this.dispatchDependentChannelCommandsForSource(
+        this.activeSheetId,
+        normalizedCellId,
+      );
+    }
   }
 
   getCellSchedule(cellId) {
@@ -981,17 +1072,35 @@ export class SpreadsheetApp {
     );
   }
 
-  runChannelSendCommandForCell(cellId, rawValue) {
+  runChannelSendCommandForCell(cellId, rawValue, options) {
     var normalizedCellId = String(cellId || '').toUpperCase();
     var raw = String(rawValue == null ? '' : rawValue);
+    var opts = options && typeof options === 'object' ? options : {};
+    var targetSheetId = String(opts.sheetId || this.activeSheetId || '');
+    var commandCellKey = targetSheetId + ':' + normalizedCellId;
+    var force = opts.force === true;
+    var storedRaw = String(
+      this.storage.getCellValue(targetSheetId, normalizedCellId) || '',
+    );
+    if (!force && storedRaw === raw) {
+      return true;
+    }
     var command = parseChannelSendCommand(raw);
     if (!command || !command.label || !command.message) return false;
     var structuredPayload = parseStructuredChannelSendMessage(command.message);
+    var commandTemplate =
+      structuredPayload && Object.prototype.hasOwnProperty.call(structuredPayload, 'command')
+        ? String(structuredPayload.command || '')
+        : '';
+    var bodyTemplate =
+      structuredPayload && Object.prototype.hasOwnProperty.call(structuredPayload, 'body')
+        ? String(structuredPayload.body || '')
+        : '';
     var messageTemplate = structuredPayload
-      ? String(structuredPayload.body || '')
+      ? commandTemplate || bodyTemplate
       : command.message;
     var prepared = this.formulaEngine.prepareAIPrompt(
-      this.activeSheetId,
+      targetSheetId,
       messageTemplate,
       {},
       {},
@@ -1002,50 +1111,154 @@ export class SpreadsheetApp {
       ? stripChannelSendFileAndImagePlaceholders(prepared.userPrompt || '')
       : buildChannelSendBodyFromPreparedPrompt(prepared);
     var outboundPayload = structuredPayload
-      ? {
+      ? Object.assign({}, structuredPayload, {
           to: normalizeChannelSendRecipients(structuredPayload.to),
           subj: String(structuredPayload.subj || ''),
-          body: outboundBody,
+          body: commandTemplate ? bodyTemplate : outboundBody,
+          command: commandTemplate ? outboundBody : String(structuredPayload.command || ''),
           attachments: outboundAttachments,
-        }
+        })
       : {
           body: outboundBody,
           attachments: outboundAttachments,
         };
+    var commandLogMessage = outboundBody || messageTemplate || command.message;
+    var payloadSignature = buildChannelSendPayloadSignature(outboundPayload);
+    var previousDisplayValue = String(
+      this.storage.getCellDisplayValue(targetSheetId, normalizedCellId) || '',
+    );
+    var lastSettled = this.channelCommandLastSettledByCell[commandCellKey];
+    if (
+      lastSettled &&
+      lastSettled.signature === payloadSignature &&
+      Date.now() - Number(lastSettled.timestamp || 0) <
+        CHANNEL_COMMAND_REPEAT_DEDUPE_WINDOW_MS
+    ) {
+      return true;
+    }
+    if (this.channelCommandInFlightByCell[commandCellKey]) {
+      if (
+        this.channelCommandInFlightSignatureByCell[commandCellKey] ===
+        payloadSignature
+      ) {
+        return true;
+      }
+      var queuedExisting = this.channelCommandQueuedByCell[commandCellKey];
+      if (
+        queuedExisting &&
+        queuedExisting.signature &&
+        queuedExisting.signature === payloadSignature
+      ) {
+        return true;
+      }
+      this.channelCommandQueuedByCell[commandCellKey] = {
+        cellId: normalizedCellId,
+        rawValue: raw,
+        signature: payloadSignature,
+        options: Object.assign({}, opts, {
+          sheetId: targetSheetId,
+          force: true,
+        }),
+      };
+      return true;
+    }
 
-    this.setRawCellValue(normalizedCellId, raw);
-    this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
+    this.channelCommandInFlightByCell[commandCellKey] = true;
+    this.channelCommandInFlightSignatureByCell[commandCellKey] =
+      payloadSignature;
+    this.storage.setCellValue(targetSheetId, normalizedCellId, raw);
+    this.storage.setCellRuntimeState(targetSheetId, normalizedCellId, {
       value: `Sending to /${command.label}...`,
+      displayValue: `Sending to /${command.label}...`,
       state: 'pending',
       error: '',
     });
     this.renderCurrentSheetFromStorage();
-    if (this.activeInput && this.activeInput.id === normalizedCellId) {
+    if (
+      targetSheetId === this.activeSheetId &&
+      this.activeInput &&
+      this.activeInput.id === normalizedCellId
+    ) {
       this.formulaInput.value = raw;
     }
 
+    var finalizeChannelSend = () => {
+      delete this.channelCommandInFlightByCell[commandCellKey];
+      delete this.channelCommandInFlightSignatureByCell[commandCellKey];
+      var queued = this.channelCommandQueuedByCell[commandCellKey];
+      if (!queued) return;
+      delete this.channelCommandQueuedByCell[commandCellKey];
+      this.runChannelSendCommandForCell(
+        queued.cellId,
+        queued.rawValue,
+        queued.options,
+      );
+    };
+
     Meteor.callAsync('channels.sendByLabel', command.label, outboundPayload)
-      .then(() => {
-        this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
-          value: `Sent to /${command.label}`,
+      .then((result) => {
+        var resultText = getChannelCommandResultText(result, command.label);
+        var logEntry = buildChannelCommandLogEntry(
+          new Date(),
+          commandLogMessage,
+          resultText,
+        );
+        this.storage.setCellRuntimeState(targetSheetId, normalizedCellId, {
+          value: appendChannelCommandLog(previousDisplayValue, logEntry),
+          displayValue: appendChannelCommandLog(previousDisplayValue, logEntry),
           state: 'resolved',
           error: '',
         });
+        this.channelCommandLastSettledByCell[commandCellKey] = {
+          signature: payloadSignature,
+          timestamp: Date.now(),
+        };
         this.renderCurrentSheetFromStorage();
+        finalizeChannelSend();
       })
       .catch((error) => {
         var message = String(
           (error && (error.reason || error.message)) ||
             'Failed to send channel message',
         ).trim();
-        this.storage.setCellRuntimeState(this.activeSheetId, normalizedCellId, {
-          value: '#ERROR',
+        var logEntry = buildChannelCommandLogEntry(
+          new Date(),
+          commandLogMessage,
+          `ERROR: ${message}`,
+        );
+        this.storage.setCellRuntimeState(targetSheetId, normalizedCellId, {
+          value: appendChannelCommandLog(previousDisplayValue, logEntry),
+          displayValue: appendChannelCommandLog(previousDisplayValue, logEntry),
           state: 'error',
           error: message,
         });
+        this.channelCommandLastSettledByCell[commandCellKey] = {
+          signature: payloadSignature,
+          timestamp: Date.now(),
+        };
         this.renderCurrentSheetFromStorage();
+        finalizeChannelSend();
       });
     return true;
+  }
+
+  dispatchDependentChannelCommandsForSource(sheetId, cellId) {
+    var downstream = this.getTransitiveDependentSourceKeysForCell(
+      String(sheetId || ''),
+      String(cellId || '').toUpperCase(),
+    );
+    for (var i = 0; i < downstream.length; i += 1) {
+      var parsed = this.parseDependencySourceKey(downstream[i]);
+      if (!parsed) continue;
+      var raw = String(
+        this.storage.getCellValue(parsed.sheetId, parsed.cellId) || '',
+      );
+      if (!parseChannelSendCommand(raw)) continue;
+      this.runChannelSendCommandForCell(parsed.cellId, raw, {
+        sheetId: parsed.sheetId,
+        force: true,
+      });
+    }
   }
 
   beginCellUpdateTrace(cellId, rawValue) {
@@ -1220,7 +1433,8 @@ export class SpreadsheetApp {
       var raw = String(
         this.storage.getCellValue(sourceSheetId, sourceCellId) || '',
       );
-      if (!this.isFormulaLikeRawValue(raw)) continue;
+      var isChannelCommand = !!parseChannelSendCommand(raw);
+      if (!this.isFormulaLikeRawValue(raw) && !isChannelCommand) continue;
       var dependencies = [];
       try {
         dependencies = this.formulaEngine.collectCellDependencies(
@@ -1401,7 +1615,15 @@ export class SpreadsheetApp {
       sheetId,
       normalizedCellId,
     );
-    for (var i = 0; i < downstream.length; i++) add(downstream[i]);
+    for (var i = 0; i < downstream.length; i++) {
+      var parsedDownstream = this.parseDependencySourceKey(downstream[i]);
+      if (!parsedDownstream) continue;
+      var downstreamRaw = String(
+        this.storage.getCellValue(parsedDownstream.sheetId, parsedDownstream.cellId) || '',
+      );
+      if (parseChannelSendCommand(downstreamRaw)) continue;
+      add(downstream[i]);
+    }
 
     if (!targets.length) {
       return {
@@ -1503,6 +1725,7 @@ export class SpreadsheetApp {
     var normalizedCellId = String(cellId || '').toUpperCase();
     var raw = String(rawValue == null ? '' : rawValue);
     this.storage.setCellValue(targetSheetId, normalizedCellId, raw, meta);
+    this.syncCellDependencyHints(targetSheetId, normalizedCellId, raw);
     this.aiService.notifyActiveCellChanged();
     var recomputePlan = this.collectLocalSyncRecomputePlanForCell(
       targetSheetId,
@@ -1527,20 +1750,41 @@ export class SpreadsheetApp {
     if (
       needsServer ||
       this.isFormulaLikeRawValue(raw) ||
-      (this.hasDownstreamDependentsForCell(targetSheetId, normalizedCellId) &&
-        !localTargets.length)
+      (serverTargets.length > 0 && !localTargets.length)
     ) {
       this.computeAll({ bypassPendingEdit: true });
+    }
+    var attachment = this.parseAttachmentSource(raw);
+    if (!attachment || (!attachment.pending && !attachment.converting)) {
+      this.dispatchDependentChannelCommandsForSource(
+        targetSheetId,
+        normalizedCellId,
+      );
     }
   }
 
   commitRawCellEdit(cellId, rawValue, trace) {
     var normalizedCellId = String(cellId || '').toUpperCase();
     var raw = String(rawValue == null ? '' : rawValue);
+    var storedRaw = String(this.getRawCellValue(normalizedCellId) || '');
+    if (storedRaw === raw) {
+      this.renderCurrentSheetFromStorage();
+      return;
+    }
     this.captureHistorySnapshot(
       'cell:' + this.activeSheetId + ':' + normalizedCellId,
     );
     if (this.runChannelSendCommandForCell(normalizedCellId, raw)) {
+      var activeCommandInput =
+        this.activeInput && this.activeInput.id === normalizedCellId
+          ? this.activeInput
+          : this.inputById && this.inputById[normalizedCellId]
+            ? this.inputById[normalizedCellId]
+            : null;
+      if (activeCommandInput && this.grid) {
+        this.grid.setEditing(activeCommandInput, false);
+        this.renderCurrentSheetFromStorage();
+      }
       traceCellUpdateClient(trace, 'channel_send.dispatched', {
         cellId: normalizedCellId,
       });
@@ -1583,7 +1827,7 @@ export class SpreadsheetApp {
     if (
       needsServer ||
       this.isFormulaLikeRawValue(raw) ||
-      (this.hasDownstreamDependents(normalizedCellId) && !localTargets.length)
+      (serverTargets.length > 0 && !localTargets.length)
     ) {
       this.computeAll({ trace: trace, bypassPendingEdit: true });
       return;
@@ -2309,6 +2553,21 @@ export class SpreadsheetApp {
       );
     }
     this.floatingAttachmentPreview = null;
+    if (this.handleAttachmentContentOverlayKeydown) {
+      document.removeEventListener(
+        'keydown',
+        this.handleAttachmentContentOverlayKeydown,
+      );
+    }
+    if (
+      this.attachmentContentOverlay &&
+      this.attachmentContentOverlay.parentNode
+    ) {
+      this.attachmentContentOverlay.parentNode.removeChild(
+        this.attachmentContentOverlay,
+      );
+    }
+    this.attachmentContentOverlay = null;
   }
 
   ensureFloatingAttachmentPreview() {

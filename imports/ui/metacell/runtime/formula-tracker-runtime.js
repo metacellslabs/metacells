@@ -33,6 +33,14 @@ function normalizeRawForCommand(rawValue) {
 function getChannelSpec(app, rawValue) {
   var raw = String(rawValue == null ? '' : rawValue);
   var normalized = normalizeRawForCommand(raw);
+  var bareLogMatch = /^\s*\/([A-Za-z][A-Za-z0-9_-]*)\s*$/.exec(raw);
+  if (bareLogMatch && bareLogMatch[1]) {
+    return {
+      kind: 'feed',
+      label: String(bareLogMatch[1] || '').trim().toLowerCase(),
+      labels: [String(bareLogMatch[1] || '').trim().toLowerCase()],
+    };
+  }
   var sendCommand = parseChannelSendCommand(normalized);
   if (sendCommand && sendCommand.label) {
     return {

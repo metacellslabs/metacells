@@ -454,6 +454,10 @@ export class GridManager {
     );
     var opts = options || {};
     input.parentElement.classList.toggle('has-ai-skeleton', !!opts.aiSkeleton);
+    input.parentElement.classList.toggle(
+      'has-generated-attachment',
+      !!(opts.attachment && opts.attachment.generated),
+    );
     if (output) {
       output.classList.toggle('formula-value', !!hasFormula);
       output.classList.toggle('error-value', !!opts.error);
@@ -612,19 +616,17 @@ export class GridManager {
       );
     }
     if (generated && downloadUrl) {
-      if (!hasDirectFileUrl) {
-        return this.renderDownloadAttachmentLink(
-          String(meta.name || 'Attached file'),
-          downloadUrl,
-        );
-      }
-      return this.renderInternalAttachmentLink(
+      return this.renderGeneratedAttachmentCard(
         String(meta.name || 'Attached file'),
         downloadUrl,
+        hasDirectFileUrl,
+        String(meta.type || ''),
       );
     }
     return (
       "<div class='attachment-chip" +
+      (downloadUrl ? ' has-download' : '') +
+      " has-content-preview" +
       (isImage ? ' has-image-preview has-inline-image' : '') +
       "' data-full-name='" +
       (name || 'Attached file') +
@@ -636,6 +638,11 @@ export class GridManager {
           '\');"'
         : '') +
       '>' +
+      "<span class='attachment-select-icon' aria-hidden='true'>" +
+      "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='m21.44 11.05-8.49 8.49a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.49-8.48' />" +
+      '</svg>' +
+      '</span>' +
       "<span class='attachment-select-label'>" +
       (name || 'Attached file') +
       '</span>' +
@@ -647,6 +654,27 @@ export class GridManager {
           (name || 'Attached image') +
           "' /></div>"
         : '') +
+      (downloadUrl
+        ? "<a class='attachment-download' href='" +
+          this.escapeHtml(downloadUrl) +
+          "' download='" +
+          (name || 'Attached file') +
+          "' title='Download attachment' aria-label='Download attachment'>" +
+          "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
+          "<path d='M12 3v11' />" +
+          "<path d='m7 11 5 5 5-5' />" +
+          "<path d='M5 21h14' />" +
+          '</svg>' +
+          '</a>'
+        : '') +
+      "<button type='button' class='attachment-content-preview' title='Show extracted content' aria-label='Show extracted content'>" +
+      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='M8 3H5a2 2 0 0 0-2 2v3'></path>" +
+      "<path d='M16 3h3a2 2 0 0 1 2 2v3'></path>" +
+      "<path d='M8 21H5a2 2 0 0 1-2-2v-3'></path>" +
+      "<path d='M16 21h3a2 2 0 0 0 2-2v-3'></path>" +
+      "</svg>" +
+      '</button>' +
       "<button type='button' class='attachment-remove' title='Remove attachment'>×</button></div>"
     );
   }
@@ -664,6 +692,53 @@ export class GridManager {
       "'>" +
       safeName +
       '</a>' +
+      '</span>'
+    );
+  }
+
+  renderGeneratedAttachmentCard(label, href, hasDirectFileUrl, type) {
+    var name = String(label || 'attachment');
+    var safeName = this.escapeHtml(name);
+    var safeHref = this.escapeHtml(String(href || ''));
+    var openAttrs = hasDirectFileUrl
+      ? " target='_blank' rel='noopener noreferrer'"
+      : '';
+
+    return (
+      "<span class='generated-attachment-card'>" +
+      "<a class='generated-attachment-main' href='" +
+      safeHref +
+      "'" +
+      openAttrs +
+      (hasDirectFileUrl ? '' : " download='" + safeName + "'") +
+      '>' +
+      "<span class='generated-attachment-name'>" +
+      safeName +
+      '</span>' +
+      '</a>' +
+      "<a class='generated-attachment-download' href='" +
+      safeHref +
+      "' download='" +
+      safeName +
+      "' aria-label='Download " +
+      safeName +
+      "' title='Download " +
+      safeName +
+      "'>" +
+      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='M12 3v11' />" +
+      "<path d='m7 11 5 5 5-5' />" +
+      "<path d='M5 21h14' />" +
+      '</svg>' +
+      '</a>' +
+      "<button type='button' class='generated-attachment-content-preview' title='Show extracted content' aria-label='Show extracted content'>" +
+      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
+      "<path d='M8 3H5a2 2 0 0 0-2 2v3'></path>" +
+      "<path d='M16 3h3a2 2 0 0 1 2 2v3'></path>" +
+      "<path d='M8 21H5a2 2 0 0 1-2-2v-3'></path>" +
+      "<path d='M16 21h3a2 2 0 0 0 2-2v-3'></path>" +
+      "</svg>" +
+      '</button>' +
       '</span>'
     );
   }

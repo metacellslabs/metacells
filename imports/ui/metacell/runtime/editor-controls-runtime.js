@@ -314,7 +314,7 @@ function openDisplayModePicker(app) {
   app.displayModeButton.setAttribute('aria-expanded', 'true');
 }
 
-function syncDisplayModeControl(app) {
+export function syncDisplayModeControl(app) {
   if (!app || !app.displayModeButton) return;
   var mode = app.displayMode === 'formulas' ? 'formulas' : 'values';
   app.displayModeButton.innerHTML = getDisplayModeIconMarkup(mode);

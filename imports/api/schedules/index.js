@@ -180,9 +180,20 @@ function shouldConsiderScheduleText(text) {
   const value = String(text || '').trim();
   if (!value) return false;
   if (value.length < 12) return false;
-  return /(?:\bcron\b|\bevery\b|\bdaily\b|\bweekly\b|\bmonthly\b|\bonce\b|\beach\b|\bweekday\b|\bremind\b|\bschedule\b|(?:^|\s)\d{1,2}:\d{2}(?:\s|$)|(?:^|\s)[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+(?:\s|$))/i.test(
+  return /(?:\bcron\b|\bevery\b|\bdaily\b|\bweekly\b|\bmonthly\b|\bonce\b|\bweekday(?:s)?\b|\bremind(?:er)?\b|\bschedule\b|(?:^|\s)\d{1,2}:\d{2}(?:\s|$)|(?:^|\s)[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+\s+[*0-9/,.-]+(?:\s|$))/i.test(
     value,
   );
+}
+
+function isChannelLinkedSource(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  if (/^\/([A-Za-z][A-Za-z0-9_-]*)\s*$/.test(value)) return true;
+  if (/^#\s*(\+\d+\s+|\d+\s+|\+\s+)?\/([A-Za-z][A-Za-z0-9_-]*)\b/.test(value)) {
+    return true;
+  }
+  if (/^[>']\s*\/([A-Za-z][A-Za-z0-9_-]*)\b/.test(value)) return true;
+  return false;
 }
 
 async function detectScheduleFromText(text) {
@@ -340,8 +351,13 @@ async function enqueueDetectionForChangedCells(sheetDocumentId, changes) {
 
     const sourceText = String(nextCell.source || '');
     const valueText = String(nextCell.value || '');
+    const skipSourceDetection = isChannelLinkedSource(sourceText);
     const candidates = [];
-    if (change.sourceChanged && shouldConsiderScheduleText(sourceText)) {
+    if (
+      change.sourceChanged &&
+      !skipSourceDetection &&
+      shouldConsiderScheduleText(sourceText)
+    ) {
       candidates.push({ kind: 'source', text: sourceText });
     }
     if (

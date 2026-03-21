@@ -24,7 +24,11 @@
     "desktop:dist:mac:arm64": "node scripts/desktop-package.js --mac --arm64",
     "desktop:dist:mac:x64": "node scripts/desktop-package.js --mac --x64",
     "desktop:dist:linux": "node scripts/desktop-package.js --linux",
-    "desktop:dist:win": "node scripts/desktop-package.js --win"
+    "desktop:dist:win": "node scripts/desktop-package.js --win --x64 --config.win.target=portable",
+    "desktop:dist:win:x64": "node scripts/desktop-package.js --win --x64 --config.win.target=portable",
+    "desktop:dist:win:arm64": "node scripts/desktop-package.js --win --arm64 --config.win.target=portable",
+    "desktop:dist:win:setup": "node scripts/desktop-package.js --win --x64 --config.win.target=nsis",
+    "desktop:dist:win:setup:arm64": "node scripts/desktop-package.js --win --arm64 --config.win.target=nsis"
   },
   "dependencies": {
     "@babel/runtime": "^7.23.5",
@@ -46,11 +50,13 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "stream": "^0.0.3",
+    "telegraf": "^4.16.3",
     "turndown": "^7.2.1",
     "turndown-plugin-gfm": "^1.0.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@meteorjs/rspack": "^1.0.0",
     "@rsdoctor/rspack-plugin": "^1.2.3",
     "@rspack/cli": "^1.7.1",
@@ -75,12 +81,6 @@
     "directories": {
       "output": "dist/electron"
     },
-    "extraResources": [
-      {
-        "from": ".desktop-runtime",
-        "to": "desktop-runtime"
-      }
-    ],
     "files": [
       "electron/**/*",
       "package.json",
@@ -99,14 +99,18 @@
       "!README.md"
     ],
     "mac": {
-      "identity": null,
       "icon": "electron/assets/app-icon.png",
       "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "target": [
         "dmg",
         "zip"
       ]
     },
+    "afterSign": "scripts/notarize.js",
     "dmg": {
       "backgroundColor": "#ffffff",
       "icon": null
@@ -117,6 +121,12 @@
         "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "differentialPackage": false,
+      "oneClick": false,
+      "include": "build/nsis-debug.nsh"
     },
     "linux": {
       "icon": "electron/assets/app-icon.png",

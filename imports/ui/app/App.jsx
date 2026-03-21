@@ -74,6 +74,275 @@ function buildProviderDrafts(providers, savedProviders) {
   }, {});
 }
 
+function isLoopbackUrl(rawUrl) {
+  const value = String(rawUrl || '').trim();
+  if (!value) return false;
+
+  try {
+    const parsed = new URL(value);
+    const host = String(parsed.hostname || '').trim().toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch (error) {
+    return false;
+  }
+}
+
+function providerAllowsBlankApiKey(provider) {
+  const source = provider && typeof provider === 'object' ? provider : {};
+  const providerId = String(source.id || '').trim();
+  const providerType = String(source.type || '').trim();
+  const baseUrl = String(source.baseUrl || '').trim();
+
+  return (
+    providerType === 'lm_studio' ||
+    providerId === 'ollama' ||
+    isLoopbackUrl(baseUrl)
+  );
+}
+
+function getProviderMissingFields(provider) {
+  const source = provider && typeof provider === 'object' ? provider : {};
+  const missing = [];
+
+  if (!String(source.baseUrl || '').trim()) {
+    missing.push('baseUrl');
+  }
+
+  if (
+    !providerAllowsBlankApiKey(source) &&
+    !String(source.apiKey || '').trim()
+  ) {
+    missing.push('apiKey');
+  }
+
+  return missing;
+}
+
+function isProviderConfigured(provider) {
+  return getProviderMissingFields(provider).length === 0;
+}
+
+function getActiveProviderRecord(settings, registeredProviders) {
+  const providers = Array.isArray(settings && settings.aiProviders)
+    ? settings.aiProviders
+    : [];
+  const fallbackId = String(
+    (registeredProviders &&
+      registeredProviders[0] &&
+      registeredProviders[0].id) ||
+      '',
+  );
+  const activeProviderId = String(
+    (settings && settings.activeAIProviderId) || fallbackId,
+  );
+
+  return (
+    providers.find((provider) => provider && provider.id === activeProviderId) ||
+    (Array.isArray(registeredProviders)
+      ? registeredProviders.find(
+          (provider) => provider && provider.id === activeProviderId,
+        )
+      : null) ||
+    (Array.isArray(registeredProviders) ? registeredProviders[0] : null) ||
+    null
+  );
+}
+
+function ProviderCredentialHelp({
+  provider,
+  onToggle,
+  isOpen = false,
+  toggleLabelPrefix = 'Credential help for',
+}) {
+  const source = provider && typeof provider === 'object' ? provider : null;
+  if (!source) return null;
+
+  const hasCredentialHelp =
+    (Array.isArray(source.credentialSteps) &&
+      source.credentialSteps.length > 0) ||
+    (Array.isArray(source.credentialLinks) && source.credentialLinks.length > 0);
+
+  if (!hasCredentialHelp) return null;
+
+  return (
+    <button
+      type="button"
+      className="settings-help-toggle"
+      aria-label={`${toggleLabelPrefix} ${source.name}`}
+      aria-expanded={isOpen}
+      onClick={onToggle}
+    >
+      ?
+    </button>
+  );
+}
+
+function ProviderCredentialHelpPanel({ provider, isOpen }) {
+  const source = provider && typeof provider === 'object' ? provider : null;
+  if (!source || !isOpen) return null;
+
+  const hasCredentialHelp =
+    (Array.isArray(source.credentialSteps) &&
+      source.credentialSteps.length > 0) ||
+    (Array.isArray(source.credentialLinks) && source.credentialLinks.length > 0);
+
+  if (!hasCredentialHelp) return null;
+
+  return (
+    <div className="settings-help-panel">
+      {source.credentialSteps && source.credentialSteps.length ? (
+        <ol className="settings-help-steps">
+          {source.credentialSteps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      ) : null}
+      {source.credentialLinks && source.credentialLinks.length ? (
+        <div className="settings-help-links">
+          {source.credentialLinks.map((link) => (
+            <a
+              key={`${source.id}-${link.url}`}
+              className="settings-help-link"
+              href={link.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProviderFields({ provider, draft, onChange }) {
+  if (!provider || !Array.isArray(provider.fields)) return null;
+
+  return (
+    <>
+      {provider.fields.map((field) => (
+        <div key={field.key} className="settings-field">
+          <label
+            className="settings-label"
+            htmlFor={`${provider.id}-${field.key}`}
+          >
+            {field.label}
+          </label>
+          <input
+            id={`${provider.id}-${field.key}`}
+            className="settings-input"
+            type={field.type || 'text'}
+            value={String((draft && draft[field.key]) || '')}
+            onChange={(event) => onChange(field.key, event.target.value)}
+            placeholder={field.placeholder || ''}
+          />
+        </div>
+      ))}
+      {provider.availableModels && provider.availableModels.length ? (
+        <p className="settings-provider-note">
+          Models: {provider.availableModels.join(', ')}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function AIProviderOnboardingPage({
+  provider,
+  draft,
+  selectedProviderId,
+  registeredProviders,
+  isSaving,
+  isLoading,
+  isHelpOpen,
+  onToggleHelp,
+  onSelectProvider,
+  onDraftChange,
+  onSave,
+}) {
+  const missingFields = getProviderMissingFields(draft || provider);
+
+  return (
+    <main className="home-page onboarding-page">
+      <section className="home-card onboarding-card">
+        <div className="onboarding-copy">
+          <div className="home-brand">
+            <img className="home-brand-logo" src="/logo.png" alt="MetaCells" />
+          </div>
+          <span className="onboarding-eyebrow">AI setup required</span>
+          <h1>Set up your default AI provider</h1>
+          <p className="home-subtitle onboarding-subtitle">
+            MetaCells detected that the default AI provider is not configured.
+            Choose a provider, enter the connection parameters, and continue to
+            the app.
+          </p>
+        </div>
+
+        <div className="settings-provider-card onboarding-provider-card">
+          <div className="settings-provider-head">
+            <div className="settings-provider-title">
+              <strong>{provider?.name || 'Provider'}</strong>
+              <ProviderCredentialHelp
+                provider={provider}
+                isOpen={isHelpOpen}
+                onToggle={onToggleHelp}
+                toggleLabelPrefix="Setup help for"
+              />
+            </div>
+            <span className="settings-status">
+              {isProviderConfigured(draft || provider)
+                ? 'Ready'
+                : missingFields.length
+                  ? `Missing: ${missingFields.join(', ')}`
+                  : 'Needs setup'}
+            </span>
+          </div>
+          <ProviderCredentialHelpPanel provider={provider} isOpen={isHelpOpen} />
+
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="onboarding-provider-id">
+              Provider type
+            </label>
+            <select
+              id="onboarding-provider-id"
+              className="settings-input"
+              value={selectedProviderId}
+              onChange={(event) => onSelectProvider(event.target.value)}
+              disabled={isSaving || isLoading}
+            >
+              {registeredProviders.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <ProviderFields
+            provider={provider}
+            draft={draft}
+            onChange={(fieldKey, value) => onDraftChange(selectedProviderId, fieldKey, value)}
+          />
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={isSaving || isLoading}
+            >
+              {isSaving ? 'Saving...' : 'Save and continue'}
+            </button>
+            <a className="home-secondary-link" href="/settings">
+              Open full settings
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function buildChannelDrafts(connectors, savedChannels) {
   const registered = Array.isArray(connectors) ? connectors : [];
   const saved = Array.isArray(savedChannels) ? savedChannels : [];
@@ -164,6 +433,19 @@ function buildJobSettingsDraft(jobSettings) {
 }
 
 function HomePage() {
+  const registeredProviders = DEFAULT_AI_PROVIDERS;
+  const defaultProviderId = String(
+    (registeredProviders[0] && registeredProviders[0].id) || '',
+  );
+  const [activeOnboardingProviderId, setActiveOnboardingProviderId] =
+    useState(defaultProviderId);
+  const [providerDrafts, setProviderDrafts] = useState(() =>
+    buildProviderDrafts(registeredProviders),
+  );
+  const [savingProviderId, setSavingProviderId] = useState('');
+  const [isSavingActiveProvider, setIsSavingActiveProvider] = useState(false);
+  const [isOnboardingHelpOpen, setIsOnboardingHelpOpen] = useState(false);
+
   useEffect(() => {
     document.body.classList.add('route-home');
     document.body.classList.remove('route-sheet');
@@ -173,15 +455,17 @@ function HomePage() {
     };
   }, []);
 
-  const { isLoading, sheets } = useTracker(() => {
+  const { isLoading, sheets, settings } = useTracker(() => {
     const handle = Meteor.subscribe('sheets.list');
+    const settingsHandle = Meteor.subscribe('settings.default');
 
     return {
-      isLoading: !handle.ready(),
+      isLoading: !handle.ready() || !settingsHandle.ready(),
       sheets: Sheets.find(
         {},
         { sort: { updatedAt: -1, createdAt: -1 } },
       ).fetch(),
+      settings: AppSettings.findOne(DEFAULT_SETTINGS_ID),
     };
   });
 
@@ -191,6 +475,76 @@ function HomePage() {
     useState(false);
   const [deletingSheetId, setDeletingSheetId] = useState('');
   const [deleteSheetDialog, setDeleteSheetDialog] = useState(null);
+
+  useEffect(() => {
+    const providers = Array.isArray(settings && settings.aiProviders)
+      ? settings.aiProviders
+      : [];
+    const activeProvider = getActiveProviderRecord(settings, registeredProviders);
+    setProviderDrafts(buildProviderDrafts(registeredProviders, providers));
+    setActiveOnboardingProviderId(
+      String((activeProvider && activeProvider.id) || defaultProviderId),
+    );
+  }, [
+    defaultProviderId,
+    registeredProviders,
+    settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() : 0,
+  ]);
+
+  const handleProviderDraftChange = (providerId, fieldKey, value) => {
+    setProviderDrafts((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] || {}),
+        [fieldKey]: value,
+      },
+    }));
+  };
+
+  const handleCompleteOnboarding = () => {
+    if (savingProviderId || isSavingActiveProvider || !activeOnboardingProviderId)
+      return;
+
+    const draft = providerDrafts[activeOnboardingProviderId];
+    if (!draft) return;
+
+    const nextProvider = {
+      id: String(draft.id || '').trim(),
+      name: String(draft.name || '').trim(),
+      type: String(draft.type || '').trim(),
+      baseUrl: String(draft.baseUrl || '').trim(),
+      model: String(draft.model || '').trim(),
+      apiKey: String(draft.apiKey || '').trim(),
+      enabled: draft.enabled !== false,
+    };
+    const missingFields = getProviderMissingFields(nextProvider);
+
+    if (missingFields.length) {
+      window.alert(`Fill in required provider settings: ${missingFields.join(', ')}`);
+      return;
+    }
+
+    setSavingProviderId(activeOnboardingProviderId);
+    setIsSavingActiveProvider(true);
+    Meteor.callAsync('settings.upsertAIProvider', nextProvider)
+      .then(() =>
+        Meteor.callAsync(
+          'settings.setActiveAIProvider',
+          activeOnboardingProviderId,
+        ),
+      )
+      .then(() => {
+        setSavingProviderId('');
+        setIsSavingActiveProvider(false);
+      })
+      .catch((error) => {
+        setSavingProviderId('');
+        setIsSavingActiveProvider(false);
+        window.alert(
+          error.reason || error.message || 'Failed to save AI provider',
+        );
+      });
+  };
 
   const handleCreateSheet = () => {
     if (isCreating) return;
@@ -269,6 +623,41 @@ function HomePage() {
         );
       });
   };
+
+  const activeProvider = getActiveProviderRecord(settings, registeredProviders);
+  const onboardingProviderId = String(
+    activeOnboardingProviderId ||
+      (activeProvider && activeProvider.id) ||
+      defaultProviderId,
+  );
+  const onboardingProvider =
+    registeredProviders.find((provider) => provider.id === onboardingProviderId) ||
+    registeredProviders[0] ||
+    null;
+  const onboardingDraft =
+    providerDrafts[onboardingProviderId] || onboardingProvider || {};
+  const showOnboarding = !isLoading && !isProviderConfigured(activeProvider);
+
+  if (showOnboarding) {
+    return (
+      <AIProviderOnboardingPage
+        provider={onboardingProvider}
+        draft={onboardingDraft}
+        selectedProviderId={onboardingProviderId}
+        registeredProviders={registeredProviders}
+        isSaving={Boolean(savingProviderId) || isSavingActiveProvider}
+        isLoading={isLoading}
+        isHelpOpen={isOnboardingHelpOpen}
+        onToggleHelp={() => setIsOnboardingHelpOpen((current) => !current)}
+        onSelectProvider={(providerId) => {
+          setActiveOnboardingProviderId(providerId);
+          setIsOnboardingHelpOpen(false);
+        }}
+        onDraftChange={handleProviderDraftChange}
+        onSave={handleCompleteOnboarding}
+      />
+    );
+  }
 
   return (
     <main className="home-page">
@@ -1434,32 +1823,21 @@ function SettingsPage() {
         {registeredProviders.map((provider) => {
           const draft = providerDrafts[provider.id] || provider;
           const isActive = activeProviderId === provider.id;
-          const hasCredentialHelp =
-            (Array.isArray(provider.credentialSteps) &&
-              provider.credentialSteps.length > 0) ||
-            (Array.isArray(provider.credentialLinks) &&
-              provider.credentialLinks.length > 0);
           const isHelpOpen = openProviderHelpId === provider.id;
           return (
             <div key={provider.id} className="settings-provider-card">
               <div className="settings-provider-head">
                 <div className="settings-provider-title">
                   <strong>{provider.name}</strong>
-                  {hasCredentialHelp ? (
-                    <button
-                      type="button"
-                      className="settings-help-toggle"
-                      aria-label={`Credential help for ${provider.name}`}
-                      aria-expanded={isHelpOpen}
-                      onClick={() =>
-                        setOpenProviderHelpId((current) =>
-                          current === provider.id ? '' : provider.id,
-                        )
-                      }
-                    >
-                      ?
-                    </button>
-                  ) : null}
+                  <ProviderCredentialHelp
+                    provider={provider}
+                    isOpen={isHelpOpen}
+                    onToggle={() =>
+                      setOpenProviderHelpId((current) =>
+                        current === provider.id ? '' : provider.id,
+                      )
+                    }
+                  />
                 </div>
                 <span className="settings-status">
                   {isActive
@@ -1469,62 +1847,17 @@ function SettingsPage() {
                       : 'Available'}
                 </span>
               </div>
-              {isHelpOpen ? (
-                <div className="settings-help-panel">
-                  {provider.credentialSteps && provider.credentialSteps.length ? (
-                    <ol className="settings-help-steps">
-                      {provider.credentialSteps.map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                    </ol>
-                  ) : null}
-                  {provider.credentialLinks && provider.credentialLinks.length ? (
-                    <div className="settings-help-links">
-                      {provider.credentialLinks.map((link) => (
-                        <a
-                          key={`${provider.id}-${link.url}`}
-                          className="settings-help-link"
-                          href={link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {link.label}
-                        </a>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {Array.isArray(provider.fields) &&
-                provider.fields.map((field) => (
-                  <div key={field.key} className="settings-field">
-                    <label
-                      className="settings-label"
-                      htmlFor={`${provider.id}-${field.key}`}
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      id={`${provider.id}-${field.key}`}
-                      className="settings-input"
-                      type={field.type || 'text'}
-                      value={String(draft[field.key] || '')}
-                      onChange={(event) =>
-                        handleProviderDraftChange(
-                          provider.id,
-                          field.key,
-                          event.target.value,
-                        )
-                      }
-                      placeholder={field.placeholder || ''}
-                    />
-                  </div>
-                ))}
-              {provider.availableModels && provider.availableModels.length ? (
-                <p className="settings-provider-note">
-                  Models: {provider.availableModels.join(', ')}
-                </p>
-              ) : null}
+              <ProviderCredentialHelpPanel
+                provider={provider}
+                isOpen={isHelpOpen}
+              />
+              <ProviderFields
+                provider={provider}
+                draft={draft}
+                onChange={(fieldKey, value) =>
+                  handleProviderDraftChange(provider.id, fieldKey, value)
+                }
+              />
               <div className="settings-actions">
                 <button
                   type="button"
@@ -2525,6 +2858,27 @@ function SheetPage({
             </button>
           </div>
           <div className="formula-cluster formula-cluster-format">
+            <select
+              id="bind-channel-mode-select"
+              className="toolbar-channel-mode-select"
+              aria-label="Choose channel formula mode"
+              title="Choose how the active cell uses channel events"
+              defaultValue="table"
+            >
+              <option value="table"># Table</option>
+              <option value="list">&gt; List</option>
+              <option value="note">' Note</option>
+              <option value="log">Log</option>
+            </select>
+            <select
+              id="bind-channel-select"
+              className="toolbar-channel-select"
+              aria-label="Bind channel to active cell"
+              title="Bind incoming channel events to active cell"
+              defaultValue=""
+            >
+              <option value="">Channel</option>
+            </select>
             <button
               id="attach-file"
               type="button"

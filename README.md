@@ -47,7 +47,8 @@ Input:@idea:[Describe your startup idea]
 'Summarize the idea in one sentence: @idea
 >top 10 user complaints about products like @idea
 #compare @idea with competitors;4;6
-/tg Launch update is live
+/tg
+/tg:send:Launch update is live
 /sf:send:{"to":"team@example.com","subj":"Status","body":"See @report"}
 ```
 
@@ -194,6 +195,15 @@ File:@policy:[Upload policy PDF]
 
 This makes it possible to build guided AI workflows and internal tools without leaving the workbook.
 
+Report controls can also bind directly to sheet cells:
+
+```text
+Input:'Sheet 1'!A1
+File:'Sheet 1'!D9
+```
+
+`File:` works for both uploaded attachments and generated file cells such as `=PDF(...)` and `=FILE(...)`.
+
 ### Cells can generate files
 
 You can turn any cell content into a downloadable attachment.
@@ -202,6 +212,8 @@ You can turn any cell content into a downloadable attachment.
 =pdf("invoice.pdf", A1)
 =FILE("invoice.pdf", A1, "PDF")
 ```
+
+Generated file cells render like uploaded attachments in the grid and support download plus fullscreen viewing of extracted text content.
 
 This is useful when another cell already contains the text you want to package, including content extracted from an uploaded file.
 
@@ -217,6 +229,36 @@ File:@policy:[Upload policy PDF]
 /x shipping update is live
 /sf:send:{"to":"team@example.com","subj":"Report","body":"See @summary"}
 ```
+
+### Cells can subscribe to channel events
+
+If a cell contains only a channel label like `/tg` or `/sf`, MetaCells treats it as an inbox log.
+
+Each new incoming event appends one row below the cell with normalized columns:
+
+- `date`
+- `from`
+- `text`
+- `file`
+
+MetaCells uses one channel pattern consistently:
+
+- `/channel` for the raw event stream
+- `' /channel ...` for one AI note in the current cell
+- `> /channel ...` for one AI list item per event
+- `# /channel ...` for one AI table row per event
+- `/channel:send:...` for outbound actions
+
+Use `# /channel prompt` when you want AI to process each event into rows. Use bare `/channel` when you want the raw event stream in the sheet.
+
+Telegram now supports both directions:
+
+- `/tg:send:hello` sends a message through the configured bot
+- `/tg` listens for inbound Telegram messages from the configured `chatId`
+
+Inbound Telegram file messages are downloaded into workbook artifacts automatically. In a bare `/tg` inbox log, the `file` column becomes a real attached file cell with download and extracted-text fullscreen controls, not just a filename.
+
+Send cells also keep a plain-text delivery log in their computed value. For example, `/tg:send:hello` records lines like `timestamp -> sent text -> result`, which are visible in the cell value and fullscreen preview.
 
 ### Mentioning is first-class
 
@@ -298,6 +340,8 @@ Optional worker for background jobs and connectors:
 npm run start:worker
 ```
 
+Run `npm start` first, wait for the Meteor dev bundle to exist, then start the worker in a second terminal. `start:worker` now attaches to the existing local dev build instead of starting a second `meteor run`, which avoids the old `.meteor/local` conflict with the main app.
+
 ### Run with Electron
 
 Electron is configured as a desktop shell for the Meteor app.
@@ -336,7 +380,23 @@ npm run desktop:dist:mac:arm64
 npm run desktop:dist:mac:x64
 npm run desktop:dist:linux
 npm run desktop:dist:win
+npm run desktop:dist:win:x64
+npm run desktop:dist:win:arm64
+npm run desktop:dist:win:setup
+npm run desktop:dist:win:setup:arm64
 ```
+
+`desktop:dist:win` now defaults to a Windows `portable` build on `x64`, because the bundled local backend can make NSIS setup extraction unreliable on some Windows machines. Use `desktop:dist:win:setup` only when you explicitly need an installer and have validated that NSIS extraction completes reliably on the target environment. `desktop:dist:win:arm64` builds a Windows ARM portable app; `desktop:dist:win:setup:arm64` builds the ARM NSIS installer variant.
+
+For a macOS release build that opens cleanly on a new machine, sign and notarize the app before distributing the DMG. Export these environment variables before running the mac packaging command:
+
+```bash
+export APPLE_ID="you@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_TEAM_ID="TEAMID1234"
+```
+
+Electron Builder will use your installed Developer ID Application certificate automatically. If those Apple variables are not set, the build still succeeds, but the generated macOS DMG is unsigned or unnotarized and Gatekeeper may report it as damaged on another Mac.
 
 Create an unpacked app directory without installers:
 
@@ -344,17 +404,25 @@ Create an unpacked app directory without installers:
 npm run desktop:pack
 ```
 
-Artifacts are written to:
+Artifacts are written to target-specific directories under:
 
 ```text
 dist/electron
+```
+
+Examples:
+
+```text
+dist/electron/darwin-arm64
+dist/electron/darwin-x64
+dist/electron/win32-x64
 ```
 
 These package commands now prepare a bundled local backend before packaging:
 
 - Meteor server bundle
 - Meteor Node runtime
-- MongoDB server binary for the current host OS/architecture
+- MongoDB server binary for the requested package OS/architecture
 
 The first packaging run may take longer because it downloads the MongoDB binary.
 

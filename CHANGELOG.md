@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-03-20
+
+### Added
+
+- First-run AI provider onboarding when no default provider is configured.
+- Fullscreen cell view now supports preview-first mode, formula/value editing, and basic Markdown controls.
+- Bare `/channel` formulas such as `/tg` and `/sf` now act as append-only inbox logs that add one row per incoming event with normalized `date`, `from`, `text`, and `file` columns.
+- Telegram channels now support inbound receive from the configured `chatId`, including live subscription via Telegraf and materialized inbound file attachments with extracted text artifacts.
+- Attachment cards for uploaded files and generated `=PDF(...)` / `=FILE(...)` cells now support hover-only download controls and fullscreen viewing of extracted text content.
+- Channel binding controls in the toolbar now let users choose a canonical receive shape (`# Table`, `> List`, `' Note`, or `Log`) before inserting the channel formula.
+
+### Changed
+
+- Shell channel commands such as `/sh pwd` and `/sh:send:{"command":"pwd"}` now preserve the command payload, render runtime status/output in the source cell, and return stderr/stdout without throwing on non-zero exit.
+- Report controls now keep `Input:@cell` linked to the target cell value and support sheet-qualified `Input:` / `File:` references, including generated file cells from `=pdf(...)` and `=file(...)`.
+- Generated file cells now render as full-cell attachments aligned with uploaded-file typography and controls, including consistent icon backgrounds and hover behavior.
+- Bare `/channel` inbox logs now respill newest messages first and write real attachment payloads into the `file` column instead of only filenames.
+- Channel send command cells now keep a timestamped send-result log in their computed value, which is visible in fullscreen `Value` mode.
+- Local `start:worker` now attaches to the existing Meteor dev bundle instead of starting a second `meteor run`, avoiding `.meteor/local` IPC conflicts with the main app.
+- In-app help and README examples now document bare channel logs, bidirectional Telegram behavior, Telegram inbound files, worker startup order, sheet-linked report controls, and generated file cells.
+- Channel connector examples now prefer explicit `/label:send:...` syntax for outbound actions instead of mixed shorthand examples.
+
 ## 2026-03-14
 
 ### Added

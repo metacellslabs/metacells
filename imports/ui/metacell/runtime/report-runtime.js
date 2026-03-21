@@ -207,7 +207,7 @@ export function replaceMentionInTextNode(app, textNode) {
   var text = textNode.nodeValue || '';
   if (!text) return;
   var pattern =
-    /(!@(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[!:][A-Za-z]+[0-9]+:[A-Za-z]+[0-9]+(?:#[A-Za-z0-9 _-]+)?|!@(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[!:][A-Za-z]+[0-9]+(?:#[A-Za-z0-9 _-]+)?|!@[A-Za-z_][A-Za-z0-9_]*(?:#[A-Za-z0-9 _-]+)?|Tab:\[[^\]]*\]|File:(?:_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[!:][A-Za-z]+[0-9]+)(?::\[[^\]]*\])?|Input:(?:_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[!:][A-Za-z]+[0-9]+)(?::\[[^\]]*\])?|(?:_?@)?(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[!:][A-Za-z]+[0-9]+:[A-Za-z]+[0-9]+|_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|[A-Za-z][A-Za-z0-9 _-]*)[:!][A-Za-z]+[0-9]+)/g;
+    /(!@(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[!:]@?[A-Za-z]+[0-9]+:@?[A-Za-z]+[0-9]+(?:#[A-Za-z0-9 _-]+)?|!@(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[!:]@?[A-Za-z]+[0-9]+(?:#[A-Za-z0-9 _-]+)?|!@[A-Za-z_][A-Za-z0-9_]*(?:#[A-Za-z0-9 _-]+)?|Tab:\[[^\]]*\]|File:(?:_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[!:]@?[A-Za-z]+[0-9]+)(?::\[[^\]]*\])?|Input:(?:_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[!:]@?[A-Za-z]+[0-9]+)(?::\[[^\]]*\])?|(?:_?@)?(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[!:]@?[A-Za-z]+[0-9]+:@?[A-Za-z]+[0-9]+|_?@[A-Za-z_][A-Za-z0-9_]*|(?:_?@)?(?:'[^']+'|"[^"]+"|[A-Za-z][A-Za-z0-9 _-]*)[:!]@?[A-Za-z]+[0-9]+)/g;
   pattern.lastIndex = 0;
   var hasMatch = pattern.exec(text);
   if (!hasMatch) return;
@@ -486,7 +486,7 @@ export function injectLinkedInputsFromPlaceholders(app, root) {
     }
     item.placeholder = String(node.dataset.reportInputHint || '');
     var fragment = document.createDocumentFragment();
-    fragment.appendChild(createLinkedReportInputValueElement(app, item));
+    fragment.appendChild(createLinkedReportInputElement(app, item));
     node.parentNode.replaceChild(fragment, node);
   });
   var filePlaceholders = root.querySelectorAll('.report-file-placeholder');
@@ -541,11 +541,11 @@ export function createLinkedReportFileElement(app, inputResolved) {
   shell.dataset.sheetId = inputResolved.sheetId;
   shell.dataset.cellId = inputResolved.cellId;
 
-  var raw = app.storage.getCellValue(
+  var attachment = resolveLinkedReportAttachment(
+    app,
     inputResolved.sheetId,
     inputResolved.cellId,
   );
-  var attachment = app.parseAttachmentSource(raw);
   var isImage =
     !!attachment &&
     !!attachment.previewUrl &&
@@ -575,10 +575,19 @@ export function createLinkedReportFileElement(app, inputResolved) {
       attachment && attachment.name
         ? attachment.name
         : inputResolved.placeholder || 'Choose file';
+    if (attachment && attachment.generated) {
+      shell.dataset.generatedAttachment = 'true';
+      shell.dataset.attachmentUrl = buildLinkedReportAttachmentHref(
+        app,
+        attachment,
+      );
+      shell.dataset.attachmentName = String(attachment.name || '');
+      choose.title = choose.textContent;
+    }
     shell.appendChild(choose);
   }
 
-  if (attachment && attachment.name) {
+  if (attachment && attachment.name && !attachment.generated) {
     var remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'report-file-remove';
@@ -590,10 +599,20 @@ export function createLinkedReportFileElement(app, inputResolved) {
 }
 
 export function handleReportFileShellAction(app, shell, removeOnly) {
-  if (!shell || !app.attachFileInput) return;
+  if (!shell) return;
   var sheetId = String(shell.dataset.sheetId || '');
   var cellId = String(shell.dataset.cellId || '').toUpperCase();
   if (!sheetId || !cellId) return;
+
+  if (!removeOnly && shell.dataset.generatedAttachment === 'true') {
+    var attachmentUrl = String(shell.dataset.attachmentUrl || '').trim();
+    var attachmentName = String(shell.dataset.attachmentName || '').trim();
+    if (!attachmentUrl) return;
+    openLinkedReportAttachment(attachmentUrl, attachmentName);
+    return;
+  }
+
+  if (!app.attachFileInput) return;
 
   if (removeOnly) {
     app.captureHistorySnapshot('attachment:' + sheetId + ':' + cellId);
@@ -643,6 +662,48 @@ export function refreshLinkedReportInputValue(app, input) {
   var cellId = String(input.dataset.cellId || '').toUpperCase();
   if (!sheetId || !cellId) return;
   input.value = readLinkedInputValue(app, sheetId, cellId);
+}
+
+export function resolveLinkedReportAttachment(app, sheetId, cellId) {
+  if (!app || typeof app.parseAttachmentSource !== 'function') return null;
+  var raw = app.storage.getCellValue(sheetId, cellId);
+  var computed = app.storage.getCellComputedValue(sheetId, cellId);
+  var display = app.storage.getCellDisplayValue(sheetId, cellId);
+  var attachment =
+    app.parseAttachmentSource(raw) ||
+    app.parseAttachmentSource(computed) ||
+    app.parseAttachmentSource(display);
+  return attachment && typeof attachment === 'object' ? attachment : null;
+}
+
+export function buildLinkedReportAttachmentHref(app, attachment) {
+  if (!attachment || typeof attachment !== 'object') return '';
+  if (app.grid && typeof app.grid.buildAttachmentHref === 'function') {
+    return String(app.grid.buildAttachmentHref(attachment) || '');
+  }
+  return String(
+    attachment.downloadUrl || attachment.previewUrl || attachment.url || '',
+  ).trim();
+}
+
+export function openLinkedReportAttachment(url, filename) {
+  var href = String(url || '').trim();
+  if (!href || typeof document === 'undefined') return;
+  var link = document.createElement('a');
+  link.href = href;
+  if (/^(?:https?:|blob:|\/)/i.test(href)) {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  } else if (filename) {
+    link.download = filename;
+  }
+  if (/^data:/i.test(href) && filename) {
+    link.download = filename;
+  }
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 export function resolveReportInputMention(app, payload) {
@@ -746,12 +807,12 @@ export function resolveNamedMention(app, name, rawMode) {
 
 export function resolveSheetCellMention(app, token, rawMode) {
   var match =
-    /^(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))[:!]([A-Za-z]+[0-9]+)$/.exec(
+    /^(?:'([^']+)'|"([^"]+)"|([A-Za-z][A-Za-z0-9 _-]*))[:!]@?([A-Za-z]+[0-9]+)$/.exec(
       token,
     );
   if (!match) return null;
-  var sheetName = match[1] || match[2] || '';
-  var cellId = (match[3] || '').toUpperCase();
+  var sheetName = match[1] || match[2] || match[3] || '';
+  var cellId = (match[4] || '').toUpperCase();
   var sheetId = app.findSheetIdByName(sheetName);
   if (!sheetId) return null;
   var value = rawMode
@@ -788,13 +849,13 @@ export function resolveSheetCellMention(app, token, rawMode) {
 
 export function resolveSheetRegionMention(app, token, rawMode) {
   var match =
-    /^(?:'([^']+)'|([A-Za-z][A-Za-z0-9 _-]*))[:!]([A-Za-z]+[0-9]+):([A-Za-z]+[0-9]+)$/.exec(
+    /^(?:'([^']+)'|"([^"]+)"|([A-Za-z][A-Za-z0-9 _-]*))[:!]@?([A-Za-z]+[0-9]+):@?([A-Za-z]+[0-9]+)$/.exec(
       token,
     );
   if (!match) return null;
-  var sheetName = match[1] || match[2] || '';
-  var startCellId = (match[3] || '').toUpperCase();
-  var endCellId = (match[4] || '').toUpperCase();
+  var sheetName = match[1] || match[2] || match[3] || '';
+  var startCellId = (match[4] || '').toUpperCase();
+  var endCellId = (match[5] || '').toUpperCase();
   var sheetId = app.findSheetIdByName(sheetName);
   if (!sheetId) return null;
   var rows = rawMode

@@ -2,6 +2,7 @@ import { Meteor } from 'meteor/meteor';
 import { AI_MODE } from './constants.js';
 import { traceCellUpdateClient } from '../../../lib/cell-update-profile.js';
 import { describeCellSchedule } from '../../../lib/cell-schedule.js';
+import { parseChannelSendCommand } from '../../../api/channels/commands.js';
 
 function parseNumericDisplayValue(value) {
   if (typeof value === 'number' && isFinite(value)) return value;
@@ -171,6 +172,54 @@ function resolveRenderableAttachment(app, rawValue, computedValue, displayValue)
   );
 }
 
+function isChannelSendCommandRaw(rawValue) {
+  return !!parseChannelSendCommand(rawValue);
+}
+
+function collectLocalChannelCommandRuntimeState(app) {
+  if (!app || !app.storage || typeof app.storage.listAllCellIds !== 'function') {
+    return [];
+  }
+  var entries = app.storage.listAllCellIds();
+  var results = [];
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (!entry || !entry.sheetId || !entry.cellId) continue;
+    var sheetId = String(entry.sheetId || '');
+    var cellId = String(entry.cellId || '').toUpperCase();
+    var raw = String(app.storage.getCellValue(sheetId, cellId) || '');
+    if (!isChannelSendCommandRaw(raw)) continue;
+    results.push({
+      sheetId: sheetId,
+      cellId: cellId,
+      raw: raw,
+      displayValue: String(app.storage.getCellDisplayValue(sheetId, cellId) || ''),
+      value: String(app.storage.getCellComputedValue(sheetId, cellId) || ''),
+      state: String(app.storage.getCellState(sheetId, cellId) || ''),
+      error: String(app.storage.getCellError(sheetId, cellId) || ''),
+    });
+  }
+  return results;
+}
+
+function restoreLocalChannelCommandRuntimeState(app, entries) {
+  var items = Array.isArray(entries) ? entries : [];
+  for (var i = 0; i < items.length; i++) {
+    var entry = items[i] && typeof items[i] === 'object' ? items[i] : null;
+    if (!entry || !entry.sheetId || !entry.cellId) continue;
+    var currentRaw = String(
+      app.storage.getCellValue(entry.sheetId, entry.cellId) || '',
+    );
+    if (currentRaw !== String(entry.raw || '')) continue;
+    app.storage.setCellRuntimeState(entry.sheetId, entry.cellId, {
+      value: entry.value,
+      displayValue: entry.displayValue,
+      state: entry.state,
+      error: entry.error,
+    });
+  }
+}
+
 export function renderCurrentSheetFromStorage(app) {
   if (app.isReportActive()) {
     app.renderReportLiveValues(true);
@@ -274,14 +323,20 @@ export function renderCurrentSheetFromStorage(app) {
         app.activeSheetId,
         input.id,
       );
-      var isEditing = document.activeElement === input;
+      var isEditing =
+        app && typeof app.isEditingCell === 'function'
+          ? app.isEditingCell(input)
+          : document.activeElement === input;
       var literalDisplay = !!raw && raw.charAt(0) === '#';
       var showFormulas = app.displayMode === 'formulas';
+      var isChannelCommand = isChannelSendCommandRaw(raw);
       var displayValue = showFormulas
         ? decorateFormulaMentionsForDisplay(raw)
         : isFormula
           ? storedDisplay
-          : raw;
+          : isChannelCommand && storedDisplay
+            ? storedDisplay
+            : raw;
       var attachment = resolveRenderableAttachment(
         app,
         raw,
@@ -495,6 +550,10 @@ export function computeAll(app) {
         : {},
   })
     .then((result) => {
+      var preservedChannelCommandState =
+        result && result.workbook
+          ? collectLocalChannelCommandRuntimeState(app)
+          : [];
       traceCellUpdateClient(trace, 'compute_call.done', {
         returnedValues:
           result && result.values ? Object.keys(result.values).length : 0,
@@ -516,6 +575,10 @@ export function computeAll(app) {
         typeof app.storage.storage.replaceAll === 'function'
       ) {
         app.storage.storage.replaceAll(result.workbook);
+        restoreLocalChannelCommandRuntimeState(
+          app,
+          preservedChannelCommandState,
+        );
       }
 
       if (result && result.workbook) {
@@ -570,12 +633,18 @@ export function computeAll(app) {
               Object.prototype.hasOwnProperty.call(computedValues, input.id)
                 ? computedValues[input.id]
                 : raw;
-            var isEditing = document.activeElement === input;
+            var isEditing =
+              app && typeof app.isEditingCell === 'function'
+                ? app.isEditingCell(input)
+                : document.activeElement === input;
             var literalDisplay = !!raw && raw.charAt(0) === '#';
             var showFormulas = app.displayMode === 'formulas';
+            var isChannelCommand = isChannelSendCommandRaw(raw);
             var displayValue = showFormulas
               ? decorateFormulaMentionsForDisplay(raw)
-              : value;
+              : isChannelCommand && storedDisplay
+                ? storedDisplay
+                : value;
             var attachment = resolveRenderableAttachment(
               app,
               raw,

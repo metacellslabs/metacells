@@ -232,6 +232,22 @@ function computeCronNextRun(schedule, afterDate) {
   return null;
 }
 
+function formatWeekdayList(daysOfWeek) {
+  const days = Array.isArray(daysOfWeek) ? daysOfWeek : [];
+  if (!days.length) return 'Mon';
+
+  const normalized = normalizeWeekdayList(days);
+  const joined = normalized.join(',');
+  if (joined === '1,2,3,4,5') return 'weekdays';
+  if (joined === '0,6') return 'weekends';
+
+  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return normalized
+    .map((day) => labels[day] || '')
+    .filter(Boolean)
+    .join(', ');
+}
+
 export function computeCellScheduleNextRun(scheduleValue, afterDateValue = new Date()) {
   const schedule = normalizeCellSchedule(scheduleValue);
   if (!schedule || schedule.enabled === false) return null;
@@ -309,7 +325,7 @@ export function describeCellSchedule(scheduleValue) {
     return `Daily at ${schedule.time}`;
   }
   if (schedule.kind === 'weekly') {
-    return `Weekly at ${schedule.time}`;
+    return `Weekly on ${formatWeekdayList(schedule.daysOfWeek)} at ${schedule.time}`;
   }
   if (schedule.kind === 'monthly') {
     return `Monthly on day ${schedule.dayOfMonth} at ${schedule.time}`;

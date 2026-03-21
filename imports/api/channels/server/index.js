@@ -21,7 +21,20 @@ import { getRegisteredChannelHandlerById } from './handlers/index.js';
 
 const activeChannelPolls = new Set();
 const activeChannelSubscriptions = new Map();
+const activeChannelSubscriptionStarts = new Set();
 let channelPollingWorkerStarted = false;
+const CHANNEL_WORKER_LEASE_MS = Math.max(
+  CHANNEL_POLL_INTERVAL_MS * 3,
+  90000,
+);
+const channelWorkerHolderId =
+  'channel-worker-' +
+  String(process.pid || '0') +
+  '-' +
+  Date.now() +
+  '-' +
+  Math.random().toString(36).slice(2);
+let channelWorkerLeaseActive = false;
 
 function logChannelRuntime(event, payload) {
   console.log(`[channels] ${event}`, payload);
@@ -345,6 +358,34 @@ async function pollSingleChannel(channel) {
       };
     }
     const handler = getChannelHandler(connector.id);
+    if (typeof handler.subscribe === 'function') {
+      logChannelRuntime('poll.skip', {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        reason: 'subscribe-supported',
+      });
+      return {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        skipped: true,
+        reason: 'subscribe-supported',
+        events: 0,
+      };
+    }
+    if (activeChannelSubscriptions.has(channelId)) {
+      logChannelRuntime('poll.skip', {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        reason: 'active-subscription',
+      });
+      return {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        skipped: true,
+        reason: 'active-subscription',
+        events: 0,
+      };
+    }
     if (typeof handler.poll !== 'function') {
       logChannelRuntime('poll.skip', {
         channelId,
@@ -494,6 +535,74 @@ async function stopChannelSubscription(channelId) {
   }
 }
 
+async function stopAllChannelSubscriptions() {
+  const channelIds = Array.from(activeChannelSubscriptions.keys());
+  for (let i = 0; i < channelIds.length; i += 1) {
+    await stopChannelSubscription(channelIds[i]);
+  }
+}
+
+async function acquireChannelWorkerLease() {
+  await ensureDefaultSettings();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + CHANNEL_WORKER_LEASE_MS);
+  const updated = await AppSettings.updateAsync(
+    {
+      _id: DEFAULT_SETTINGS_ID,
+      $or: [
+        { 'runtimeLocks.channelWorker.expiresAt': { $exists: false } },
+        { 'runtimeLocks.channelWorker.expiresAt': { $lte: now } },
+        { 'runtimeLocks.channelWorker.holderId': channelWorkerHolderId },
+      ],
+    },
+    {
+      $set: {
+        'runtimeLocks.channelWorker.holderId': channelWorkerHolderId,
+        'runtimeLocks.channelWorker.acquiredAt': now,
+        'runtimeLocks.channelWorker.heartbeatAt': now,
+        'runtimeLocks.channelWorker.expiresAt': expiresAt,
+        updatedAt: now,
+      },
+    },
+  );
+  if (updated > 0) return true;
+  const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID, {
+    fields: { runtimeLocks: 1 },
+  });
+  return (
+    String(
+      current &&
+        current.runtimeLocks &&
+        current.runtimeLocks.channelWorker &&
+        current.runtimeLocks.channelWorker.holderId,
+    ).trim() === channelWorkerHolderId
+  );
+}
+
+async function releaseChannelWorkerLease() {
+  try {
+    await AppSettings.updateAsync(
+      {
+        _id: DEFAULT_SETTINGS_ID,
+        'runtimeLocks.channelWorker.holderId': channelWorkerHolderId,
+      },
+      {
+        $unset: {
+          'runtimeLocks.channelWorker': '',
+        },
+        $set: {
+          updatedAt: new Date(),
+        },
+      },
+    );
+  } catch (error) {
+    logChannelRuntime('worker.lease.release_failed', {
+      holderId: channelWorkerHolderId,
+      message: error && error.message ? error.message : String(error),
+    });
+  }
+}
+
 async function ensureChannelSubscription(channel) {
   const channelId = String((channel && channel.id) || '').trim();
   if (!channelId) return;
@@ -511,8 +620,10 @@ async function ensureChannelSubscription(channel) {
     return;
   }
   if (activeChannelSubscriptions.has(channelId)) return;
+  if (activeChannelSubscriptionStarts.has(channelId)) return;
 
   const settings = normalizeChannelSettings(connector, channel.settings);
+  activeChannelSubscriptionStarts.add(channelId);
   try {
     const cleanup = await handler.subscribe({
       channel,
@@ -562,6 +673,8 @@ async function ensureChannelSubscription(channel) {
       label: String((channel && channel.label) || ''),
       message: error && error.message ? error.message : String(error),
     });
+  } finally {
+    activeChannelSubscriptionStarts.delete(channelId);
   }
 }
 
@@ -591,32 +704,71 @@ async function reconcileChannelSubscriptions() {
 export function startChannelPollingWorker() {
   if (!Meteor.isServer || channelPollingWorkerStarted) return;
   channelPollingWorkerStarted = true;
-  logChannelRuntime('worker.started', { intervalMs: CHANNEL_POLL_INTERVAL_MS });
+  logChannelRuntime('worker.started', {
+    intervalMs: CHANNEL_POLL_INTERVAL_MS,
+    holderId: channelWorkerHolderId,
+  });
   Meteor.startup(() => {
-    Meteor.setTimeout(() => {
-      reconcileChannelSubscriptions().catch((error) => {
-        logChannelRuntime('subscribe.startup.failed', {
+    const tick = async (phase) => {
+      const hasLease = await acquireChannelWorkerLease();
+      if (!hasLease) {
+        if (channelWorkerLeaseActive) {
+          channelWorkerLeaseActive = false;
+          await stopAllChannelSubscriptions();
+          logChannelRuntime('worker.lease.lost', {
+            holderId: channelWorkerHolderId,
+          });
+        } else {
+          logChannelRuntime('worker.lease.standby', {
+            holderId: channelWorkerHolderId,
+          });
+        }
+        return;
+      }
+      if (!channelWorkerLeaseActive) {
+        channelWorkerLeaseActive = true;
+        logChannelRuntime('worker.lease.acquired', {
+          holderId: channelWorkerHolderId,
+        });
+      }
+      try {
+        await reconcileChannelSubscriptions();
+      } catch (error) {
+        logChannelRuntime(`subscribe.${phase}.failed`, {
           message: error && error.message ? error.message : String(error),
         });
-      });
-      pollEnabledChannels().catch((error) => {
-        logChannelRuntime('poll.startup.failed', {
+      }
+      try {
+        await pollEnabledChannels();
+      } catch (error) {
+        logChannelRuntime(`poll.${phase}.failed`, {
+          message: error && error.message ? error.message : String(error),
+        });
+      }
+    };
+
+    Meteor.setTimeout(() => {
+      tick('startup').catch((error) => {
+        logChannelRuntime('worker.tick.startup_failed', {
           message: error && error.message ? error.message : String(error),
         });
       });
     }, 5000);
     Meteor.setInterval(() => {
-      reconcileChannelSubscriptions().catch((error) => {
-        logChannelRuntime('subscribe.interval.failed', {
-          message: error && error.message ? error.message : String(error),
-        });
-      });
-      pollEnabledChannels().catch((error) => {
-        logChannelRuntime('poll.interval.failed', {
+      tick('interval').catch((error) => {
+        logChannelRuntime('worker.tick.interval_failed', {
           message: error && error.message ? error.message : String(error),
         });
       });
     }, CHANNEL_POLL_INTERVAL_MS);
+
+    const release = () => {
+      stopAllChannelSubscriptions().catch(() => {});
+      releaseChannelWorkerLease().catch(() => {});
+    };
+    process.once('SIGINT', release);
+    process.once('SIGTERM', release);
+    process.once('exit', release);
   });
 }
 

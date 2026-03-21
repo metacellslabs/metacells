@@ -471,6 +471,7 @@ async function requeueDeferredJob(job, outcome) {
     250,
     parseInt(outcome && outcome.delayMs, 10) || DEFAULT_RETRY_DELAY_MS,
   );
+  const reason = outcome && outcome.reason ? String(outcome.reason) : '';
   const runAt = new Date(Date.now() + delayMs);
   await Jobs.rawCollection().findOneAndUpdate(
     {
@@ -485,7 +486,7 @@ async function requeueDeferredJob(job, outcome) {
         updatedAt: nowDate(),
         heartbeatAt: nowDate(),
         lockUntil: null,
-        lastError: outcome && outcome.reason ? String(outcome.reason) : '',
+        lastError: reason,
       },
       $unset: {
         leaseTimeoutMs: '',
@@ -500,14 +501,16 @@ async function requeueDeferredJob(job, outcome) {
   );
   await appendJobLog(job, 'deferred', {
     delayMs,
-    reason: outcome && outcome.reason ? String(outcome.reason) : '',
+    reason,
   });
-  log('deferred', {
-    jobId: job._id,
-    type: job.type,
-    delayMs,
-    reason: outcome && outcome.reason ? String(outcome.reason) : '',
-  });
+  if (reason !== 'blocked by edit lock') {
+    log('deferred', {
+      jobId: job._id,
+      type: job.type,
+      delayMs,
+      reason,
+    });
+  }
 }
 
 async function requeueFailedJob(job, error) {

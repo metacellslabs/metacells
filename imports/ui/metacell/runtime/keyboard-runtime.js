@@ -36,7 +36,10 @@ export function setupButtons(app) {
     var activeEl = document.activeElement;
     var isEditableTarget = !!(
       activeEl &&
-      (activeEl === app.formulaInput ||
+      ((activeEl.tagName === 'INPUT' &&
+        !activeEl.readOnly &&
+        !activeEl.disabled) ||
+        activeEl === app.formulaInput ||
         activeEl === app.cellNameInput ||
         activeEl === app.reportEditor ||
         (activeEl.tagName === 'TEXTAREA' &&
@@ -71,6 +74,11 @@ export function setupButtons(app) {
       );
       var shouldUseWorkbookHistory =
         !app.hasPendingLocalEdit() && !isReportEditing;
+      var isDisplayModeShortcut =
+        key === '/' ||
+        key === '?' ||
+        e.code === 'Slash' ||
+        e.code === 'NumpadDivide';
       if (shouldUseWorkbookHistory && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) app.redo();
@@ -82,10 +90,7 @@ export function setupButtons(app) {
         app.redo();
         return;
       }
-      if (
-        shouldUseWorkbookHistory &&
-        (key === '/' || key === '?' || e.code === 'Slash')
-      ) {
+      if (!isReportEditing && isDisplayModeShortcut) {
         e.preventDefault();
         app.setDisplayMode(
           app.displayMode === 'formulas' ? 'values' : 'formulas',
@@ -563,12 +568,15 @@ export function bindGridInputEvents(app) {
           (app.selectionRange.startCol !== app.selectionRange.endCol ||
             app.selectionRange.startRow !== app.selectionRange.endRow)
         );
+        if (isEditing) {
+          return;
+        }
         if (!isEditing && !hasTextSelection) {
           e.preventDefault();
           app.clearSelectedCells();
           return;
         }
-        if (isEditing && hasMultiCellSelection) {
+        if (hasMultiCellSelection) {
           e.preventDefault();
           app.clearSelectedCells();
           return;
