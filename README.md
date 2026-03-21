@@ -365,6 +365,18 @@ The package commands prepare a bundled local backend before packaging:
 
 The first packaging run may take longer because it downloads the MongoDB binary.
 
+### Run with Docker
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+```text
+http://localhost:3400
+```
+
 ## First 3 minutes
 
 1. Open MetaCells.
