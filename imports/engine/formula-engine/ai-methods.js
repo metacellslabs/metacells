@@ -853,6 +853,7 @@ export const aiMethods = {
   parseTablePromptSpec(rawValue) {
     var raw = String(rawValue == null ? '' : rawValue);
     if (!raw || raw.charAt(0) !== '#') return null;
+    if (/\r|\n/.test(raw)) return null;
 
     var parsed = this.parseFormulaDisplayPlaceholder(
       this.stripOptionalFormulaQuestionMarker(raw.substring(1)),

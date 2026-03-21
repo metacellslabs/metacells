@@ -743,7 +743,7 @@ export function setupCellFormatControls(app) {
   });
   app.cellFormatOptions.forEach(function (option) {
     option.addEventListener('click', function () {
-      if (!app.activeInput || app.isReportActive()) return;
+      if (!app.activeCellId || app.isReportActive()) return;
       app.captureHistorySnapshot('cell-format');
       var cellIds = getSelectedRegionCellIds(app);
       var value = String(option.getAttribute('data-format') || 'text');
@@ -781,7 +781,7 @@ export function setupCellPresentationControls(app) {
     app.syncCellPresentationControls();
     app.cellAlignButtons.forEach(function (button) {
       button.addEventListener('click', function () {
-        if (!app.activeInput || app.isReportActive() || button.disabled) return;
+        if (!app.activeCellId || app.isReportActive() || button.disabled) return;
         applyPresentationToSelection(
           app,
           {
@@ -794,10 +794,10 @@ export function setupCellPresentationControls(app) {
   }
   if (app.cellBoldButton) {
     app.cellBoldButton.addEventListener('click', () => {
-      if (!app.activeInput || app.isReportActive()) return;
+      if (!app.activeCellId || app.isReportActive()) return;
       var current = app.storage.getCellPresentation(
         app.activeSheetId,
-        app.activeInput.id,
+        app.activeCellId,
       );
       applyPresentationToSelection(
         app,
@@ -810,10 +810,10 @@ export function setupCellPresentationControls(app) {
   }
   if (app.cellItalicButton) {
     app.cellItalicButton.addEventListener('click', () => {
-      if (!app.activeInput || app.isReportActive()) return;
+      if (!app.activeCellId || app.isReportActive()) return;
       var current = app.storage.getCellPresentation(
         app.activeSheetId,
-        app.activeInput.id,
+        app.activeCellId,
       );
       applyPresentationToSelection(
         app,
@@ -981,10 +981,10 @@ export function setupCellPresentationControls(app) {
   }
   if (app.cellWrapButton) {
     app.cellWrapButton.addEventListener('click', () => {
-      if (!app.activeInput || app.isReportActive()) return;
+      if (!app.activeCellId || app.isReportActive()) return;
       var current = app.storage.getCellPresentation(
         app.activeSheetId,
-        app.activeInput.id,
+        app.activeCellId,
       );
       applyPresentationToSelection(
         app,
@@ -1018,7 +1018,7 @@ export function setupCellPresentationControls(app) {
 }
 
 export function applyPresentationToSelection(app, updates, historyKey) {
-  if (!app.activeInput || app.isReportActive()) return;
+  if (!app.activeCellId || app.isReportActive()) return;
   app.captureHistorySnapshot(historyKey);
   var cellIds = getSelectedRegionCellIds(app);
   for (var i = 0; i < cellIds.length; i++) {
@@ -1034,13 +1034,14 @@ function getSelectedRegionCellIds(app) {
       ? app.getSelectedCellIds()
       : [];
   if (!Array.isArray(cellIds) || !cellIds.length) {
-    return app.activeInput ? [app.activeInput.id] : [];
+    return app.activeCellId ? [app.activeCellId] : [];
   }
   return cellIds;
 }
 
-export function commitFormulaBarValue(app) {
-  if (!app.activeInput) return;
+export function commitFormulaBarValue(app, options) {
+  var activeInput = app.getActiveCellInput ? app.getActiveCellInput() : null;
+  if (!activeInput) return;
   if (
     app.crossTabMentionContext &&
     app.activeSheetId !== app.crossTabMentionContext.sourceSheetId
@@ -1048,51 +1049,29 @@ export function commitFormulaBarValue(app) {
     return;
 
   var raw = String(app.formulaInput ? app.formulaInput.value : '');
-  var existingRaw = String(app.getRawCellValue(app.activeInput.id) || '');
-  var existingAttachment = app.parseAttachmentSource(existingRaw);
-  if (existingAttachment && raw === String(existingAttachment.name || '')) {
-    app.activeInput.parentElement.classList.remove('formula-bar-editing');
-    return;
-  }
-  if (app.aiService && typeof app.aiService.setEditDraftLock === 'function') {
-    app.aiService.setEditDraftLock(false);
-  }
-  app.syncServerEditLock(false);
-  if (app.runTablePromptForCell(app.activeInput.id, raw, app.activeInput))
-    return;
-  if (app.runQuotedPromptForCell(app.activeInput.id, raw, app.activeInput))
-    return;
-
-  app.activeInput.value = raw;
-  app.activeInput.parentElement.classList.remove('formula-bar-editing');
-  app.commitRawCellEdit(
-    app.activeInput.id,
-    raw,
-    app.beginCellUpdateTrace(app.activeInput.id, raw),
-  );
+  app.commitFormulaBarEditing(activeInput, {
+    rawValue: raw,
+    origin: 'formula-bar',
+    restoreFocus: !!(options && options.restoreFocus),
+  });
 }
 
 export function bindFormulaBarEvents(app) {
   app.formulaInput.addEventListener('input', (e) => {
-    if (!app.activeInput) return;
+    var activeInput = app.getActiveCellInput ? app.getActiveCellInput() : null;
+    if (!activeInput) return;
     var raw = e.target.value;
     if (!app.crossTabMentionContext) {
-      if (!app.isEditingCell(app.activeInput)) {
-        app.grid.setEditing(app.activeInput, true);
-        if (
-          !Object.prototype.hasOwnProperty.call(
-            app.editStartRawByCell,
-            app.activeInput.id,
-          )
-        ) {
-          app.editStartRawByCell[app.activeInput.id] = app.getRawCellValue(
-            app.activeInput.id,
-          );
-        }
-      }
-      app.activeInput.parentElement.classList.add('formula-bar-editing');
-      app.activeInput.value = raw;
+      app.enterFormulaBarEditing(activeInput, {
+        draftRaw: raw,
+        origin: 'formula-bar',
+      });
+      app.syncCellDraft(activeInput, raw, {
+        origin: 'formula-bar',
+        syncFormula: false,
+      });
     }
+    app.updateEditingSessionDraft(raw, { origin: 'formula-bar' });
     app.syncCrossTabMentionSourceValue(raw);
     app.syncAIDraftLock();
     app.syncAIModeUI();
@@ -1100,7 +1079,8 @@ export function bindFormulaBarEvents(app) {
   });
 
   app.formulaInput.addEventListener('keydown', (e) => {
-    if (!app.activeInput) return;
+    var activeInput = app.getActiveCellInput ? app.getActiveCellInput() : null;
+    if (!activeInput) return;
     if (app.handleMentionAutocompleteKeydown(e, app.formulaInput)) return;
     if (e.key === 'Enter' && app.finishCrossTabMentionAndReturnToSource()) {
       e.preventDefault();
@@ -1108,35 +1088,21 @@ export function bindFormulaBarEvents(app) {
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      app.commitFormulaBarValue();
-      app.activeInput.focus();
+      app.commitFormulaBarValue({ restoreFocus: true });
       return;
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      var restoreValue = Object.prototype.hasOwnProperty.call(
-        app.editStartRawByCell,
-        app.activeInput.id,
-      )
-        ? app.editStartRawByCell[app.activeInput.id]
-        : app.getRawCellValue(app.activeInput.id);
-      app.formulaInput.value = restoreValue;
-      app.activeInput.value = restoreValue;
-      app.activeInput.parentElement.classList.remove('formula-bar-editing');
-      app.grid.setEditing(app.activeInput, false);
-      delete app.editStartRawByCell[app.activeInput.id];
-      app.formulaRefCursorId = null;
-      app.formulaMentionPreview = null;
-      app.syncAIDraftLock();
+      app.cancelCellEditing(activeInput);
       app.suppressFormulaBarBlurCommitOnce = true;
-      app.activeInput.focus();
+      app.restoreFocusAfterEditingExit();
     }
   });
   app.formulaInput.addEventListener('blur', () => {
     var suppressCommit = app.suppressFormulaBarBlurCommitOnce;
     app.suppressFormulaBarBlurCommitOnce = false;
     if (!suppressCommit) {
-      app.commitFormulaBarValue();
+      app.commitFormulaBarValue({ restoreFocus: false });
     }
     app.syncAIDraftLock();
     app.syncAIModeUI();
@@ -1167,13 +1133,13 @@ export function setupCellNameControls(app) {
       if (!tryNavigateFromCellNameInput(app)) {
         app.applyActiveCellName();
         closeNamedCellJumpPicker(app);
-        if (app.activeInput) app.activeInput.focus();
+        app.focusActiveEditor();
       }
       return;
     }
     if (e.key === 'Escape') {
       closeNamedCellJumpPicker(app);
-      if (app.activeInput) app.activeInput.focus();
+      app.focusActiveEditor();
       app.syncCellNameInput();
     }
   });
@@ -1259,26 +1225,28 @@ export function setupCellNameControls(app) {
 }
 
 export function syncCellNameInput(app) {
-  if (!app.activeInput) {
+  var activeCellId = String(app.activeCellId || '');
+  if (!activeCellId) {
     app.cellNameInput.value = '';
     return;
   }
-  if (document.activeElement === app.cellNameInput) return;
+  if (typeof app.isEditorElementFocused === 'function' && app.isEditorElementFocused(app.cellNameInput)) return;
   app.cellNameInput.value =
-    app.storage.getCellNameFor(app.activeSheetId, app.activeInput.id) ||
-    String(app.activeInput.id || '');
+    app.storage.getCellNameFor(app.activeSheetId, activeCellId) ||
+    activeCellId;
   syncNamedCellJumpSearch(app, false);
 }
 
 export function syncCellFormatControl(app) {
   if (!app.cellFormatButton) return;
-  if (!app.activeInput || app.isReportActive()) {
+  var activeCellId = String(app.activeCellId || '');
+  if (!activeCellId || app.isReportActive()) {
     app.cellFormatButton.disabled = true;
     closeCellFormatPicker(app);
     return;
   }
   app.cellFormatButton.disabled = false;
-  var currentFormat = String(app.getCellFormat(app.activeInput.id) || 'text');
+  var currentFormat = String(app.getCellFormat(activeCellId) || 'text');
   app.cellFormatOptions.forEach(function (option) {
     option.classList.toggle(
       'is-active',
@@ -1291,7 +1259,8 @@ export function syncCellPresentationControls(app) {
   if (app && typeof app.syncRegionRecordingControls === 'function') {
     app.syncRegionRecordingControls();
   }
-  var disabled = !app.activeInput || app.isReportActive();
+  var activeCellId = String(app.activeCellId || '');
+  var disabled = !activeCellId || app.isReportActive();
   var presentation = disabled
     ? {
         align: 'left',
@@ -1304,7 +1273,7 @@ export function syncCellPresentationControls(app) {
         fontSize: 14,
         borders: { top: false, right: false, bottom: false, left: false },
       }
-    : app.getCellPresentation(app.activeInput.id);
+    : app.getCellPresentation(activeCellId);
 
   if (app.cellAlignButtons && app.cellAlignButtons.length) {
     app.cellAlignButtons.forEach(function (button) {
@@ -1395,8 +1364,9 @@ function getSelectedRegionBounds(app) {
       endRow: app.selectionRange.endRow,
     };
   }
-  if (!app.activeInput) return null;
-  var parsed = app.parseCellId(app.activeInput.id);
+  var activeCellId = String(app.activeCellId || '');
+  if (!activeCellId) return null;
+  var parsed = app.parseCellId(activeCellId);
   if (!parsed) return null;
   return {
     startCol: parsed.col,
@@ -1407,7 +1377,7 @@ function getSelectedRegionBounds(app) {
 }
 
 function applyBordersPresetToSelection(app, preset) {
-  if (!app.activeInput || app.isReportActive()) return;
+  if (!app.activeCellId || app.isReportActive()) return;
   var bounds = getSelectedRegionBounds(app);
   if (!bounds) return;
   app.captureHistorySnapshot('cell-borders');
@@ -1493,11 +1463,12 @@ function normalizeBorders(borders) {
 }
 
 function adjustDecimalPlaces(app, delta) {
-  if (!app.activeInput || app.isReportActive()) return;
-  var current = app.getCellPresentation(app.activeInput.id);
+  var activeCellId = String(app.activeCellId || '');
+  if (!activeCellId || app.isReportActive()) return;
+  var current = app.getCellPresentation(activeCellId);
   var next = Number.isInteger(current.decimalPlaces)
     ? current.decimalPlaces
-    : getDefaultDecimalPlaces(app.getCellFormat(app.activeInput.id));
+    : getDefaultDecimalPlaces(app.getCellFormat(activeCellId));
   next = Math.max(0, Math.min(6, next + delta));
   applyPresentationToSelection(
     app,
@@ -1527,8 +1498,9 @@ function getDefaultDecimalPlaces(format) {
 }
 
 function adjustFontSize(app, delta) {
-  if (!app.activeInput || app.isReportActive()) return;
-  var current = app.getCellPresentation(app.activeInput.id);
+  var activeCellId = String(app.activeCellId || '');
+  if (!activeCellId || app.isReportActive()) return;
+  var current = app.getCellPresentation(activeCellId);
   var next = Math.max(10, Math.min(28, Number(current.fontSize || 14) + delta));
   applyPresentationToSelection(
     app,
@@ -1540,7 +1512,7 @@ function adjustFontSize(app, delta) {
 }
 
 export function applyActiveCellName(app) {
-  if (!app.activeInput) {
+  if (!app.activeCellId) {
     alert('Select a cell first.');
     return;
   }
@@ -1565,7 +1537,7 @@ export function applyActiveCellName(app) {
   app.captureHistorySnapshot('named-cell:' + app.activeSheetId);
   var result = app.storage.setCellName(
     app.activeSheetId,
-    app.activeInput.id,
+    app.activeCellId,
     app.cellNameInput.value,
     rangeRef,
   );
@@ -1582,7 +1554,8 @@ export function refreshNamedCellJumpOptions(app) {
   syncNamedCellJumpSearch(
     app,
     !app.namedCellJumpPopover.hidden &&
-      document.activeElement === app.cellNameInput,
+      typeof app.isEditorElementFocused === 'function' &&
+      app.isEditorElementFocused(app.cellNameInput),
   );
 }
 

@@ -367,6 +367,9 @@ export function switchToSheet(app, sheetId) {
   app.syncCellNameInput();
   app.renderCurrentSheetFromStorage();
   app.ensureActiveCell();
+  if (typeof app.restoreGridKeyboardFocusSoon === 'function') {
+    app.restoreGridKeyboardFocusSoon();
+  }
   setTimeout(function () {
     if (app.activeSheetId !== sheetId || app.isReportActive()) return;
     app.computeAll();

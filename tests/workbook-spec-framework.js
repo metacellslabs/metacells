@@ -100,6 +100,23 @@ function createAttachmentSource(specFilePath, cellSpec) {
   })}`;
 }
 
+function getExpectationTextCandidates(cell) {
+  const value = String(cell && cell.value == null ? '' : cell.value);
+  const candidates = [value];
+  if (value.indexOf('__ATTACHMENT__:') !== 0) return candidates;
+  try {
+    const attachment = JSON.parse(value.slice('__ATTACHMENT__:'.length));
+    const content = String(
+      attachment && attachment.content != null ? attachment.content : '',
+    );
+    if (content) candidates.push(content);
+    if (attachment && attachment.encoding === 'base64' && content) {
+      candidates.push(Buffer.from(content, 'base64').toString('utf8'));
+    }
+  } catch (error) {}
+  return candidates;
+}
+
 function emptyWorkbook() {
   return {
     version: 1,
@@ -532,9 +549,10 @@ async function assertCellExpectation(sheetId, expectation) {
         );
       }
       if (Object.prototype.hasOwnProperty.call(expectation, 'contains')) {
+        const candidates = getExpectationTextCandidates(cell);
         assert.ok(
-          String(cell.value == null ? '' : cell.value).includes(
-            String(expectation.contains),
+          candidates.some((text) =>
+            String(text).includes(String(expectation.contains)),
           ),
           `Expected ${ref.sheetId}:${ref.cellId} value to contain ${expectation.contains}`,
         );

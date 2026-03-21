@@ -178,6 +178,53 @@ function buildTableInstruction(colsLimit, rowsLimit) {
   return buildTableSystemPrompt(colsLimit, rowsLimit);
 }
 
+export function buildOpenAIResponsesInput(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  return source.map((message) => {
+    const item = message && typeof message === 'object' ? message : {};
+    const input = Array.isArray(item.content)
+      ? item.content
+          .map((part) => {
+            if (!part || typeof part !== 'object') return null;
+            if (part.type === 'text') {
+              return {
+                type: 'input_text',
+                text: String(part.text == null ? '' : part.text),
+              };
+            }
+            if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+              return {
+                type: 'input_image',
+                image_url: String(part.image_url.url || ''),
+              };
+            }
+            return null;
+          })
+          .filter(Boolean)
+      : [
+          {
+            type: 'input_text',
+            text: String(item.content == null ? '' : item.content),
+          },
+        ];
+    return {
+      role: String(item.role || 'user'),
+      content: input,
+    };
+  });
+}
+
+export function extractOpenAIResponsesText(payload) {
+  const output = Array.isArray(payload && payload.output) ? payload.output : [];
+  return output
+    .flatMap((item) =>
+      Array.isArray(item && item.content) ? item.content : [],
+    )
+    .filter((part) => part && part.type === 'output_text')
+    .map((part) => String(part.text == null ? '' : part.text))
+    .join('');
+}
+
 async function fetchModelFromServer() {
   const provider = await getActiveAIProvider();
   const providerKey = [provider.type, provider.baseUrl, provider.model].join(

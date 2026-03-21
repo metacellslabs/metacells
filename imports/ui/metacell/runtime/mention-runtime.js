@@ -93,9 +93,17 @@ export function updateMentionAutocomplete(app, input) {
 }
 
 export function getMentionAutocompleteContext(app, input) {
-  if (!input || typeof input.selectionStart !== 'number') return null;
-  var start = input.selectionStart;
-  var end = input.selectionEnd;
+  if (!input) return null;
+  var range =
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input)
+      : {
+          start:
+            typeof input.selectionStart === 'number' ? input.selectionStart : 0,
+          end: typeof input.selectionEnd === 'number' ? input.selectionEnd : 0,
+        };
+  var start = range.start;
+  var end = range.end;
   if (start !== end) return null;
   var value = String(input.value == null ? '' : input.value);
   var left = value.slice(0, start);
@@ -297,17 +305,24 @@ export function applyMentionAutocompleteSelection(app, index) {
   var next = value.slice(0, state.start) + item.token + value.slice(state.end);
   input.value = next;
   var caret = state.start + item.token.length;
-  if (typeof input.setSelectionRange === 'function')
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(caret, caret, input);
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(caret, caret);
+  }
   input.focus();
 
   if (input === app.formulaInput) {
     if (app.activeInput) {
-      app.activeInput.value = next;
+      app.syncActiveEditorValue(next, { syncOverlay: false });
       app.setRawCellValue(app.activeInput.id, next);
     }
+  } else if (input === app.editorOverlayInput) {
+    if (app.activeInput) {
+      app.syncActiveEditorValue(next);
+    }
   } else if (app.activeInput === input) {
-    app.formulaInput.value = next;
+    app.syncActiveEditorValue(next, { syncOverlay: false });
   }
 
   hideMentionAutocomplete(app);
@@ -402,18 +417,26 @@ export function insertTextIntoInputAtCursor(app, input, text) {
   if (!insertion) return;
 
   var start =
-    typeof input.selectionStart === 'number'
-      ? input.selectionStart
-      : value.length;
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input).start
+      : typeof input.selectionStart === 'number'
+        ? input.selectionStart
+        : value.length;
   var end =
-    typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input).end
+      : typeof input.selectionEnd === 'number'
+        ? input.selectionEnd
+        : value.length;
   var needsSpace =
     start > 0 && !/\s|\(|,|\+|-|\*|\/|:/.test(value.charAt(start - 1));
   var prefix = needsSpace ? ' ' : '';
   var nextValue = value.slice(0, start) + prefix + insertion + value.slice(end);
   input.value = nextValue;
   var cursor = start + prefix.length + insertion.length;
-  if (typeof input.setSelectionRange === 'function') {
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(cursor, cursor, input);
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(cursor, cursor);
   }
 }
@@ -423,12 +446,21 @@ export function applyFormulaMentionPreview(app, input, token) {
   var text = String(token == null ? '' : token);
   if (!text) return;
   var value = String(input.value == null ? '' : input.value);
-  var caretStart =
-    typeof input.selectionStart === 'number'
-      ? input.selectionStart
-      : value.length;
-  var caretEnd =
-    typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+  var range =
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input)
+      : {
+          start:
+            typeof input.selectionStart === 'number'
+              ? input.selectionStart
+              : value.length,
+          end:
+            typeof input.selectionEnd === 'number'
+              ? input.selectionEnd
+              : value.length,
+        };
+  var caretStart = range.start;
+  var caretEnd = range.end;
 
   if (
     app.formulaMentionPreview &&
@@ -452,11 +484,20 @@ export function applyFormulaMentionPreview(app, input, token) {
       input.value = value;
       app.formulaMentionPreview.start = start;
       app.formulaMentionPreview.end = start + text.length;
-      if (typeof input.setSelectionRange === 'function') {
+      if (app && typeof app.setEditorSelectionRange === 'function') {
+        app.setEditorSelectionRange(
+          app.formulaMentionPreview.end,
+          app.formulaMentionPreview.end,
+          input,
+        );
+      } else if (typeof input.setSelectionRange === 'function') {
         input.setSelectionRange(
           app.formulaMentionPreview.end,
           app.formulaMentionPreview.end,
         );
+      }
+      if (typeof app.updateEditingSessionDraft === 'function') {
+        app.updateEditingSessionDraft(input.value, { origin: 'cell' });
       }
       return;
     }
@@ -476,11 +517,20 @@ export function applyFormulaMentionPreview(app, input, token) {
     start: startPos,
     end: startPos + inserted.length,
   };
-  if (typeof input.setSelectionRange === 'function') {
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(
+      app.formulaMentionPreview.end,
+      app.formulaMentionPreview.end,
+      input,
+    );
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(
       app.formulaMentionPreview.end,
       app.formulaMentionPreview.end,
     );
+  }
+  if (typeof app.updateEditingSessionDraft === 'function') {
+    app.updateEditingSessionDraft(input.value, { origin: 'cell' });
   }
 }
 

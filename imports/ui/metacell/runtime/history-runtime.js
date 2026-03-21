@@ -5,9 +5,11 @@ export function createHistoryEntry(app) {
     workbook: workbook,
     activeSheetId: String(app.activeSheetId || ''),
     activeCellId:
-      app.activeInput && app.activeInput.id
-        ? String(app.activeInput.id).toUpperCase()
-        : 'A1',
+      app.activeCellId
+        ? String(app.activeCellId).toUpperCase()
+        : app.activeInput && app.activeInput.id
+          ? String(app.activeInput.id).toUpperCase()
+          : 'A1',
   };
 }
 
@@ -59,6 +61,8 @@ export function applyWorkbookHistorySnapshot(app, serialized) {
   var previousCellId =
     entry && entry.activeCellId
       ? String(entry.activeCellId).toUpperCase()
+      : app.activeCellId
+        ? String(app.activeCellId).toUpperCase()
       : app.activeInput && app.activeInput.id
         ? app.activeInput.id
         : 'A1';

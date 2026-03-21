@@ -194,12 +194,11 @@ function getAttachmentDisplayValue(app, rawValue) {
 }
 
 function syncActiveAttachmentValue(app, cellId, rawValue) {
-  if (!app.activeInput || app.activeInput.id !== String(cellId || '').toUpperCase()) {
+  if (String(app.activeCellId || '') !== String(cellId || '').toUpperCase()) {
     return;
   }
   var displayValue = getAttachmentDisplayValue(app, rawValue);
-  app.activeInput.value = displayValue;
-  app.formulaInput.value = displayValue;
+  app.syncActiveEditorValue(displayValue);
 }
 
 function resolveCellAttachment(app, sheetId, cellId) {
@@ -331,13 +330,14 @@ export function setupAttachmentControls(app) {
   app.syncAttachButtonState();
   if (app.attachFileButton) {
     app.attachFileButton.addEventListener('click', () => {
+      var activeInput = app.getActiveCellInput ? app.getActiveCellInput() : null;
+      var cellId = String(app.activeCellId || '').toUpperCase();
       if (
         !app.hasSingleSelectedCell() ||
-        !app.activeInput ||
+        !cellId ||
         !app.attachFileInput
       )
         return;
-      var cellId = String(app.activeInput.id || '').toUpperCase();
       var previousValue = app.getRawCellValue(cellId);
       app.pendingAttachmentContext = {
         sheetId: app.activeSheetId,
@@ -374,7 +374,9 @@ export function setupAttachmentControls(app) {
       if (contentPreviewButton) {
         var previewTd =
           e.target && e.target.closest ? e.target.closest('td') : null;
-        var previewInput = previewTd ? previewTd.querySelector('input') : null;
+        var previewInput = previewTd
+          ? previewTd.querySelector('.cell-anchor-input')
+          : null;
         if (!previewInput) return;
         e.preventDefault();
         e.stopPropagation();
@@ -391,7 +393,7 @@ export function setupAttachmentControls(app) {
       }
       if (!selectButton && !removeButton) return;
       var td = e.target && e.target.closest ? e.target.closest('td') : null;
-      var input = td ? td.querySelector('input') : null;
+      var input = td ? td.querySelector('.cell-anchor-input') : null;
       if (!input) return;
       e.preventDefault();
       e.stopPropagation();
@@ -487,7 +489,9 @@ export function setupAttachmentControls(app) {
   }
 
   var applyChannelBindingSelection = function () {
-    if (!app.activeInput) {
+    var activeCellId = String(app.activeCellId || '').toUpperCase();
+    var activeInput = app.getActiveCellInput ? app.getActiveCellInput() : null;
+    if (!activeCellId) {
       syncChannelBindingControl(app);
       return;
     }
@@ -498,7 +502,7 @@ export function setupAttachmentControls(app) {
       var existingRaw = String(
         app.formulaInput && app.formulaInput.value != null
           ? app.formulaInput.value
-          : app.getRawCellValue(app.activeInput.id),
+          : app.getRawCellValue(activeCellId),
       );
       channelLabel = getBoundChannelLabel(app, existingRaw);
     }
@@ -512,7 +516,7 @@ export function setupAttachmentControls(app) {
     var currentRaw = String(
       app.formulaInput && app.formulaInput.value != null
         ? app.formulaInput.value
-        : app.getRawCellValue(app.activeInput.id),
+        : app.getRawCellValue(activeCellId),
     );
     var nextRaw = buildChannelBindingRaw(
       app,
@@ -526,22 +530,15 @@ export function setupAttachmentControls(app) {
       return;
     }
 
-    if (
-      !Object.prototype.hasOwnProperty.call(
-        app.editStartRawByCell,
-        app.activeInput.id,
-      )
-    ) {
-      app.editStartRawByCell[app.activeInput.id] = app.getRawCellValue(
-        app.activeInput.id,
-      );
+    if (!activeInput) {
+      syncChannelBindingControl(app);
+      return;
     }
-    app.activeInput.parentElement.classList.add('formula-bar-editing');
-    app.grid.setEditing(app.activeInput, true);
-    app.activeInput.value = nextRaw;
-    if (app.formulaInput) {
-      app.formulaInput.value = nextRaw;
-    }
+    app.enterFormulaBarEditing(activeInput, {
+      draftRaw: nextRaw,
+      origin: 'formula-bar',
+    });
+    app.syncActiveEditorValue(nextRaw, { syncOverlay: false });
     app.commitFormulaBarValue();
     focusFormulaInputAtEnd(app);
     syncChannelBindingControl(app);
@@ -570,8 +567,8 @@ export function syncChannelBindingControl(app) {
     !!(app.isReportActive && app.isReportActive()) ||
     !app.hasSingleSelectedCell() ||
     !channels.length;
-  var currentRaw =
-    app && app.activeInput ? app.getRawCellValue(app.activeInput.id) : '';
+  var activeCellId = String(app.activeCellId || '').toUpperCase();
+  var currentRaw = activeCellId ? app.getRawCellValue(activeCellId) : '';
   var currentLabel = getBoundChannelLabel(app, currentRaw);
   var currentMode = getChannelBindingMode(app, currentRaw);
 

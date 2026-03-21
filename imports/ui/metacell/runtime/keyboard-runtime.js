@@ -1,4 +1,8 @@
 import { applyPresentationToSelection } from './editor-controls-runtime.js';
+import {
+  bindCellInputEditingEvents,
+  bindOverlayEditingInputEvents,
+} from './editing-input-runtime.js';
 
 export function setupButtons(app) {
   app.addTabButton.addEventListener('click', (e) => {
@@ -294,12 +298,14 @@ export function prepareContextFromCell(app, td) {
     colIndex <= maxCol
   ) {
     var cellId = app.cellIdFrom(colIndex, rowIndex);
-    var input = app.inputById[cellId];
+    var input = resolveSpillSourceInput(app, app.inputById[cellId]);
     if (input) {
       app.setActiveInput(input);
-      app.setSelectionAnchor(cellId);
+      app.setSelectionAnchor(input.id);
       app.clearSelectionRange();
-      input.focus();
+      if (typeof app.focusCellProxy === 'function') {
+        app.focusCellProxy(input);
+      }
     }
     app.contextMenuState = { type: 'cell', row: rowIndex, col: colIndex };
   }
@@ -351,415 +357,265 @@ export function hideContextMenu(app) {
   app.contextMenu.style.display = 'none';
 }
 
-export function bindGridInputEvents(app) {
-  app.inputs.forEach((input) => {
-    input.addEventListener('focus', (e) => {
-      app.setActiveInput(e.target);
-      app.syncAIDraftLock();
-    });
+function resolveSpillSourceInput(app, input) {
+  if (!app || !input) return input;
+  if (typeof app.getSpillSourceForCell !== 'function') return input;
+  var sourceCellId = app.getSpillSourceForCell(app.activeSheetId, input.id);
+  if (!sourceCellId || sourceCellId === String(input.id || '').toUpperCase()) {
+    return input;
+  }
+  return (app.inputById && app.inputById[sourceCellId]) || input;
+}
 
-    input.addEventListener('blur', (e) => {
-      var wasEditing = app.isEditingCell(e.target);
-      app.grid.setEditing(e.target, false);
-      app.syncAIDraftLock();
-      if (!wasEditing) return;
-      if (app.suppressBlurCommitOnce) {
-        app.suppressBlurCommitOnce = false;
-        delete app.editStartRawByCell[e.target.id];
-        return;
-      }
-      if (
-        app.crossTabMentionContext &&
-        app.activeSheetId !== app.crossTabMentionContext.sourceSheetId
-      ) {
-        if (app.activeInput === e.target) {
-          app.formulaInput.value = app.crossTabMentionContext.value;
-        }
-        delete app.editStartRawByCell[e.target.id];
-        return;
-      }
-      app.formulaRefCursorId = null;
-      app.formulaMentionPreview = null;
-      var raw = String(e.target.value == null ? '' : e.target.value);
-      var existingRaw = String(app.getRawCellValue(e.target.id) || '');
-      var existingAttachment = app.parseAttachmentSource(existingRaw);
-      if (existingAttachment && raw === String(existingAttachment.name || '')) {
-        delete app.editStartRawByCell[e.target.id];
-        if (app.activeInput === e.target) {
-          app.formulaInput.value = String(existingAttachment.name || '');
-        }
-        return;
-      }
-      var hasChanged = app.hasRawCellChanged(e.target.id, raw);
-      if (!hasChanged) {
-        if (app.activeInput === e.target) {
-          app.formulaInput.value = raw;
-        }
-        delete app.editStartRawByCell[e.target.id];
-        return;
-      }
-      if (app.runTablePromptForCell(e.target.id, raw, e.target)) {
-        delete app.editStartRawByCell[e.target.id];
-        return;
-      }
-      if (app.runQuotedPromptForCell(e.target.id, raw, e.target)) {
-        delete app.editStartRawByCell[e.target.id];
-        return;
-      }
-      app.commitRawCellEdit(
-        e.target.id,
-        raw,
-        app.beginCellUpdateTrace(e.target.id, raw),
-      );
-      delete app.editStartRawByCell[e.target.id];
-    });
+function bindCellFocusProxyEvents(app, input) {
+  var proxy =
+    app.grid && typeof app.grid.getFocusProxy === 'function'
+      ? app.grid.getFocusProxy(input)
+      : input.parentElement.querySelector('.cell-focus-proxy');
+  if (!proxy) return;
 
-    input.addEventListener('keydown', (e) => {
-      if (app.handleMentionAutocompleteKeydown(e, input)) return;
-      if (
-        app.isEditingCell(input) &&
-        (e.key === 'ArrowUp' ||
-          e.key === 'ArrowDown' ||
-          e.key === 'ArrowLeft' ||
-          e.key === 'ArrowRight') &&
-        app.canInsertFormulaMention(input.value)
-      ) {
-        e.preventDefault();
-        var baseCellId = app.getFormulaMentionBaseCellId(input.id, e.key);
-        var targetCellId =
-          e.metaKey || e.ctrlKey
-            ? app.findJumpTargetCellId(baseCellId, e.key)
-            : app.findAdjacentCellId(baseCellId, e.key);
-        if (!targetCellId) return;
+  proxy.addEventListener('focus', () => {
+    app.setActiveInput(input);
+    app.syncAIDraftLock();
+  });
 
-        if (e.shiftKey) {
-          if (!app.selectionRange) {
-            app.setSelectionAnchor(baseCellId);
-            app.setSelectionRange(baseCellId, targetCellId);
-          } else {
-            app.extendSelectionRangeTowardCell(targetCellId, e.key);
-          }
-        } else {
-          app.setSelectionAnchor(targetCellId);
-          app.setSelectionRange(targetCellId, targetCellId);
-        }
-
-        app.formulaRefCursorId = targetCellId;
-        var mentionToken = app.buildMentionTokenForSelection(
-          targetCellId,
-          !!e.shiftKey,
-        );
-        app.applyFormulaMentionPreview(input, mentionToken);
-        if (app.activeInput === input) app.formulaInput.value = input.value;
-        return;
-      }
-      if (!app.isEditingCell(input) && app.isDirectTypeKey(e)) {
-        e.preventDefault();
-        app.clearSelectionRange();
-        app.startEditingCell(input);
-        input.value = e.key;
-        if (app.activeInput === input) app.formulaInput.value = input.value;
-        return;
-      }
-      if (!e.metaKey && !e.ctrlKey && e.key === 'Enter') {
-        if (app.finishCrossTabMentionAndReturnToSource()) {
-          e.preventDefault();
-          return;
-        }
-        if (!app.isEditingCell(input)) {
-          e.preventDefault();
-          app.startEditingCell(input);
-          return;
-        }
-        var hasChanged = app.hasRawCellChanged(input.id, input.value);
-        if (
-          hasChanged &&
-          app.runTablePromptForCell(input.id, input.value, input)
-        ) {
-          e.preventDefault();
-          app.clearSelectionRange();
-          app.grid.focusCellByArrow(
-            input,
-            e.shiftKey ? 'ArrowRight' : 'ArrowDown',
-          );
-          return;
-        }
-        if (
-          hasChanged &&
-          app.runQuotedPromptForCell(input.id, input.value, input)
-        ) {
-          e.preventDefault();
-          app.clearSelectionRange();
-          app.grid.focusCellByArrow(
-            input,
-            e.shiftKey ? 'ArrowRight' : 'ArrowDown',
-          );
-          return;
-        }
-        if (hasChanged) {
-          e.preventDefault();
-          app.formulaRefCursorId = null;
-          app.formulaMentionPreview = null;
-          app.commitRawCellEdit(
-            input.id,
-            input.value,
-            app.beginCellUpdateTrace(input.id, input.value),
-          );
-          delete app.editStartRawByCell[input.id];
-          app.grid.setEditing(input, false);
-          app.syncAIDraftLock();
-          app.clearSelectionRange();
-          app.grid.focusCellByArrow(
-            input,
-            e.shiftKey ? 'ArrowRight' : 'ArrowDown',
-          );
-          return;
-        }
-        e.preventDefault();
-        app.clearSelectionRange();
-        app.grid.focusCellByArrow(
-          input,
-          e.shiftKey ? 'ArrowRight' : 'ArrowDown',
-        );
-        return;
-      }
-      if (
-        !e.metaKey &&
-        !e.ctrlKey &&
-        e.key === 'Escape' &&
-        app.isEditingCell(input)
-      ) {
-        e.preventDefault();
-        var restoreValue = Object.prototype.hasOwnProperty.call(
-          app.editStartRawByCell,
-          input.id,
-        )
-          ? app.editStartRawByCell[input.id]
-          : app.getRawCellValue(input.id);
-        input.value = restoreValue;
-        app.grid.setEditing(input, false);
-        if (app.activeInput === input) {
-          app.formulaInput.value = restoreValue;
-        }
-        delete app.editStartRawByCell[input.id];
-        app.formulaRefCursorId = null;
-        app.formulaMentionPreview = null;
-        app.syncAIDraftLock();
-        return;
-      }
-      if (
-        !e.metaKey &&
-        !e.ctrlKey &&
-        (e.key === 'Delete' || e.key === 'Backspace')
-      ) {
-        var target = e.target;
-        var isEditing = !!(
-          target &&
-          target.classList &&
-          target.classList.contains('editing')
-        );
-        var hasTextSelection =
-          target &&
-          typeof target.selectionStart === 'number' &&
-          typeof target.selectionEnd === 'number' &&
-          target.selectionStart !== target.selectionEnd;
-        var hasMultiCellSelection = !!(
-          app.selectionRange &&
-          (app.selectionRange.startCol !== app.selectionRange.endCol ||
-            app.selectionRange.startRow !== app.selectionRange.endRow)
-        );
-        if (isEditing) {
-          return;
-        }
-        if (!isEditing && !hasTextSelection) {
-          e.preventDefault();
-          app.clearSelectedCells();
-          return;
-        }
-        if (hasMultiCellSelection) {
-          e.preventDefault();
-          app.clearSelectedCells();
-          return;
-        }
-      }
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
-        e.preventDefault();
-        var now = Date.now();
-        var isDoublePress = now - app.lastSelectAllShortcutTs < 500;
-        app.lastSelectAllShortcutTs = now;
-        if (isDoublePress) {
-          app.selectWholeSheetRegion();
-        } else {
-          app.selectNearestValueRegionFromActive(input);
-        }
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
-        e.preventDefault();
-        app.copySelectedRangeToClipboard();
-        return;
-      }
-      if (
-        !app.isEditingCell(input) &&
-        (e.metaKey || e.ctrlKey) &&
-        (e.key === 'ArrowUp' ||
-          e.key === 'ArrowDown' ||
-          e.key === 'ArrowLeft' ||
-          e.key === 'ArrowRight')
-      ) {
-        e.preventDefault();
-        if (e.shiftKey) {
-          var hadSelection = !!app.selectionRange;
-          var jumpSource = app.getSelectionEdgeInputForDirection(input, e.key);
-          app.extendSelectionNav = true;
-          var targetInput = app.moveToNextFilledCell(
-            jumpSource || input,
-            e.key,
-          );
-          app.extendSelectionNav = false;
-          if (targetInput) {
-            if (hadSelection && app.selectionRange) {
-              app.extendSelectionRangeTowardCell(targetInput.id, e.key);
-            } else {
-              var anchor = app.selectionAnchorId || input.id;
-              app.setSelectionRange(anchor, targetInput.id);
-            }
-          }
-        } else {
-          app.clearSelectionRange();
-          app.moveToNextFilledCell(input, e.key);
-        }
-        return;
-      }
-      if (
-        e.shiftKey &&
-        (e.key === 'ArrowUp' ||
-          e.key === 'ArrowDown' ||
-          e.key === 'ArrowLeft' ||
-          e.key === 'ArrowRight')
-      ) {
-        e.preventDefault();
-        app.moveSelectionByArrow(input, e.key);
-        return;
-      }
-      if (
-        !e.shiftKey &&
-        (e.key === 'ArrowUp' ||
-          e.key === 'ArrowDown' ||
-          e.key === 'ArrowLeft' ||
-          e.key === 'ArrowRight')
-      ) {
-        app.clearSelectionRange();
-      }
-      if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
-        app.clearSelectionRange();
-      }
-      if (app.grid.focusCellByArrow(input, e.key)) {
-        e.preventDefault();
-      }
-    });
-
-    input.addEventListener('input', () => {
-      if (!app.isEditingCell(input)) return;
-      app.syncAIDraftLock();
-      app.updateMentionAutocomplete(input);
-      if (app.activeInput === input) app.formulaInput.value = input.value;
-    });
-    input.addEventListener('blur', () => {
-      app.syncAIDraftLock();
-      app.hideMentionAutocompleteSoon();
-    });
-
-    input.addEventListener('click', (e) => {
-      if (e.shiftKey) {
-        var anchor = app.selectionAnchorId || input.id;
-        app.setSelectionRange(anchor, input.id);
-        return;
-      }
-      app.setSelectionAnchor(input.id);
+  proxy.addEventListener('click', (e) => {
+    var targetInput = resolveSpillSourceInput(app, input);
+    e.preventDefault();
+    app.setActiveInput(targetInput);
+    if (e.shiftKey) {
+      var anchor =
+        (typeof app.getSelectionAnchorCellId === 'function'
+          ? app.getSelectionAnchorCellId()
+          : app.selectionAnchorId) || targetInput.id;
+      app.setSelectionRange(anchor, targetInput.id);
+    } else {
+      app.setSelectionAnchor(targetInput.id);
       app.clearSelectionRange();
-    });
+    }
+  });
 
-    input.addEventListener('paste', (e) => {
-      var text =
-        e.clipboardData && e.clipboardData.getData
-          ? e.clipboardData.getData('text/plain')
-          : '';
-      if (typeof text !== 'string') return;
+  proxy.addEventListener('dblclick', (e) => {
+    var targetInput = resolveSpillSourceInput(app, input);
+    e.preventDefault();
+    app.setActiveInput(targetInput);
+    app.startEditingCell(targetInput);
+  });
+
+  proxy.addEventListener('keydown', (e) => {
+    var targetInput = input;
+    if (!app.isEditingCell(targetInput) && app.isDirectTypeKey(e)) {
+      var directTypeValue =
+        typeof app.getDirectTypeValue === 'function'
+          ? app.getDirectTypeValue(e)
+          : String(e.key || '');
       e.preventDefault();
-      app.applyPastedText(text);
-    });
-
-    input.addEventListener('copy', (e) => {
-      var text = app.getSelectedRangeText();
-      if (!text) return;
-      if (e.clipboardData && e.clipboardData.setData) {
-        e.preventDefault();
-        e.clipboardData.setData('text/plain', text);
-      }
-    });
-
-    input.parentElement.addEventListener('click', (e) => {
-      if (app.selectionDragJustFinished) {
-        app.selectionDragJustFinished = false;
-        return;
-      }
-      if (e.target === input) return;
-      if (e.target.closest && e.target.closest('.fill-handle')) return;
-      if (e.target.closest && e.target.closest('.cell-actions')) return;
-      var output = e.target.closest && e.target.closest('.cell-output');
-      if (output) {
-        var canScroll =
-          output.scrollHeight > output.clientHeight ||
-          output.scrollWidth > output.clientWidth;
-        if (canScroll) return;
-      }
-      app.setActiveInput(input);
-      if (e.shiftKey) {
-        var rangeAnchor = app.selectionAnchorId || input.id;
-        app.setSelectionRange(rangeAnchor, input.id);
+      app.handleCellDirectType(targetInput, directTypeValue, {
+        clearSelection: true,
+        origin: 'cell',
+      });
+      return;
+    }
+    if (!e.metaKey && !e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      app.handleCellEditingEnter(targetInput, { origin: 'cell' });
+      app.clearSelectionRange();
+      return;
+    }
+    if (!e.metaKey && !e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault();
+      app.clearSelectionRange();
+      app.grid.focusCellByArrow(
+        targetInput,
+        e.shiftKey ? 'ArrowLeft' : 'ArrowRight',
+      );
+      return;
+    }
+    if (
+      !e.metaKey &&
+      !e.ctrlKey &&
+      (e.key === 'Delete' || e.key === 'Backspace')
+    ) {
+      e.preventDefault();
+      app.clearSelectedCells();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault();
+      var now = Date.now();
+      var isDoublePress = now - app.lastSelectAllShortcutTs < 500;
+      app.lastSelectAllShortcutTs = now;
+      if (isDoublePress) {
+        app.selectWholeSheetRegion();
       } else {
-        app.setSelectionAnchor(input.id);
-        app.clearSelectionRange();
+        app.selectNearestValueRegionFromActive(input);
       }
-      input.focus();
-    });
-
-    input.parentElement.addEventListener('dblclick', (e) => {
-      if (e.target.closest && e.target.closest('.fill-handle')) return;
-      if (e.target.closest && e.target.closest('.cell-actions')) return;
-      app.setActiveInput(input);
-      app.startEditingCell(input);
-    });
-
-    input.parentElement.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest('.fill-handle')) return;
-      if (e.target.closest && e.target.closest('.cell-actions')) return;
-      app.startSelectionDrag(input, e);
-    });
-
-    var actions = input.parentElement.querySelector('.cell-actions');
-    if (actions) {
-      actions.addEventListener('click', (e) => {
-        var btn = e.target.closest && e.target.closest('.cell-action');
-        if (!btn) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var action = btn.dataset.action;
-        if (action === 'copy') app.copyCellValue(input);
-        if (action === 'fullscreen') app.openFullscreenCell(input);
-        if (action === 'run') app.runFormulaForCell(input);
-      });
+      return;
     }
-
-    var fillHandle = input.parentElement.querySelector('.fill-handle');
-    if (fillHandle) {
-      fillHandle.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        app.startFillDrag(input, e);
-      });
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      app.copySelectedRangeToClipboard();
+      return;
     }
+    if (
+      !app.isEditingCell(targetInput) &&
+      (e.metaKey || e.ctrlKey) &&
+      (e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight')
+    ) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        var currentSelectionRange =
+          typeof app.getSelectionRange === 'function'
+            ? app.getSelectionRange()
+            : app.selectionRange;
+        var hadSelection = !!currentSelectionRange;
+        var jumpSource = app.getSelectionEdgeInputForDirection(
+          targetInput,
+          e.key,
+        );
+        app.extendSelectionNav = true;
+        var jumpTargetInput = app.moveToNextFilledCell(
+          jumpSource || targetInput,
+          e.key,
+        );
+        app.extendSelectionNav = false;
+        if (jumpTargetInput) {
+          if (
+            hadSelection &&
+            (typeof app.getSelectionRange === 'function'
+              ? app.getSelectionRange()
+              : app.selectionRange)
+          ) {
+            app.extendSelectionRangeTowardCell(jumpTargetInput.id, e.key);
+          } else {
+            var anchor =
+              (typeof app.getSelectionAnchorCellId === 'function'
+                ? app.getSelectionAnchorCellId()
+                : app.selectionAnchorId) || targetInput.id;
+            app.setSelectionRange(anchor, jumpTargetInput.id);
+          }
+        }
+      } else {
+        app.clearSelectionRange();
+        app.moveToNextFilledCell(targetInput, e.key);
+      }
+      return;
+    }
+    if (
+      e.shiftKey &&
+      (e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight')
+    ) {
+      e.preventDefault();
+      app.moveSelectionByArrow(targetInput, e.key);
+      return;
+    }
+    if (
+      !e.shiftKey &&
+      (e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight')
+    ) {
+      app.clearSelectionRange();
+    }
+    if (!e.shiftKey && e.key === 'Enter') {
+      app.clearSelectionRange();
+    }
+    if (app.grid.focusCellByArrow(targetInput, e.key)) {
+      e.preventDefault();
+    }
+  });
+}
+
+function bindCellShellEvents(app, input) {
+  input.parentElement.addEventListener('click', (e) => {
+    if (app.selectionDragJustFinished) {
+      app.selectionDragJustFinished = false;
+      return;
+    }
+    if (e.target === input) return;
+    if (e.target.closest && e.target.closest('.fill-handle')) return;
+    if (e.target.closest && e.target.closest('.cell-actions')) return;
+    var output = e.target.closest && e.target.closest('.cell-output');
+    if (output) {
+      var canScroll =
+        output.scrollHeight > output.clientHeight ||
+        output.scrollWidth > output.clientWidth;
+      if (canScroll) return;
+    }
+    var targetInput = resolveSpillSourceInput(app, input);
+    app.setActiveInput(targetInput);
+    if (e.shiftKey) {
+      var rangeAnchor =
+        (typeof app.getSelectionAnchorCellId === 'function'
+          ? app.getSelectionAnchorCellId()
+          : app.selectionAnchorId) || targetInput.id;
+      app.setSelectionRange(rangeAnchor, targetInput.id);
+    } else {
+      app.setSelectionAnchor(targetInput.id);
+      app.clearSelectionRange();
+    }
+    if (typeof app.focusCellProxy === 'function') {
+      app.focusCellProxy(targetInput);
+    }
+  });
+
+  input.parentElement.addEventListener('dblclick', (e) => {
+    if (e.target.closest && e.target.closest('.fill-handle')) return;
+    if (e.target.closest && e.target.closest('.cell-actions')) return;
+    var targetInput = resolveSpillSourceInput(app, input);
+    app.setActiveInput(targetInput);
+    app.startEditingCell(targetInput);
+  });
+
+  input.parentElement.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest && e.target.closest('.fill-handle')) return;
+    if (e.target.closest && e.target.closest('.cell-actions')) return;
+    app.startSelectionDrag(resolveSpillSourceInput(app, input), e);
+  });
+}
+
+function bindCellActionEvents(app, input) {
+  var actions = input.parentElement.querySelector('.cell-actions');
+  if (actions) {
+    actions.addEventListener('click', (e) => {
+      var btn = e.target.closest && e.target.closest('.cell-action');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var action = btn.dataset.action;
+      if (action === 'copy') app.copyCellValue(input);
+      if (action === 'fullscreen') app.openFullscreenCell(input);
+      if (action === 'run') app.runFormulaForCell(input);
+    });
+  }
+}
+
+function bindCellFillHandleEvents(app, input) {
+  var fillHandle = input.parentElement.querySelector('.fill-handle');
+  if (fillHandle) {
+    fillHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      app.startFillDrag(input, e);
+    });
+  }
+}
+
+export function bindGridInputEvents(app) {
+  bindOverlayEditingInputEvents(app);
+  app.inputs.forEach((input) => {
+    bindCellInputEditingEvents(app, input);
+    bindCellFocusProxyEvents(app, input);
+    bindCellShellEvents(app, input);
+    bindCellActionEvents(app, input);
+    bindCellFillHandleEvents(app, input);
   });
 }

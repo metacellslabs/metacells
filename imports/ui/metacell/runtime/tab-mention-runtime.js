@@ -14,9 +14,16 @@ export function shouldStartCrossTabMention(app, tabId) {
   if (!app.activeInput) return false;
   var formulaRaw = String(app.formulaInput ? app.formulaInput.value : '');
   if (app.canInsertFormulaMention(formulaRaw)) return true;
+  var editingTarget =
+    typeof app.getActiveEditorInput === 'function'
+      ? app.getActiveEditorInput()
+      : app.activeInput;
+  var editingRaw = String(
+    editingTarget && editingTarget.value != null ? editingTarget.value : '',
+  );
   if (
     app.isEditingCell(app.activeInput) &&
-    app.canInsertFormulaMention(app.activeInput.value)
+    app.canInsertFormulaMention(editingRaw)
   )
     return true;
   return false;
@@ -25,12 +32,14 @@ export function shouldStartCrossTabMention(app, tabId) {
 export function startCrossTabMention(app, targetSheetId) {
   if (!app.activeInput) return app.switchToSheet(targetSheetId);
   var sourceCellId = app.activeInput.id;
+  var activeEditor =
+    typeof app.getActiveEditorInput === 'function'
+      ? app.getActiveEditorInput()
+      : null;
   var sourceValue = String(
-    app.formulaInput && document.activeElement === app.formulaInput
-      ? app.formulaInput.value
-      : app.activeInput.value == null
-        ? ''
-        : app.activeInput.value,
+    activeEditor && activeEditor.value != null
+      ? activeEditor.value
+      : app.getRawCellValue(sourceCellId) || '',
   );
 
   app.crossTabMentionContext = {
@@ -61,9 +70,8 @@ export function restoreCrossTabMentionEditor(app) {
   if (!targetInput) return;
   app.setActiveInput(targetInput);
   app.startEditingCell(targetInput);
-  targetInput.value = app.crossTabMentionContext.value;
   app.editStartRawByCell[targetInput.id] = app.crossTabMentionContext.value;
-  app.formulaInput.value = app.crossTabMentionContext.value;
+  app.syncActiveEditorValue(app.crossTabMentionContext.value);
 }
 
 export function syncCrossTabMentionSourceValue(app, nextValue) {
@@ -95,12 +103,14 @@ export function finishCrossTabMentionAndReturnToSource(app) {
 
   app.setActiveInput(sourceInput);
   app.startEditingCell(sourceInput);
-  sourceInput.value = finalValue;
   app.editStartRawByCell[sourceInput.id] = finalValue;
-  app.formulaInput.value = finalValue;
-  if (typeof sourceInput.setSelectionRange === 'function') {
-    var caret = finalValue.length;
+  app.syncActiveEditorValue(finalValue);
+  var caret = finalValue.length;
+  if (typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(caret, caret);
+  } else if (typeof sourceInput.setSelectionRange === 'function') {
     sourceInput.setSelectionRange(caret, caret);
   }
+  app.focusActiveEditor();
   return true;
 }

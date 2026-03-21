@@ -17,11 +17,16 @@ import { StorageService } from './storage-service.js';
 import { AIService } from './ai-service.js';
 import { FormulaEngine } from './formula-engine.js';
 import { GridManager } from './grid-manager.js';
+import { renderMarkdown as renderMarkdownRuntime } from './cell-content-renderer.js';
 import {
   createCellUpdateTrace,
   shouldProfileCellUpdatesClient,
   traceCellUpdateClient,
 } from '../../../lib/cell-update-profile.js';
+import {
+  applyDependencyHighlight as applyDependencyHighlightVisualRuntime,
+  clearDependencyHighlight as clearDependencyHighlightVisualRuntime,
+} from './dependency-visual-runtime.js';
 import {
   applyWorkbookHistorySnapshot as applyWorkbookHistorySnapshotRuntime,
   captureHistorySnapshot as captureHistorySnapshotRuntime,
@@ -214,6 +219,49 @@ import {
   toggleAddTabMenu as toggleAddTabMenuRuntime,
 } from './keyboard-runtime.js';
 import {
+  focusEditorOverlayInput as focusEditorOverlayInputRuntime,
+  hideEditorOverlay as hideEditorOverlayRuntime,
+  setupEditorOverlay as setupEditorOverlayRuntime,
+  syncEditorOverlay as syncEditorOverlayRuntime,
+} from './editor-overlay-runtime.js';
+import {
+  focusActiveEditor as focusActiveEditorRuntime,
+  focusCellProxy as focusCellProxyRuntime,
+  restoreGridKeyboardFocusSoon as restoreGridKeyboardFocusSoonRuntime,
+} from './grid-focus-runtime.js';
+import {
+  clearSelectionRangeModel as clearSelectionRangeModelRuntime,
+  ensureSelectionModel as ensureSelectionModelRuntime,
+  getSelectionActiveCellId as getSelectionActiveCellIdRuntime,
+  getSelectionAnchorCellId as getSelectionAnchorCellIdRuntime,
+  getSelectionFillRange as getSelectionFillRangeRuntime,
+  getSelectionRangeModel as getSelectionRangeModelRuntime,
+  setSelectionActiveCellId as setSelectionActiveCellIdRuntime,
+  setSelectionAnchorCellId as setSelectionAnchorCellIdRuntime,
+  setSelectionFillRange as setSelectionFillRangeRuntime,
+  setSelectionRangeModel as setSelectionRangeModelRuntime,
+} from './selection-model.js';
+import {
+  clearSpillSheetState as clearSpillSheetStateRuntime,
+  ensureSpillModel as ensureSpillModelRuntime,
+  getSpillEntry as getSpillEntryRuntime,
+  getSpillSourceForCell as getSpillSourceForCellRuntime,
+  listSpillEntries as listSpillEntriesRuntime,
+  setSpillEntry as setSpillEntryRuntime,
+} from './spill-model.js';
+import {
+  applySpillVisualStateFromModel as applySpillVisualStateFromModelRuntime,
+  clearSpillVisualState as clearSpillVisualStateRuntime,
+} from './spill-runtime.js';
+import {
+  applyActiveCellVisualState as applyActiveCellVisualStateRuntime,
+  applySelectionRangeVisualState as applySelectionRangeVisualStateRuntime,
+  applySpillSelectionHighlight as applySpillSelectionHighlightRuntime,
+  clearSelectionVisualState as clearSelectionVisualStateRuntime,
+  clearSpillSelectionHighlight as clearSpillSelectionHighlightRuntime,
+  updateAxisHeaderHighlight as updateAxisHeaderHighlightVisualRuntime,
+} from './selection-visual-runtime.js';
+import {
   hideScheduleDialog as hideScheduleDialogRuntime,
   setupScheduleDialog as setupScheduleDialogRuntime,
   showScheduleDialogForCell as showScheduleDialogForCellRuntime,
@@ -231,22 +279,43 @@ import {
   toggleFormulaTrackerPanel as toggleFormulaTrackerPanelRuntime,
 } from './formula-tracker-runtime.js';
 import {
-  applyDependencyHighlight as applyDependencyHighlightRuntime,
+  cancelCellEditing as cancelCellEditingRuntime,
+  commitFormulaBarEditing as commitFormulaBarEditingRuntime,
+  commitCellEditing as commitCellEditingRuntime,
+  enterCellEditing as enterCellEditingRuntime,
+  enterFormulaBarEditing as enterFormulaBarEditingRuntime,
+  ensureCellEditing as ensureCellEditingRuntime,
+  handleCellEditingBlur as handleCellEditingBlurRuntime,
+  handleCellDirectType as handleCellDirectTypeRuntime,
+  handleCellEditingEnter as handleCellEditingEnterRuntime,
+  handleCellEditingEscape as handleCellEditingEscapeRuntime,
+  handleCellInputDraft as handleCellInputDraftRuntime,
+  handleCellMentionNavigation as handleCellMentionNavigationRuntime,
+  resolveCellEditingExit as resolveCellEditingExitRuntime,
+  restoreFocusAfterEditingExit as restoreFocusAfterEditingExitRuntime,
+  syncCellDraft as syncCellDraftRuntime,
+} from './editor-controller-runtime.js';
+import {
+  beginEditingSession as beginEditingSessionRuntime,
+  clearEditingSession as clearEditingSessionRuntime,
+  ensureEditingSession as ensureEditingSessionRuntime,
+  getEditingSessionDraft as getEditingSessionDraftRuntime,
+  syncEditingSessionWithGridState as syncEditingSessionWithGridStateRuntime,
+  updateEditingSessionDraft as updateEditingSessionDraftRuntime,
+} from './editing-session-runtime.js';
+import {
   applyHeaderSelectionRange as applyHeaderSelectionRangeRuntime,
   bindHeaderSelectionEvents as bindHeaderSelectionEventsRuntime,
   cellHasAnyRawValue as cellHasAnyRawValueRuntime,
   clearActiveInput as clearActiveInputRuntime,
-  clearDependencyHighlight as clearDependencyHighlightRuntime,
-  clearHeaderSelectionHighlight as clearHeaderSelectionHighlightRuntime,
-  clearSelectionHighlight as clearSelectionHighlightRuntime,
   clearSelectionRange as clearSelectionRangeRuntime,
   collectDependencyHintsFromRaw as collectDependencyHintsFromRawRuntime,
   ensureActiveCell as ensureActiveCellRuntime,
   extendSelectionRangeTowardCell as extendSelectionRangeTowardCellRuntime,
   findAdjacentCellId as findAdjacentCellIdRuntime,
   findJumpTargetCellId as findJumpTargetCellIdRuntime,
+  getDirectTypeValue as getDirectTypeValueRuntime,
   getSelectionEdgeInputForDirection as getSelectionEdgeInputForDirectionRuntime,
-  highlightSelectionRange as highlightSelectionRangeRuntime,
   isDirectTypeKey as isDirectTypeKeyRuntime,
   isEditingCell as isEditingCellRuntime,
   moveSelectionByArrow as moveSelectionByArrowRuntime,
@@ -261,7 +330,6 @@ import {
   setSelectionRange as setSelectionRangeRuntime,
   startEditingCell as startEditingCellRuntime,
   startHeaderSelectionDrag as startHeaderSelectionDragRuntime,
-  updateAxisHeaderHighlight as updateAxisHeaderHighlightRuntime,
 } from './selection-runtime.js';
 import {
   downloadRegionRecording as downloadRegionRecordingRuntime,
@@ -406,6 +474,7 @@ export class SpreadsheetApp {
       throw new Error('SpreadsheetApp requires a storage adapter');
     }
     this.sheetDocumentId = String(opts.sheetDocumentId || '');
+    this.renderMarkdown = renderMarkdownRuntime;
     this.initialSheetId = String(opts.initialSheetId || '');
     this.onActiveSheetChange =
       typeof opts.onActiveSheetChange === 'function'
@@ -526,6 +595,10 @@ export class SpreadsheetApp {
     this.ensureReportTabExists();
     this.activeSheetId = this.initializeActiveSheetId();
     this.activeInput = null;
+    this.activeCellId = '';
+    this.selectionModel = ensureSelectionModelRuntime(this);
+    this.spillModel = ensureSpillModelRuntime(this);
+    this.editingSession = ensureEditingSessionRuntime(this);
     this.fillDrag = null;
     this.selectionDrag = null;
     this.selectionDragJustFinished = false;
@@ -543,9 +616,13 @@ export class SpreadsheetApp {
       DEFAULT_COL_WIDTH,
       DEFAULT_ROW_HEIGHT,
     );
+    this.grid.onEditingStateChange = (input, editing) => {
+      this.handleGridEditingStateChange(input, editing);
+    };
     this.refreshGridReferences();
     this.selectionAnchorId = null;
     this.selectionRange = null;
+    this.fillRange = null;
     this.extendSelectionNav = false;
     this.lastSelectAllShortcutTs = 0;
     this.formulaRefCursorId = null;
@@ -566,6 +643,10 @@ export class SpreadsheetApp {
     this.backgroundComputeEnabled = false;
     this.fullscreenOverlay = null;
     this.fullscreenOverlayContent = null;
+    this.editorOverlay = null;
+    this.editorOverlayInput = null;
+    this.editorOverlayPendingFocus = false;
+    this.handleEditorOverlayViewportSync = null;
     this.reportMode = 'edit';
     this.calcProgressHideTimer = null;
     this.lastReportLiveHtml = '';
@@ -639,6 +720,7 @@ export class SpreadsheetApp {
     this.bindHeaderSelectionEvents();
     this.bindFormulaBarEvents();
     this.setupMentionAutocomplete();
+    this.setupEditorOverlay();
     this.setupFullscreenOverlay();
     this.setupContextMenu();
     this.setupScheduleDialog();
@@ -652,6 +734,7 @@ export class SpreadsheetApp {
     this.applyActiveSheetLayout();
     this.renderCurrentSheetFromStorage();
     this.ensureActiveCell();
+    this.restoreGridKeyboardFocusSoon();
   }
 
   captureRenderedRowHeights() {
@@ -734,17 +817,31 @@ export class SpreadsheetApp {
   }
 
   hasPendingLocalEdit() {
-    if (this.activeInput && this.isEditingCell(this.activeInput)) return true;
-    if (!this.activeInput || !this.formulaInput) return false;
-    if (document.activeElement !== this.formulaInput) return false;
+    var activeInput = this.getActiveCellInput();
+    if (activeInput && this.isEditingCell(activeInput)) return true;
+    if (!activeInput || !this.formulaInput) return false;
+    if (!this.isFormulaBarFocused() && !this.isOverlayEditorFocused()) {
+      return false;
+    }
 
+    var currentEditor = this.getActiveEditorInput();
     var currentFormulaValue = String(
-      this.formulaInput.value == null ? '' : this.formulaInput.value,
+      currentEditor && currentEditor.value != null ? currentEditor.value : '',
     );
-    var storedRawValue = String(
-      this.getRawCellValue(this.activeInput.id) || '',
-    );
+    var storedRawValue = String(this.getRawCellValue(activeInput.id) || '');
     return currentFormulaValue !== storedRawValue;
+  }
+
+  isEditorElementFocused(target) {
+    return document.activeElement === target;
+  }
+
+  isFormulaBarFocused() {
+    return this.isEditorElementFocused(this.formulaInput);
+  }
+
+  isOverlayEditorFocused() {
+    return this.isEditorElementFocused(this.editorOverlayInput);
   }
 
   syncAIDraftLock() {
@@ -760,15 +857,16 @@ export class SpreadsheetApp {
 
   hasSingleSelectedCell() {
     if (!this.activeInput) return false;
-    if (!this.selectionRange) return true;
+    var selectionRange = this.getSelectionRange();
+    if (!selectionRange) return true;
     return (
-      this.selectionRange.startCol === this.selectionRange.endCol &&
-      this.selectionRange.startRow === this.selectionRange.endRow
+      selectionRange.startCol === selectionRange.endCol &&
+      selectionRange.startRow === selectionRange.endRow
     );
   }
 
   hasRegionSelection() {
-    if (!this.activeInput || !this.selectionRange) return false;
+    if (!this.activeInput || !this.getSelectionRange()) return false;
     return !this.hasSingleSelectedCell();
   }
 
@@ -830,17 +928,17 @@ export class SpreadsheetApp {
 
   syncServerEditLock(locked) {
     var nextKey = '';
+    var activeCellId = this.getSelectionActiveCellId();
     if (
       locked &&
       this.sheetDocumentId &&
       this.activeSheetId &&
-      this.activeInput &&
-      this.activeInput.id
+      activeCellId
     ) {
       nextKey = [
         String(this.sheetDocumentId || ''),
         String(this.activeSheetId || ''),
-        String(this.activeInput.id || '').toUpperCase(),
+        String(activeCellId || '').toUpperCase(),
       ].join(':');
     }
 
@@ -1174,10 +1272,10 @@ export class SpreadsheetApp {
       error: '',
     });
     this.renderCurrentSheetFromStorage();
+    var activeCellId = this.getSelectionActiveCellId();
     if (
       targetSheetId === this.activeSheetId &&
-      this.activeInput &&
-      this.activeInput.id === normalizedCellId
+      activeCellId === normalizedCellId
     ) {
       this.formulaInput.value = raw;
     }
@@ -1767,7 +1865,9 @@ export class SpreadsheetApp {
     var normalizedCellId = String(cellId || '').toUpperCase();
     var raw = String(rawValue == null ? '' : rawValue);
     var storedRaw = String(this.getRawCellValue(normalizedCellId) || '');
+    var activeCellId = this.getSelectionActiveCellId();
     if (storedRaw === raw) {
+      this.clearEditingSession(normalizedCellId);
       this.renderCurrentSheetFromStorage();
       return;
     }
@@ -1776,13 +1876,14 @@ export class SpreadsheetApp {
     );
     if (this.runChannelSendCommandForCell(normalizedCellId, raw)) {
       var activeCommandInput =
-        this.activeInput && this.activeInput.id === normalizedCellId
-          ? this.activeInput
+        activeCellId === normalizedCellId
+          ? this.getActiveCellInput()
           : this.inputById && this.inputById[normalizedCellId]
             ? this.inputById[normalizedCellId]
             : null;
       if (activeCommandInput && this.grid) {
         this.grid.setEditing(activeCommandInput, false);
+        this.clearEditingSession(normalizedCellId);
         this.renderCurrentSheetFromStorage();
       }
       traceCellUpdateClient(trace, 'channel_send.dispatched', {
@@ -1791,8 +1892,9 @@ export class SpreadsheetApp {
       return;
     }
     this.setRawCellValue(normalizedCellId, raw);
+    this.clearEditingSession(normalizedCellId);
     this.aiService.notifyActiveCellChanged();
-    if (this.activeInput && this.activeInput.id === normalizedCellId) {
+    if (activeCellId === normalizedCellId) {
       this.formulaInput.value = raw;
     }
     var recomputePlan = this.collectLocalSyncRecomputePlan(
@@ -1838,13 +1940,14 @@ export class SpreadsheetApp {
   runQuotedPromptForCell(cellId, rawValue, inputElement) {
     var raw = String(rawValue == null ? '' : rawValue);
     if (!raw || raw.charAt(0) !== "'") return false;
+    var activeCellId = this.getSelectionActiveCellId();
     this.captureHistorySnapshot(
       'cell:' + this.activeSheetId + ':' + String(cellId || '').toUpperCase(),
     );
 
     var prompt = raw.substring(1).trim();
     var updateFormulaBar = () => {
-      if (this.activeInput && this.activeInput.id === cellId) {
+      if (activeCellId === cellId) {
         this.formulaInput.value = this.getRawCellValue(cellId);
       }
     };
@@ -1918,6 +2021,7 @@ export class SpreadsheetApp {
   }
 
   runTablePromptForCell(cellId, rawValue, inputElement) {
+    var activeCellId = this.getSelectionActiveCellId();
     var channelSpec = this.parseChannelFeedPromptSpec(rawValue);
     if (channelSpec) {
       this.captureHistorySnapshot(
@@ -1925,7 +2029,7 @@ export class SpreadsheetApp {
       );
       this.setRawCellValue(cellId, String(rawValue));
       if (inputElement) inputElement.value = String(rawValue);
-      if (this.activeInput && this.activeInput.id === cellId)
+      if (activeCellId === cellId)
         this.formulaInput.value = String(rawValue);
       this.computeAll();
       return true;
@@ -1939,7 +2043,7 @@ export class SpreadsheetApp {
     if (!prompt) {
       this.setRawCellValue(cellId, '');
       if (inputElement) inputElement.value = '';
-      if (this.activeInput && this.activeInput.id === cellId)
+      if (activeCellId === cellId)
         this.formulaInput.value = '';
       this.computeAll();
       return true;
@@ -1950,7 +2054,7 @@ export class SpreadsheetApp {
 
     this.setRawCellValue(cellId, sourceRaw);
     if (inputElement) inputElement.value = String(rawValue);
-    if (this.activeInput && this.activeInput.id === cellId)
+    if (activeCellId === cellId)
       this.formulaInput.value = String(rawValue);
     this.computeAll();
 
@@ -2003,7 +2107,7 @@ export class SpreadsheetApp {
           if (this.inputById[errCellId])
             this.setRawCellValue(errCellId, message);
         }
-        if (this.activeInput && this.activeInput.id === sourceCellId)
+        if (this.getSelectionActiveCellId() === sourceCellId)
           this.formulaInput.value = sourceRaw;
         this.computeAll();
       });
@@ -2396,7 +2500,7 @@ export class SpreadsheetApp {
       return;
     }
     this.setActiveInput(input);
-    input.focus();
+    this.focusActiveEditor();
     this.runManualAIUpdate({ forceRefreshAI: true });
   }
 
@@ -2479,8 +2583,8 @@ export class SpreadsheetApp {
     syncAIModeUIRuntime(this);
   }
 
-  commitFormulaBarValue() {
-    commitFormulaBarValueRuntime(this);
+  commitFormulaBarValue(options) {
+    commitFormulaBarValueRuntime(this, options);
   }
 
   bindFormulaBarEvents() {
@@ -2491,12 +2595,314 @@ export class SpreadsheetApp {
     bindGridInputEventsRuntime(this);
   }
 
+  ensureCellEditing(input, options) {
+    ensureCellEditingRuntime(this, input, options);
+  }
+
+  enterCellEditing(input, options) {
+    return enterCellEditingRuntime(this, input, options);
+  }
+
+  enterFormulaBarEditing(input, options) {
+    return enterFormulaBarEditingRuntime(this, input, options);
+  }
+
+  syncCellDraft(input, rawValue, options) {
+    syncCellDraftRuntime(this, input, rawValue, options);
+  }
+
+  cancelCellEditing(input, options) {
+    return cancelCellEditingRuntime(this, input, options);
+  }
+
+  commitCellEditing(input, options) {
+    return commitCellEditingRuntime(this, input, options);
+  }
+
+  commitFormulaBarEditing(input, options) {
+    return commitFormulaBarEditingRuntime(this, input, options);
+  }
+
+  handleCellEditingBlur(input, options) {
+    return handleCellEditingBlurRuntime(this, input, options);
+  }
+
+  handleCellDirectType(input, key, options) {
+    return handleCellDirectTypeRuntime(this, input, key, options);
+  }
+
+  handleCellEditingEnter(input, options) {
+    return handleCellEditingEnterRuntime(this, input, options);
+  }
+
+  handleCellEditingEscape(input, options) {
+    return handleCellEditingEscapeRuntime(this, input, options);
+  }
+
+  resolveCellEditingExit(input, options) {
+    return resolveCellEditingExitRuntime(this, input, options);
+  }
+
+  restoreFocusAfterEditingExit(options) {
+    return restoreFocusAfterEditingExitRuntime(this, options);
+  }
+
+  handleCellMentionNavigation(input, key, options) {
+    return handleCellMentionNavigationRuntime(this, input, key, options);
+  }
+
+  handleCellInputDraft(input, options) {
+    return handleCellInputDraftRuntime(this, input, options);
+  }
+
+  setupEditorOverlay() {
+    setupEditorOverlayRuntime(this);
+  }
+
+  syncEditorOverlay() {
+    syncEditorOverlayRuntime(this);
+  }
+
+  focusEditorOverlayInput() {
+    focusEditorOverlayInputRuntime(this);
+  }
+
+  focusActiveEditor() {
+    return focusActiveEditorRuntime(this);
+  }
+
+  restoreGridKeyboardFocusSoon() {
+    restoreGridKeyboardFocusSoonRuntime(this);
+  }
+
+  focusCellProxy(input) {
+    return focusCellProxyRuntime(this, input);
+  }
+
+  getActiveCellInput() {
+    var activeCellId = this.getSelectionActiveCellId();
+    if (
+      activeCellId &&
+      this.inputById &&
+      Object.prototype.hasOwnProperty.call(this.inputById, activeCellId)
+    ) {
+      return this.inputById[activeCellId] || null;
+    }
+    return this.activeInput || null;
+  }
+
+  getSelectionActiveCellId() {
+    return getSelectionActiveCellIdRuntime(this);
+  }
+
+  setSelectionActiveCellId(cellId) {
+    return setSelectionActiveCellIdRuntime(this, cellId);
+  }
+
+  getSelectionAnchorCellId() {
+    return getSelectionAnchorCellIdRuntime(this);
+  }
+
+  setSelectionAnchorCellId(cellId) {
+    return setSelectionAnchorCellIdRuntime(this, cellId);
+  }
+
+  getSelectionRange() {
+    return getSelectionRangeModelRuntime(this);
+  }
+
+  setSelectionRangeState(range) {
+    return setSelectionRangeModelRuntime(this, range);
+  }
+
+  clearSelectionRangeState() {
+    return clearSelectionRangeModelRuntime(this);
+  }
+
+  getSelectionFillRange() {
+    return getSelectionFillRangeRuntime(this);
+  }
+
+  setSelectionFillRange(range) {
+    return setSelectionFillRangeRuntime(this, range);
+  }
+
+  clearSpillSheetState(sheetId) {
+    return clearSpillSheetStateRuntime(this, sheetId || this.activeSheetId);
+  }
+
+  setSpillEntry(sheetId, sourceCellId, payload) {
+    return setSpillEntryRuntime(
+      this,
+      sheetId || this.activeSheetId,
+      sourceCellId,
+      payload,
+    );
+  }
+
+  getSpillEntry(sheetId, sourceCellId) {
+    return getSpillEntryRuntime(
+      this,
+      sheetId || this.activeSheetId,
+      sourceCellId,
+    );
+  }
+
+  getSpillSourceForCell(sheetId, cellId) {
+    return getSpillSourceForCellRuntime(
+      this,
+      sheetId || this.activeSheetId,
+      cellId,
+    );
+  }
+
+  listSpillEntries(sheetId) {
+    return listSpillEntriesRuntime(this, sheetId || this.activeSheetId);
+  }
+
+  clearSpillVisualState() {
+    return clearSpillVisualStateRuntime(this);
+  }
+
+  applySpillVisualStateFromModel(sheetId) {
+    return applySpillVisualStateFromModelRuntime(
+      this,
+      sheetId || this.activeSheetId,
+    );
+  }
+
+  clearSpillSelectionHighlight() {
+    return clearSpillSelectionHighlightRuntime(this);
+  }
+
+  applySpillSelectionHighlight() {
+    return applySpillSelectionHighlightRuntime(this);
+  }
+
+  clearSelectionVisualState() {
+    return clearSelectionVisualStateRuntime(this);
+  }
+
+  applyActiveCellVisualState() {
+    return applyActiveCellVisualStateRuntime(this);
+  }
+
+  applySelectionRangeVisualState() {
+    return applySelectionRangeVisualStateRuntime(this);
+  }
+
+  updateAxisHeaderVisualHighlight() {
+    return updateAxisHeaderHighlightVisualRuntime(this);
+  }
+
+  getCellElement(inputOrCellId) {
+    var input =
+      typeof inputOrCellId === 'string'
+        ? this.inputById[String(inputOrCellId || '').toUpperCase()] || null
+        : inputOrCellId || null;
+    return input && input.parentElement ? input.parentElement : null;
+  }
+
+  getActiveEditorInput() {
+    var activeInput = this.getActiveCellInput();
+    if (this.editorOverlayInput && this.isOverlayEditorFocused()) {
+      return this.editorOverlayInput;
+    }
+    if (this.formulaInput && this.isFormulaBarFocused()) {
+      return this.formulaInput;
+    }
+    if (
+      activeInput &&
+      this.isEditingCell(activeInput) &&
+      this.editorOverlayInput &&
+      this.editorOverlay &&
+      this.editorOverlay.style.display !== 'none'
+    ) {
+      return this.editorOverlayInput;
+    }
+    return activeInput || null;
+  }
+
+  getEditorSelectionRange(input) {
+    var target = input || this.getActiveEditorInput();
+    var value = String(target && target.value != null ? target.value : '');
+    var start =
+      target && typeof target.selectionStart === 'number'
+        ? target.selectionStart
+        : value.length;
+    var end =
+      target && typeof target.selectionEnd === 'number'
+        ? target.selectionEnd
+        : start;
+    return { start: start, end: end };
+  }
+
+  setEditorSelectionRange(start, end, input) {
+    var target = input || this.getActiveEditorInput();
+    if (!target || typeof target.setSelectionRange !== 'function') return;
+    target.setSelectionRange(start, end);
+    if (
+      this.activeInput &&
+      target !== this.activeInput &&
+      typeof this.activeInput.setSelectionRange === 'function'
+    ) {
+      this.activeInput.setSelectionRange(start, end);
+    }
+  }
+
+  syncActiveEditorValue(value, options) {
+    var opts = options || {};
+    var nextValue = String(value == null ? '' : value);
+    if (this.activeInput) {
+      this.activeInput.value = nextValue;
+    }
+    if (opts.syncFormula !== false && this.formulaInput) {
+      this.formulaInput.value = nextValue;
+    }
+    if (
+      opts.syncOverlay !== false &&
+      this.editorOverlayInput &&
+      (this.isEditingCell(this.activeInput) || this.isOverlayEditorFocused())
+    ) {
+      this.editorOverlayInput.value = nextValue;
+    }
+  }
+
+  hideEditorOverlay() {
+    hideEditorOverlayRuntime(this);
+  }
+
   isEditingCell(input) {
     return isEditingCellRuntime(this, input);
   }
 
+  beginEditingSession(input, options) {
+    beginEditingSessionRuntime(this, input, options);
+  }
+
+  updateEditingSessionDraft(value, options) {
+    updateEditingSessionDraftRuntime(this, value, options);
+  }
+
+  getEditingSessionDraft(cellId) {
+    return getEditingSessionDraftRuntime(this, cellId);
+  }
+
+  clearEditingSession(cellId, sheetId) {
+    clearEditingSessionRuntime(this, { cellId: cellId, sheetId: sheetId });
+  }
+
+  handleGridEditingStateChange(input, editing) {
+    syncEditingSessionWithGridStateRuntime(this, input, editing);
+    this.syncEditorOverlay();
+  }
+
   isDirectTypeKey(event) {
     return isDirectTypeKeyRuntime(this, event);
+  }
+
+  getDirectTypeValue(event) {
+    return getDirectTypeValueRuntime(this, event);
   }
 
   startEditingCell(input) {
@@ -2513,6 +2919,7 @@ export class SpreadsheetApp {
 
   destroy() {
     this.syncServerEditLock(false);
+    this.hideEditorOverlay();
     this.hideFloatingAttachmentPreview();
     if (this.attachmentPreviewTimer) {
       clearTimeout(this.attachmentPreviewTimer);
@@ -2543,6 +2950,15 @@ export class SpreadsheetApp {
         this.handleAttachmentPreviewScroll,
         true,
       );
+    }
+    if (this.handleEditorOverlayViewportSync) {
+      if (this.tableWrap) {
+        this.tableWrap.removeEventListener(
+          'scroll',
+          this.handleEditorOverlayViewportSync,
+        );
+      }
+      window.removeEventListener('resize', this.handleEditorOverlayViewportSync);
     }
     if (
       this.floatingAttachmentPreview &&
@@ -2603,19 +3019,23 @@ export class SpreadsheetApp {
   }
 
   clearSelectionHighlight() {
-    clearSelectionHighlightRuntime(this);
+    clearSelectionVisualStateRuntime(this);
   }
 
   clearHeaderSelectionHighlight() {
-    clearHeaderSelectionHighlightRuntime(this);
+    return clearHeaderSelectionHighlightRuntime(this);
   }
 
   clearDependencyHighlight() {
-    clearDependencyHighlightRuntime(this);
+    clearDependencyHighlightVisualRuntime(this);
   }
 
   applyDependencyHighlight() {
-    applyDependencyHighlightRuntime(this);
+    applyDependencyHighlightVisualRuntime(this);
+  }
+
+  collectDependencyHintsFromRaw(rawValue, sheetIdOverride) {
+    return collectDependencyHintsFromRawRuntime(this, rawValue, sheetIdOverride);
   }
 
   collectDependencyHintsFromRaw(rawValue) {
@@ -2627,11 +3047,11 @@ export class SpreadsheetApp {
   }
 
   highlightSelectionRange() {
-    highlightSelectionRangeRuntime(this);
+    return highlightSelectionRangeRuntime(this);
   }
 
   updateAxisHeaderHighlight() {
-    updateAxisHeaderHighlightRuntime(this);
+    return updateAxisHeaderHighlightVisualRuntime(this);
   }
 
   bindHeaderSelectionEvents() {
@@ -2687,7 +3107,8 @@ export class SpreadsheetApp {
   }
 
   getFormulaMentionBaseCellId(fallbackCellId, key) {
-    if (!this.selectionRange) return this.formulaRefCursorId || fallbackCellId;
+    if (!this.getSelectionRange())
+      return this.formulaRefCursorId || fallbackCellId;
     var baseInput =
       this.inputById[this.formulaRefCursorId || fallbackCellId] ||
       this.inputById[fallbackCellId];

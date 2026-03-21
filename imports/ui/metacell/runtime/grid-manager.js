@@ -1,5 +1,9 @@
 // Description: Grid/table rendering, resizing, keyboard navigation, fill-handle support, and markdown cell display.
 import { MIN_COL_WIDTH } from './constants.js';
+import {
+  applyCellContentToOutput,
+  applyCellInputTypography,
+} from './cell-content-renderer.js';
 
 function columnIndexToLabel(index) {
   var n = Number(index) || 0;
@@ -33,17 +37,25 @@ export class GridManager {
         var letter = columnIndexToLabel(j);
         row.insertCell(-1).innerHTML =
           i && j
-            ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><div class='cell-schedule-indicator' aria-hidden='true'></div><input id='" +
+            ? "<div class='cell-output'></div><div class='cell-status' aria-hidden='true'></div><div class='cell-schedule-indicator' aria-hidden='true'></div><button type='button' class='cell-focus-proxy' tabindex='0' aria-label='Select cell " +
               letter +
               i +
-              "'/><div class='cell-actions'><button type='button' class='cell-action' data-action='copy' title='Copy value' aria-label='Copy value'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='10' height='10' rx='2'></rect><path d='M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1'></path></svg></button><button type='button' class='cell-action' data-action='fullscreen' title='Fullscreen' aria-label='Fullscreen'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M8 3H5a2 2 0 0 0-2 2v3'></path><path d='M16 3h3a2 2 0 0 1 2 2v3'></path><path d='M8 21H5a2 2 0 0 1-2-2v-3'></path><path d='M16 21h3a2 2 0 0 0 2-2v-3'></path></svg></button><button type='button' class='cell-action' data-action='run' title='Run formula'>▶</button></div><div class='fill-handle'></div>"
+              "'></button><input id='" +
+              letter +
+              i +
+              "' class='cell-anchor-input' readonly tabindex='-1' aria-hidden='true' aria-readonly='true' autocomplete='off' spellcheck='false'/><div class='cell-actions'><button type='button' class='cell-action' data-action='copy' title='Copy value' aria-label='Copy value'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='10' height='10' rx='2'></rect><path d='M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1'></path></svg></button><button type='button' class='cell-action' data-action='fullscreen' title='Fullscreen' aria-label='Fullscreen'><svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M8 3H5a2 2 0 0 0-2 2v3'></path><path d='M16 3h3a2 2 0 0 1 2 2v3'></path><path d='M8 21H5a2 2 0 0 1-2-2v-3'></path><path d='M16 21h3a2 2 0 0 0 2-2v-3'></path></svg></button><button type='button' class='cell-action' data-action='run' title='Run formula'>▶</button></div><div class='fill-handle'></div>"
             : i || letter;
       }
     }
   }
 
   getInputs() {
-    return [].slice.call(this.table.querySelectorAll('input'));
+    return [].slice.call(this.table.querySelectorAll('.cell-anchor-input'));
+  }
+
+  getFocusProxy(input) {
+    if (!input || !input.parentElement) return null;
+    return input.parentElement.querySelector('.cell-focus-proxy');
   }
 
   fitRowHeaderColumnWidth() {
@@ -310,7 +322,7 @@ export class GridManager {
     probe.style.whiteSpace = 'nowrap';
     probe.style.overflow = 'visible';
 
-    var input = probe.querySelector('input');
+    var input = probe.querySelector('.cell-anchor-input');
     if (input) {
       input.style.position = 'static';
       input.style.width = 'auto';
@@ -407,8 +419,12 @@ export class GridManager {
   }
 
   setEditing(input, editing) {
+    input.readOnly = true;
     input.classList.toggle('editing', editing);
     input.parentElement.classList.toggle('editing', editing);
+    if (typeof this.onEditingStateChange === 'function') {
+      this.onEditingStateChange(input, !!editing);
+    }
     if (!editing) {
       input.parentElement.classList.remove('formula-bar-editing');
     }
@@ -434,13 +450,22 @@ export class GridManager {
     if (nextCellIndex >= this.table.rows[nextRowIndex].cells.length)
       return true;
 
-    var nextInput =
-      this.table.rows[nextRowIndex].cells[nextCellIndex].querySelector('input');
-    if (nextInput) nextInput.focus();
+    var nextInput = this.table.rows[nextRowIndex].cells[
+      nextCellIndex
+    ].querySelector('.cell-anchor-input');
+    if (nextInput) {
+      var focusProxy = this.getFocusProxy(nextInput);
+      if (focusProxy && typeof focusProxy.focus === 'function') {
+        focusProxy.focus();
+      } else {
+        nextInput.focus();
+      }
+    }
     return true;
   }
 
   renderCellValue(input, value, isEditing, hasFormula, options) {
+    input.readOnly = true;
     if (!isEditing) input.value = value;
     input.parentElement.dataset.computedValue =
       value == null ? '' : String(value);
@@ -459,64 +484,9 @@ export class GridManager {
       !!(opts.attachment && opts.attachment.generated),
     );
     if (output) {
-      output.classList.toggle('formula-value', !!hasFormula);
-      output.classList.toggle('error-value', !!opts.error);
-      output.classList.toggle('numeric-value', !!opts.alignRight);
-      output.classList.toggle('ai-skeleton-value', !!opts.aiSkeleton);
-      output.classList.toggle(
-        'ai-skeleton-list-value',
-        !!opts.aiSkeleton && aiSkeletonVariant === 'list',
-      );
-      output.classList.toggle(
-        'ai-skeleton-table-value',
-        !!opts.aiSkeleton && aiSkeletonVariant === 'table',
-      );
-      output.style.backgroundColor = opts.backgroundColor
-        ? String(opts.backgroundColor)
-        : '';
-      output.style.fontSize = opts.fontSize ? String(opts.fontSize) + 'px' : '';
-      output.style.fontFamily = getFontFamilyCssValue(opts.fontFamily);
-      if (opts.attachment) {
-        output.innerHTML = this.renderAttachmentValue(opts.attachment);
-      } else if (opts.aiSkeleton) {
-        if (aiSkeletonVariant === 'table') {
-          output.innerHTML =
-            "<span class='cell-ai-skeleton cell-ai-skeleton-table' aria-hidden='true'>" +
-            "<span class='cell-ai-skeleton-table-row'>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            '</span>' +
-            "<span class='cell-ai-skeleton-table-row'>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            '</span>' +
-            "<span class='cell-ai-skeleton-table-row'>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            "<span class='cell-ai-skeleton-block'></span>" +
-            '</span>' +
-            '</span>';
-        } else {
-          output.innerHTML =
-            "<span class='cell-ai-skeleton cell-ai-skeleton-list' aria-hidden='true'>" +
-            "<span class='cell-ai-skeleton-line is-long'></span>" +
-            "<span class='cell-ai-skeleton-line is-mid'></span>" +
-            "<span class='cell-ai-skeleton-line is-short'></span>" +
-            '</span>';
-        }
-      } else {
-        output.innerHTML = opts.literal
-          ? this.escapeHtml(value == null ? '' : value).replace(
-              /\r\n?/g,
-              '<br>',
-            )
-          : this.renderMarkdown(value);
-      }
+      applyCellContentToOutput(output, value, hasFormula, opts);
     }
-    input.style.fontSize = opts.fontSize ? String(opts.fontSize) + 'px' : '';
-    input.style.fontFamily = getFontFamilyCssValue(opts.fontFamily);
+    applyCellInputTypography(input, opts);
     input.parentElement.style.setProperty(
       '--cell-bg',
       opts.backgroundColor ? String(opts.backgroundColor) : '#fff',
@@ -595,88 +565,9 @@ export class GridManager {
   }
 
   renderAttachmentValue(attachment) {
-    var meta = attachment || {};
-    var pending = !!meta.pending;
-    var name = this.escapeHtml(String(meta.name || ''));
-    var previewUrl = String(meta.previewUrl || '');
-    var downloadUrl = this.buildAttachmentHref(meta);
-    var hasDirectFileUrl = !!String(
-      meta.downloadUrl || meta.previewUrl || meta.url || '',
-    ).trim();
-    var generated = meta.generated === true;
-    var isImage =
-      String(meta.type || '')
-        .toLowerCase()
-        .indexOf('image/') === 0 && !!previewUrl;
-    if (pending) {
-      return (
-        "<div class='attachment-chip pending full'><button type='button' class='attachment-select'>" +
-        (meta.converting ? 'Converting the file...' : 'Choose file') +
-        '</button></div>'
-      );
-    }
-    if (generated && downloadUrl) {
-      return this.renderGeneratedAttachmentCard(
-        String(meta.name || 'Attached file'),
-        downloadUrl,
-        hasDirectFileUrl,
-        String(meta.type || ''),
-      );
-    }
-    return (
-      "<div class='attachment-chip" +
-      (downloadUrl ? ' has-download' : '') +
-      " has-content-preview" +
-      (isImage ? ' has-image-preview has-inline-image' : '') +
-      "' data-full-name='" +
-      (name || 'Attached file') +
-      "'>" +
-      "<button type='button' class='attachment-select'" +
-      (isImage
-        ? ' style="background-image:url(\'' +
-          this.escapeHtml(previewUrl) +
-          '\');"'
-        : '') +
-      '>' +
-      "<span class='attachment-select-icon' aria-hidden='true'>" +
-      "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
-      "<path d='m21.44 11.05-8.49 8.49a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.49-8.48' />" +
-      '</svg>' +
-      '</span>' +
-      "<span class='attachment-select-label'>" +
-      (name || 'Attached file') +
-      '</span>' +
-      '</button>' +
-      (isImage
-        ? "<div class='attachment-image-preview'><img src='" +
-          this.escapeHtml(previewUrl) +
-          "' alt='" +
-          (name || 'Attached image') +
-          "' /></div>"
-        : '') +
-      (downloadUrl
-        ? "<a class='attachment-download' href='" +
-          this.escapeHtml(downloadUrl) +
-          "' download='" +
-          (name || 'Attached file') +
-          "' title='Download attachment' aria-label='Download attachment'>" +
-          "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
-          "<path d='M12 3v11' />" +
-          "<path d='m7 11 5 5 5-5' />" +
-          "<path d='M5 21h14' />" +
-          '</svg>' +
-          '</a>'
-        : '') +
-      "<button type='button' class='attachment-content-preview' title='Show extracted content' aria-label='Show extracted content'>" +
-      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
-      "<path d='M8 3H5a2 2 0 0 0-2 2v3'></path>" +
-      "<path d='M16 3h3a2 2 0 0 1 2 2v3'></path>" +
-      "<path d='M8 21H5a2 2 0 0 1-2-2v-3'></path>" +
-      "<path d='M16 21h3a2 2 0 0 0 2-2v-3'></path>" +
-      "</svg>" +
-      '</button>' +
-      "<button type='button' class='attachment-remove' title='Remove attachment'>×</button></div>"
-    );
+    var probe = document.createElement('div');
+    applyCellContentToOutput(probe, '', false, { attachment: attachment });
+    return probe.innerHTML;
   }
 
   renderDownloadAttachmentLink(label, href) {
@@ -697,230 +588,13 @@ export class GridManager {
   }
 
   renderGeneratedAttachmentCard(label, href, hasDirectFileUrl, type) {
-    var name = String(label || 'attachment');
-    var safeName = this.escapeHtml(name);
-    var safeHref = this.escapeHtml(String(href || ''));
-    var openAttrs = hasDirectFileUrl
-      ? " target='_blank' rel='noopener noreferrer'"
-      : '';
-
-    return (
-      "<span class='generated-attachment-card'>" +
-      "<a class='generated-attachment-main' href='" +
-      safeHref +
-      "'" +
-      openAttrs +
-      (hasDirectFileUrl ? '' : " download='" + safeName + "'") +
-      '>' +
-      "<span class='generated-attachment-name'>" +
-      safeName +
-      '</span>' +
-      '</a>' +
-      "<a class='generated-attachment-download' href='" +
-      safeHref +
-      "' download='" +
-      safeName +
-      "' aria-label='Download " +
-      safeName +
-      "' title='Download " +
-      safeName +
-      "'>" +
-      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
-      "<path d='M12 3v11' />" +
-      "<path d='m7 11 5 5 5-5' />" +
-      "<path d='M5 21h14' />" +
-      '</svg>' +
-      '</a>' +
-      "<button type='button' class='generated-attachment-content-preview' title='Show extracted content' aria-label='Show extracted content'>" +
-      "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>" +
-      "<path d='M8 3H5a2 2 0 0 0-2 2v3'></path>" +
-      "<path d='M16 3h3a2 2 0 0 1 2 2v3'></path>" +
-      "<path d='M8 21H5a2 2 0 0 1-2-2v-3'></path>" +
-      "<path d='M16 21h3a2 2 0 0 0 2-2v-3'></path>" +
-      "</svg>" +
-      '</button>' +
-      '</span>'
-    );
-  }
-
-  buildAttachmentHref(attachment) {
-    var meta = attachment || {};
-    var directUrl = String(
-      meta.downloadUrl || meta.previewUrl || meta.url || '',
-    ).trim();
-    if (directUrl) return directUrl;
-
-    var content = meta.content;
-    if (content == null || content === '') return '';
-
-    var mimeType = String(meta.type || 'application/octet-stream').trim();
-    var encoding = String(meta.encoding || 'utf8').trim().toLowerCase();
-    if (encoding === 'base64') {
-      return 'data:' + mimeType + ';base64,' + String(content);
-    }
-    return (
-      'data:' +
-      mimeType +
-      ';charset=utf-8,' +
-      encodeURIComponent(String(content))
-    );
-  }
-
-  renderMarkdown(value) {
-    var text = this.escapeHtml(value == null ? '' : value).replace(
-      /\r\n?/g,
-      '\n',
-    );
-    var lines = text.split('\n');
-    var blocks = [];
-
-    for (var i = 0; i < lines.length; i++) {
-      var header = lines[i];
-      var separator = lines[i + 1];
-
-      if (this.isMarkdownTableHeader(header, separator)) {
-        var tableLines = [header];
-        i += 2;
-        while (i < lines.length && /\|/.test(lines[i])) {
-          tableLines.push(lines[i]);
-          i++;
-        }
-        i--;
-        blocks.push(this.renderMarkdownTable(tableLines));
-      } else {
-        blocks.push(this.renderInlineMarkdown(header));
-      }
-    }
-
-    return blocks.join('<br>');
-  }
-
-  isMarkdownTableHeader(headerLine, separatorLine) {
-    if (!headerLine || !separatorLine) return false;
-    if (!/\|/.test(headerLine)) return false;
-    return /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(
-      separatorLine,
-    );
-  }
-
-  renderMarkdownTable(lines) {
-    if (!lines.length) return '';
-
-    var headerCells = this.parseTableRow(lines[0]);
-    var bodyRows = [];
-
-    for (var i = 1; i < lines.length; i++) {
-      bodyRows.push(this.parseTableRow(lines[i]));
-    }
-
-    var thead =
-      '<thead><tr>' +
-      headerCells
-        .map((cell) => '<th>' + this.renderInlineMarkdown(cell) + '</th>')
-        .join('') +
-      '</tr></thead>';
-    var tbody =
-      '<tbody>' +
-      bodyRows
-        .map((row) => {
-          return (
-            '<tr>' +
-            row
-              .map((cell) => '<td>' + this.renderInlineMarkdown(cell) + '</td>')
-              .join('') +
-            '</tr>'
-          );
-        })
-        .join('') +
-      '</tbody>';
-
-    return "<table class='md-table'>" + thead + tbody + '</table>';
-  }
-
-  parseTableRow(line) {
-    var normalized = String(line || '').trim();
-    if (normalized.charAt(0) === '|') normalized = normalized.substring(1);
-    if (normalized.charAt(normalized.length - 1) === '|')
-      normalized = normalized.substring(0, normalized.length - 1);
-    return normalized.split('|').map(function (cell) {
-      return cell.trim();
+    return this.renderAttachmentValue({
+      name: label,
+      downloadUrl: href,
+      generated: true,
+      type: type,
+      url: hasDirectFileUrl ? href : '',
     });
-  }
-
-  renderInlineMarkdown(text) {
-    var output = String(text || '');
-    output = output.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
-    output = output.replace(/^###\s+/, '');
-    output = output.replace(/^##\s+/, '');
-    output = output.replace(/^#\s+/, '');
-    output = output.replace(
-      /\[([^\]]+)\]\((\/channel-events\/[^)\s]+)\)/g,
-      (_, label, href) => this.renderInternalAttachmentLink(label, href),
-    );
-    output = output.replace(
-      /\[([^\]]+)\]\(((?:https?:\/\/|data:|blob:|\/)[^\s)]+)\)/g,
-      "<a href='$2' target='_blank' rel='noopener noreferrer'>$1</a>",
-    );
-    output = output.replace(/`([^`]+)`/g, '<code>$1</code>');
-    output = output.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    output = output.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-    return output;
-  }
-
-  renderInternalAttachmentLink(label, href) {
-    var name = String(label || 'attachment');
-    var safeName = this.escapeHtml(name);
-    var safeHref = this.escapeHtml(String(href || ''));
-    var lower = name.toLowerCase();
-    var isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(lower);
-    var isPdf = /\.pdf$/i.test(lower);
-
-    if (isImage) {
-      return (
-        "<span class='embedded-attachment-link has-preview is-image'>" +
-        "<a class='embedded-attachment-open' href='" +
-        safeHref +
-        "' target='_blank' rel='noopener noreferrer' data-preview-kind='image' data-preview-url='" +
-        safeHref +
-        "' data-preview-name='" +
-        safeName +
-        "'>" +
-        safeName +
-        '</a>' +
-        '</span>'
-      );
-    }
-
-    if (isPdf) {
-      return (
-        "<span class='embedded-attachment-link has-preview is-pdf'>" +
-        "<a class='embedded-attachment-open' href='" +
-        safeHref +
-        "' target='_blank' rel='noopener noreferrer' data-preview-kind='pdf' data-preview-url='" +
-        safeHref +
-        "' data-preview-name='" +
-        safeName +
-        "'>" +
-        safeName +
-        '</a>' +
-        '</span>'
-      );
-    }
-
-    return (
-      "<span class='embedded-attachment-link'>" +
-      "<a class='embedded-attachment-open' href='" +
-      safeHref +
-      "' target='_blank' rel='noopener noreferrer'>" +
-      safeName +
-      '</a>' +
-      "<a class='embedded-attachment-download' href='" +
-      safeHref +
-      "' download='" +
-      safeName +
-      "'>Download</a>" +
-      '</span>'
-    );
   }
 
   escapeHtml(value) {
@@ -930,21 +604,5 @@ export class GridManager {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
-  }
-}
-
-function getFontFamilyCssValue(fontFamily) {
-  switch (String(fontFamily || 'default')) {
-    case 'sans':
-      return '"Trebuchet MS", "Segoe UI", sans-serif';
-    case 'serif':
-      return 'Georgia, "Times New Roman", serif';
-    case 'mono':
-      return '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
-    case 'display':
-      return '"Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif';
-    case 'default':
-    default:
-      return '';
   }
 }

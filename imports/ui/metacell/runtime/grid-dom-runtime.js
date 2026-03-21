@@ -72,7 +72,10 @@ export function ensureGridCapacityForStorage(app, workbookSnapshot) {
 
   var nextRows = Math.max(app.gridRows, bounds.maxRow);
   var nextCols = Math.max(app.gridCols, bounds.maxCol);
-  var activeId = app.activeInput ? app.activeInput.id : 'A1';
+  var activeId =
+    String(app.activeCellId || '') ||
+    (app.activeInput ? app.activeInput.id : '') ||
+    'A1';
 
   app.gridRows = nextRows;
   app.gridCols = nextCols;
@@ -84,6 +87,11 @@ export function ensureGridCapacityForStorage(app, workbookSnapshot) {
     DEFAULT_COL_WIDTH,
     DEFAULT_ROW_HEIGHT,
   );
+  if (typeof app.handleGridEditingStateChange === 'function') {
+    app.grid.onEditingStateChange = function (input, editing) {
+      app.handleGridEditingStateChange(input, editing);
+    };
+  }
   refreshGridReferences(app);
   app.setupColumnSort();
   app.setupGridResizing();
@@ -95,4 +103,8 @@ export function ensureGridCapacityForStorage(app, workbookSnapshot) {
   var nextActive =
     app.inputById[activeId] || app.inputById['A1'] || app.inputs[0];
   if (nextActive) app.setActiveInput(nextActive);
+
+  if (typeof app.renderCurrentSheetFromStorage === 'function') {
+    app.renderCurrentSheetFromStorage();
+  }
 }

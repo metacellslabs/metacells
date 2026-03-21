@@ -194,7 +194,7 @@ export function renderReportMarkdownNodes(app, root) {
     if (!text.trim()) continue;
 
     var container = document.createElement('div');
-    container.innerHTML = app.grid.renderMarkdown(text);
+    container.innerHTML = app.renderMarkdown(text);
     var fragment = document.createDocumentFragment();
     while (container.firstChild) {
       fragment.appendChild(container.firstChild);

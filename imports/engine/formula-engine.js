@@ -247,7 +247,15 @@ export class FormulaEngine {
         'with (context) { return (' + expression + '); }',
       );
       try {
-        return fn(context);
+        var result = fn(context);
+        if (
+          equalFormulaSpec &&
+          equalFormulaSpec.placeholder &&
+          String(result == null ? '' : result) === ''
+        ) {
+          this.setDisplayPlaceholder(options, equalFormulaSpec.placeholder);
+        }
+        return result;
       } catch (error) {
         var unknownFunctions = this.shouldUseUnknownFormulaFallback(
           raw.substring(1),

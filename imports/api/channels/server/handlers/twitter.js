@@ -122,11 +122,11 @@ export async function sendTwitterMessage(payload) {
     ? source.attachments.filter((item) => item && typeof item === 'object')
     : [];
 
-  if (!body) {
-    throw new Error('Twitter/X send requires a message body');
-  }
   if (attachments.length) {
     throw new Error('Twitter/X send does not support attachments yet');
+  }
+  if (!body) {
+    throw new Error('Twitter/X send requires a message body');
   }
 
   const response = await callTwitterApi(validated, '/2/tweets', {

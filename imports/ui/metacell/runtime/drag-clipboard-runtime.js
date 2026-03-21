@@ -1,28 +1,49 @@
+function getSelectionRangeState(app) {
+  return typeof app.getSelectionRange === 'function'
+    ? app.getSelectionRange()
+    : app.selectionRange;
+}
+
+function getActiveCellId(app) {
+  return typeof app.getSelectionActiveCellId === 'function'
+    ? app.getSelectionActiveCellId()
+    : String(app.activeCellId || '').toUpperCase();
+}
+
+function resolveSpillSourceInput(app, input) {
+  if (!app || !input) return input;
+  if (typeof app.getSpillSourceForCell !== 'function') return input;
+  var sourceCellId = app.getSpillSourceForCell(app.activeSheetId, input.id);
+  if (!sourceCellId || sourceCellId === String(input.id || '').toUpperCase()) {
+    return input;
+  }
+  return (app.inputById && app.inputById[sourceCellId]) || input;
+}
+
 export function getSelectionStartCellId(app) {
-  if (app.selectionRange) {
+  var selectionRange = getSelectionRangeState(app);
+  if (selectionRange) {
     return app.formatCellId(
-      app.selectionRange.startCol,
-      app.selectionRange.startRow,
+      selectionRange.startCol,
+      selectionRange.startRow,
     );
   }
-  return app.activeInput ? app.activeInput.id : null;
+  return getActiveCellId(app) || (app.activeInput ? app.activeInput.id : null);
 }
 
 export function getSelectedCellIds(app) {
-  if (!app.selectionRange) {
-    return app.activeInput ? [app.activeInput.id] : [];
+  var selectionRange = getSelectionRangeState(app);
+  var activeCellId = getActiveCellId(app);
+  if (!selectionRange) {
+    return activeCellId
+      ? [activeCellId]
+      : app.activeInput
+        ? [app.activeInput.id]
+        : [];
   }
   var ids = [];
-  for (
-    var row = app.selectionRange.startRow;
-    row <= app.selectionRange.endRow;
-    row++
-  ) {
-    for (
-      var col = app.selectionRange.startCol;
-      col <= app.selectionRange.endCol;
-      col++
-    ) {
+  for (var row = selectionRange.startRow; row <= selectionRange.endRow; row++) {
+    for (var col = selectionRange.startCol; col <= selectionRange.endCol; col++) {
       ids.push(app.formatCellId(col, row));
     }
   }
@@ -54,18 +75,11 @@ export function getSelectedRangeText(app) {
   var ids = getSelectedCellIds(app);
   if (!ids.length) return '';
   var rows = [];
-  if (app.selectionRange) {
-    for (
-      var row = app.selectionRange.startRow;
-      row <= app.selectionRange.endRow;
-      row++
-    ) {
+  var selectionRange = getSelectionRangeState(app);
+  if (selectionRange) {
+    for (var row = selectionRange.startRow; row <= selectionRange.endRow; row++) {
       var cols = [];
-      for (
-        var col = app.selectionRange.startCol;
-        col <= app.selectionRange.endCol;
-        col++
-      ) {
+      for (var col = selectionRange.startCol; col <= selectionRange.endCol; col++) {
         var cellId = app.formatCellId(col, row);
         cols.push(app.getRawCellValue(cellId));
       }
@@ -86,8 +100,8 @@ export function copyTextFallback(app, text, previouslyFocused) {
   fallback.remove();
   if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
     previouslyFocused.focus();
-  } else if (app.activeInput && typeof app.activeInput.focus === 'function') {
-    app.activeInput.focus();
+  } else if (typeof app.focusActiveEditor === 'function') {
+    app.focusActiveEditor();
   }
 }
 
@@ -105,15 +119,16 @@ export function applyPastedText(app, text) {
   var matrix = rows.map((row) => row.split('\t'));
   var changed = {};
 
-  if (app.selectionRange && matrix.length === 1 && matrix[0].length === 1) {
+  var selectionRange = getSelectionRangeState(app);
+  if (selectionRange && matrix.length === 1 && matrix[0].length === 1) {
     for (
-      var r = app.selectionRange.startRow;
-      r <= app.selectionRange.endRow;
+      var r = selectionRange.startRow;
+      r <= selectionRange.endRow;
       r++
     ) {
       for (
-        var c = app.selectionRange.startCol;
-        c <= app.selectionRange.endCol;
+        var c = selectionRange.startCol;
+        c <= selectionRange.endCol;
         c++
       ) {
         var cellId = app.formatCellId(c, r);
@@ -137,9 +152,9 @@ export function applyPastedText(app, text) {
     }
   }
 
-  if (app.activeInput && changed[app.activeInput.id]) {
-    app.activeInput.value = app.getRawCellValue(app.activeInput.id);
-    app.formulaInput.value = app.activeInput.value;
+  var activeCellId = String(getActiveCellId(app) || '');
+  if (activeCellId && changed[activeCellId]) {
+    app.syncActiveEditorValue(app.getRawCellValue(activeCellId));
   }
 
   app.aiService.notifyActiveCellChanged();
@@ -148,7 +163,10 @@ export function applyPastedText(app, text) {
 
 export function clearSelectedCells(app) {
   var ids = getSelectedCellIds(app);
-  if (!ids.length && app.activeInput) {
+  var activeCellId = String(getActiveCellId(app) || '');
+  if (!ids.length && activeCellId) {
+    ids = [activeCellId];
+  } else if (!ids.length && app.activeInput) {
     ids = [app.activeInput.id];
   }
   if (!ids.length) return;
@@ -171,9 +189,8 @@ export function clearSelectedCells(app) {
     app.setRawCellValue(ids[i], '');
   }
 
-  if (app.activeInput && ids.indexOf(app.activeInput.id) !== -1) {
-    app.activeInput.value = '';
-    app.formulaInput.value = '';
+  if (activeCellId && ids.indexOf(activeCellId) !== -1) {
+    app.syncActiveEditorValue('');
   }
 
   app.aiService.notifyActiveCellChanged();
@@ -182,6 +199,11 @@ export function clearSelectedCells(app) {
 }
 
 export function clearFillRangeHighlight(app) {
+  if (typeof app.setSelectionFillRange === 'function') {
+    app.setSelectionFillRange(null);
+  } else {
+    app.fillRange = null;
+  }
   app.inputs.forEach((input) => {
     input.parentElement.classList.remove('fill-range');
   });
@@ -197,6 +219,19 @@ export function highlightFillRange(app, sourceId, targetId) {
   var maxCol = Math.max(source.col, target.col);
   var minRow = Math.min(source.row, target.row);
   var maxRow = Math.max(source.row, target.row);
+  var nextRange = {
+    startCol: minCol,
+    endCol: maxCol,
+    startRow: minRow,
+    endRow: maxRow,
+    sourceId: String(sourceId || '').toUpperCase(),
+    targetId: String(targetId || '').toUpperCase(),
+  };
+  if (typeof app.setSelectionFillRange === 'function') {
+    app.setSelectionFillRange(nextRange);
+  } else {
+    app.fillRange = nextRange;
+  }
 
   app.inputs.forEach((input) => {
     var parsed = app.parseCellId(input.id);
@@ -232,14 +267,31 @@ export function startSelectionDrag(app, sourceInput, event) {
   if (!sourceInput) return;
   event.preventDefault();
   var mentionInput = null;
+  var activeEditor =
+    typeof app.getActiveEditorInput === 'function'
+      ? app.getActiveEditorInput()
+      : app.activeInput;
+  var activeInput = app.getActiveCellInput
+    ? app.getActiveCellInput()
+    : app.activeInput;
   if (
-    app.activeInput &&
-    app.isEditingCell(app.activeInput) &&
-    app.canInsertFormulaMention(app.activeInput.value)
+    activeInput &&
+    app.isEditingCell(activeInput) &&
+    app.canInsertFormulaMention(
+      String(activeEditor && activeEditor.value != null ? activeEditor.value : ''),
+    )
   ) {
-    mentionInput = app.activeInput;
+    mentionInput =
+      app.editorOverlayInput &&
+      (typeof app.isEditorElementFocused === 'function'
+        ? app.isEditorElementFocused(app.editorOverlayInput)
+        : false)
+        ? app.editorOverlayInput
+        : activeInput;
   } else if (
-    document.activeElement === app.formulaInput &&
+    (typeof app.isEditorElementFocused === 'function'
+      ? app.isEditorElementFocused(app.formulaInput)
+      : false) &&
     app.canInsertFormulaMention(app.formulaInput.value)
   ) {
     mentionInput = app.formulaInput;
@@ -282,7 +334,10 @@ export function onSelectionDragMove(app, event) {
   if (!el || !el.closest) return;
   var td = el.closest('td');
   if (!td) return;
-  var input = td.querySelector('input');
+  var input = resolveSpillSourceInput(
+    app,
+    td.querySelector('.cell-anchor-input'),
+  );
   if (!input) return;
 
   if (app.selectionDrag.targetId !== input.id) {
@@ -319,25 +374,38 @@ export function finishSelectionDrag(app) {
   var targetInput = app.inputById[targetId];
   if (!targetInput) return;
   app.extendSelectionNav = true;
-  targetInput.focus();
+  if (typeof app.focusCellProxy === 'function') {
+    app.focusCellProxy(targetInput);
+  } else {
+    targetInput.focus();
+  }
   app.extendSelectionNav = false;
 }
 
 export function syncMentionPreviewToUi(app, mentionInput) {
   if (!mentionInput) return;
+  var activeCellId = String(getActiveCellId(app) || '');
   if (app.syncCrossTabMentionSourceValue(mentionInput.value)) {
     if (mentionInput !== app.formulaInput)
-      app.formulaInput.value = mentionInput.value;
+      app.syncActiveEditorValue(mentionInput.value, { syncOverlay: false });
     return;
   }
   if (mentionInput === app.formulaInput) {
-    if (!app.activeInput) return;
-    app.activeInput.value = mentionInput.value;
-    app.setRawCellValue(app.activeInput.id, mentionInput.value);
+    if (!activeCellId) return;
+    app.syncActiveEditorValue(mentionInput.value, { syncOverlay: false });
+    app.setRawCellValue(activeCellId, mentionInput.value);
     return;
   }
-  if (app.activeInput === mentionInput) {
-    app.formulaInput.value = mentionInput.value;
+  if (
+    mentionInput &&
+    activeCellId &&
+    mentionInput.id &&
+    String(mentionInput.id || '').toUpperCase() === activeCellId
+  ) {
+    app.syncActiveEditorValue(mentionInput.value, { syncOverlay: false });
+  }
+  if (mentionInput === app.editorOverlayInput && activeCellId) {
+    app.syncActiveEditorValue(mentionInput.value);
   }
 }
 
@@ -347,7 +415,10 @@ export function onFillDragMove(app, event) {
   if (!el || !el.closest) return;
   var td = el.closest('td');
   if (!td) return;
-  var input = td.querySelector('input');
+  var input = resolveSpillSourceInput(
+    app,
+    td.querySelector('.cell-anchor-input'),
+  );
   if (!input) return;
 
   app.fillDrag.targetId = input.id;

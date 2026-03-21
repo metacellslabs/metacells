@@ -7,6 +7,8 @@ import { computeSheetSnapshot } from './server/compute.js';
 const MAIN_SHEET_ID = 'sheet-1';
 const LOOKUP_SHEET_ID = 'sheet-2';
 const AI_SHEET_ID = 'sheet-3';
+const RUNTIME_SHEET_ID = 'sheet-4';
+const REPORT_TAB_ID = 'report-1';
 const FINANCE_ASSUMPTIONS_SHEET_ID = 'sheet-1';
 const FINANCE_MODEL_SHEET_ID = 'sheet-2';
 const FINANCE_AI_SHEET_ID = 'sheet-3';
@@ -22,6 +24,8 @@ function buildBaseFormulaTestWorkbook() {
     { id: MAIN_SHEET_ID, name: 'Formula Checks', type: 'sheet' },
     { id: LOOKUP_SHEET_ID, name: 'Lookup Data', type: 'sheet' },
     { id: AI_SHEET_ID, name: 'AI Playground', type: 'sheet' },
+    { id: RUNTIME_SHEET_ID, name: 'Runtime Patterns', type: 'sheet' },
+    { id: REPORT_TAB_ID, name: 'Report View', type: 'report' },
   ]);
   adapter.setActiveTabId(MAIN_SHEET_ID);
   adapter.setNamedCells({
@@ -31,6 +35,10 @@ function buildBaseFormulaTestWorkbook() {
     website: { sheetId: AI_SHEET_ID, cellId: 'J3' },
     tone: { sheetId: AI_SHEET_ID, cellId: 'J4' },
     plans: { sheetId: LOOKUP_SHEET_ID, startCellId: 'A2', endCellId: 'C4' },
+    case: { sheetId: RUNTIME_SHEET_ID, cellId: 'J2' },
+    summary: { sheetId: RUNTIME_SHEET_ID, cellId: 'J3' },
+    policy_source: { sheetId: RUNTIME_SHEET_ID, cellId: 'J5' },
+    policy_file: { sheetId: RUNTIME_SHEET_ID, cellId: 'K5' },
   });
 
   setCell(adapter, LOOKUP_SHEET_ID, 'A1', 'SKU');
@@ -353,6 +361,129 @@ export async function buildComputedFormulaTestWorkbook() {
     setCell(adapter, AI_SHEET_ID, `B${sheetRow}`, row[1]);
     setCell(adapter, AI_SHEET_ID, `C${sheetRow}`, row[2]);
   });
+
+  setCell(adapter, RUNTIME_SHEET_ID, 'A1', 'Capability');
+  setCell(adapter, RUNTIME_SHEET_ID, 'B1', 'Example');
+  setCell(adapter, RUNTIME_SHEET_ID, 'C1', 'What it covers');
+  setCell(adapter, RUNTIME_SHEET_ID, 'J1', 'Runtime Inputs');
+  setCell(adapter, RUNTIME_SHEET_ID, 'J2', 'A two-line business case draft');
+  setCell(
+    adapter,
+    RUNTIME_SHEET_ID,
+    'J3',
+    'Weekly launch summary with customer proof points.',
+  );
+  setCell(
+    adapter,
+    RUNTIME_SHEET_ID,
+    'J5',
+    '# Policy\n\n- Keep launch notes concise.\n- Include customer impact.\n',
+  );
+  setCell(
+    adapter,
+    RUNTIME_SHEET_ID,
+    'K5',
+    '=PDF("policy-copy.pdf", J5)',
+  );
+
+  const runtimeRows = [
+    [
+      'Report input',
+      'Input:@case:[Enter your business case]',
+      'Editable report control bound to a named cell',
+    ],
+    [
+      'Inline report input',
+      'Business case: Input:@case',
+      'Mixed prose + embedded report control',
+    ],
+    [
+      'Report file picker',
+      'File:@policy_file:[Upload policy PDF]',
+      'Report file control syntax for workbook-bound files',
+    ],
+    [
+      'Sheet-linked generated file',
+      "File:'Runtime Patterns'!K5",
+      'Report link to a generated =PDF(...) file cell',
+    ],
+    [
+      'Report link',
+      '!@idea',
+      'Internal report link to a named cell',
+    ],
+    [
+      'Generated text file',
+      '=FILE("launch-notes.txt", J3)',
+      'Generated attachment formula',
+    ],
+    [
+      'Generated PDF',
+      '=PDF("policy-copy.pdf", J5)',
+      'Generated PDF formula',
+    ],
+    [
+      'Channel inbox log',
+      '/tg',
+      'Raw inbound event stream as date/from/text/file rows',
+    ],
+    [
+      'Channel AI note',
+      "' /tg summarize the latest incoming event",
+      'One AI note from channel events',
+    ],
+    [
+      'Channel AI list',
+      '> /tg extract action items from each incoming event',
+      'One list item per channel event',
+    ],
+    [
+      'Channel AI table',
+      '# /tg extract key fields from each incoming event',
+      'One table row per channel event',
+    ],
+    [
+      'Telegram send',
+      '/tg:send:hello from MetaCells',
+      'Outbound channel send',
+    ],
+    [
+      'Telegram file send',
+      '/tg:send:@policy_file uploaded',
+      'Outbound send with workbook attachment reference',
+    ],
+    [
+      'Shell send',
+      '/sh:send:{"command":"pwd"}',
+      'Channel action with JSON payload',
+    ],
+    [
+      'Email send',
+      '/sf:send:{"to":"user@example.com","subj":"Status","body":"See @summary"}',
+      'Structured outbound send through SMTP/IMAP channel',
+    ],
+  ];
+
+  runtimeRows.forEach((row, index) => {
+    const sheetRow = index + 2;
+    setCell(adapter, RUNTIME_SHEET_ID, `A${sheetRow}`, row[0]);
+    setCell(adapter, RUNTIME_SHEET_ID, `B${sheetRow}`, row[1]);
+    setCell(adapter, RUNTIME_SHEET_ID, `C${sheetRow}`, row[2]);
+  });
+
+  adapter.setReportContent(
+    REPORT_TAB_ID,
+    [
+      '# Formula Test Report',
+      '',
+      'Idea link: !@idea',
+      'Case input: Input:@case:[Enter your business case]',
+      'Policy file: File:@policy_file:[Upload policy PDF]',
+      "Generated file: File:'Runtime Patterns'!K5",
+      '',
+      'This report tab exercises report-view controls, links, and generated file references.',
+    ].join('\n'),
+  );
 
   return adapter.snapshot();
 }

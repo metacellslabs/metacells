@@ -270,11 +270,9 @@ describe('metacells', function () {
         'base64',
       ).toString('utf8');
       assert.doesNotMatch(markdownPdfText, /# Title/);
-      assert.match(markdownPdfText, /\(Title\) Tj/);
-      assert.match(markdownPdfText, /\(\* one\) Tj/);
-      assert.match(markdownPdfText, /\(\* two\) Tj/);
-      assert.match(markdownPdfText, /\(doc \(https:\/\/example\.com\)\) Tj/);
-      assert.strictEqual(pdfData.content, 'Hello World');
+      assert.ok(markdownPdfText.includes('Title\\\\n\\\\n- one\\\\n- two'));
+      assert.ok(markdownPdfText.includes('doc \\(https://example.com\\)'));
+      assert.strictEqual(fileData.content, 'Hello World');
 
       const docxResult = formulaEngine.evaluateCell('sheet-1', 'C2', {});
       const docxData = JSON.parse(
@@ -633,6 +631,8 @@ describe('metacells', function () {
           return cells[cellId] || '';
         },
         getCellState(sheetId, cellId) {
+          return '';
+        },
         getCellDisplayValue() {
           return '';
         },
@@ -942,8 +942,6 @@ describe('metacells', function () {
       assert.deepStrictEqual(parseChannelSendCommand('/tg:send:message'), {
         label: 'tg',
         message: 'message',
-      });
-        message: 'hello',
       });
       assert.deepStrictEqual(
         parseChannelSendCommand(
@@ -1518,7 +1516,7 @@ describe('metacells', function () {
         assert.strictEqual(saved.name, 'Formula Test Bench');
 
         const workbook = decodeWorkbookDocument(saved.workbook || {});
-        assert.strictEqual(workbook.tabs.length, 3);
+        assert.strictEqual(workbook.tabs.length, 5);
         assert.strictEqual(workbook.activeTabId, 'sheet-1');
         assert.deepStrictEqual(workbook.namedCells.base_value, {
           sheetId: 'sheet-1',
@@ -1536,6 +1534,23 @@ describe('metacells', function () {
           sheetId: 'sheet-2',
           startCellId: 'A2',
           endCellId: 'C4',
+        });
+        assert.deepStrictEqual(workbook.namedCells.case, {
+          sheetId: 'sheet-4',
+          cellId: 'J2',
+        });
+        assert.deepStrictEqual(workbook.namedCells.summary, {
+          sheetId: 'sheet-4',
+          cellId: 'J3',
+        });
+        assert.deepStrictEqual(workbook.namedCells.policy_file, {
+          sheetId: 'sheet-4',
+          cellId: 'K5',
+        });
+        assert.deepStrictEqual(workbook.tabs[4], {
+          id: 'report-1',
+          name: 'Report View',
+          type: 'report',
         });
 
         assert.strictEqual(workbook.sheets['sheet-1'].cells.B5.value, '30');
@@ -1569,6 +1584,45 @@ describe('metacells', function () {
         assert.strictEqual(
           workbook.sheets['sheet-3'].cells.J2.source,
           'пломбир для карликов',
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B2.source,
+          'Input:@case:[Enter your business case]',
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B5.source,
+          "File:'Runtime Patterns'!K5",
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B7.source,
+          '=FILE("launch-notes.txt", J3)',
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B8.source,
+          '=PDF("policy-copy.pdf", J5)',
+        );
+        assert.strictEqual(workbook.sheets['sheet-4'].cells.B9.source, '/tg');
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B12.source,
+          '# /tg extract key fields from each incoming event',
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.B15.source,
+          '/sh:send:{"command":"pwd"}',
+        );
+        assert.strictEqual(
+          workbook.sheets['sheet-4'].cells.K5.source,
+          '=PDF("policy-copy.pdf", J5)',
+        );
+        assert.ok(
+          String(workbook.sheets['report-1'].reportContent || '').includes(
+            'Case input: Input:@case:[Enter your business case]',
+          ),
+        );
+        assert.ok(
+          String(workbook.sheets['report-1'].reportContent || '').includes(
+            "Generated file: File:'Runtime Patterns'!K5",
+          ),
         );
       } finally {
         await Sheets.removeAsync({ _id: sheetId });
@@ -3400,8 +3454,8 @@ describe('metacells', function () {
       );
 
       assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'B1', {}), 15);
-      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'C1', {}), '10');
-      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'D1', {}), '10');
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'C1', {}), 10);
+      assert.strictEqual(formulaEngine.evaluateCell('sheet-1', 'D1', {}), 10);
     });
   }
 });

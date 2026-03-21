@@ -44,7 +44,7 @@ function insertLinePrefix(textarea, prefix) {
 
 function syncFullscreenPreview(app) {
   if (!app.fullscreenEditor || !app.fullscreenPreview) return;
-  app.fullscreenPreview.innerHTML = app.grid.renderMarkdown(
+  app.fullscreenPreview.innerHTML = app.renderMarkdown(
     app.fullscreenEditor.value || '',
   );
 }

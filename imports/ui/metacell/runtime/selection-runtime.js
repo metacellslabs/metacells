@@ -1,5 +1,52 @@
+import { focusCellProxy as focusCellProxyRuntime } from './grid-focus-runtime.js';
+import {
+  applyDependencyHighlight,
+  clearDependencyHighlight,
+} from './dependency-visual-runtime.js';
+import {
+  applyActiveCellVisualState,
+  applySpillSelectionHighlight,
+  clearSelectionVisualState,
+  clearSpillSelectionHighlight,
+  highlightSelectionRange,
+  updateAxisHeaderHighlight,
+} from './selection-visual-runtime.js';
+
+function getActiveCellId(app) {
+  return typeof app.getSelectionActiveCellId === 'function'
+    ? app.getSelectionActiveCellId()
+    : String(app.activeCellId || '').toUpperCase();
+}
+
+function getAnchorCellId(app) {
+  return typeof app.getSelectionAnchorCellId === 'function'
+    ? app.getSelectionAnchorCellId()
+    : String(app.selectionAnchorId || '').toUpperCase();
+}
+
+function getSelectionRangeState(app) {
+  return typeof app.getSelectionRange === 'function'
+    ? app.getSelectionRange()
+    : app.selectionRange;
+}
+
+function setSelectionRangeState(app, range) {
+  if (typeof app.setSelectionRangeState === 'function') {
+    app.setSelectionRangeState(range);
+    return;
+  }
+  app.selectionRange = range || null;
+}
+
 export function isEditingCell(app, input) {
-  return !!(input && input.classList && input.classList.contains('editing'));
+  if (!input) return false;
+  if (app.editingSession && app.editingSession.cellId) {
+    return !!(
+      app.editingSession.sheetId === String(app.activeSheetId || '') &&
+      app.editingSession.cellId === String(input.id || '').toUpperCase()
+    );
+  }
+  return !!(input.classList && input.classList.contains('editing'));
 }
 
 export function isDirectTypeKey(app, event) {
@@ -9,195 +56,124 @@ export function isDirectTypeKey(app, event) {
   return true;
 }
 
+export function getDirectTypeValue(app, event) {
+  if (!isDirectTypeKey(app, event)) return '';
+  if (event && event.key === ' ' && event.code && event.code !== 'Space') {
+    var fallbackByCode = {
+      Equal: event.shiftKey ? '+' : '=',
+      Minus: event.shiftKey ? '_' : '-',
+      Digit0: event.shiftKey ? '=' : '0',
+    };
+    if (Object.prototype.hasOwnProperty.call(fallbackByCode, event.code)) {
+      return fallbackByCode[event.code];
+    }
+  }
+  if (event && event.key === ' ' && event.code === 'Equal') {
+    return event.shiftKey ? '+' : '=';
+  }
+  return String(event.key || '');
+}
+
 export function startEditingCell(app, input) {
   if (!input) return;
-  app.grid.setEditing(input, true);
-  app.editStartRawByCell[input.id] = app.getRawCellValue(input.id);
-  app.formulaRefCursorId = input.id;
-  app.formulaMentionPreview = null;
-  var rawValue = app.getRawCellValue(input.id);
-  var attachment = app.parseAttachmentSource(rawValue);
-  input.value = attachment ? String(attachment.name || '') : rawValue;
-  if (document.activeElement !== input) input.focus();
-  app.syncAIDraftLock();
+  if (typeof app.enterCellEditing === 'function') {
+    app.enterCellEditing(input, { origin: 'cell' });
+  }
 }
 
 export function setActiveInput(app, input) {
-  if (app.activeInput && app.activeInput.parentElement) {
-    app.activeInput.parentElement.classList.remove('active-cell');
-  }
   app.activeInput = input;
-  app.activeInput.parentElement.classList.add('active-cell');
+  if (typeof app.setSelectionActiveCellId === 'function') {
+    app.setSelectionActiveCellId(input.id);
+  } else {
+    app.activeCellId = String(input.id || '').toUpperCase();
+  }
   var rawValue = app.getRawCellValue(input.id);
   var attachment = app.parseAttachmentSource(rawValue);
-  app.formulaInput.value = attachment
-    ? String(attachment.name || '')
-    : rawValue;
+  var editingDraft = app.getEditingSessionDraft(input.id);
+  var displayValue =
+    editingDraft != null
+      ? editingDraft
+      : attachment
+        ? String(attachment.name || '')
+        : rawValue;
+  if (typeof app.syncActiveEditorValue === 'function') {
+    app.syncActiveEditorValue(displayValue, { syncOverlay: false });
+  } else {
+    app.formulaInput.value = displayValue;
+  }
   if (!app.extendSelectionNav) {
     setSelectionAnchor(app, input.id);
     clearSelectionRange(app);
   }
+  applyActiveCellVisualState(app);
   updateAxisHeaderHighlight(app);
   applyDependencyHighlight(app);
+  applySpillSelectionHighlight(app);
   app.syncCellNameInput();
   app.syncCellFormatControl();
   app.syncCellPresentationControls();
   app.syncAIDraftLock();
   app.syncAttachButtonState();
+  if (typeof app.syncEditorOverlay === 'function') app.syncEditorOverlay();
 }
 
 export function clearActiveInput(app) {
   if (app.activeInput) {
     app.grid.setEditing(app.activeInput, false);
-    app.activeInput.parentElement.classList.remove('active-cell');
+    app.clearEditingSession(app.activeInput.id);
   }
   app.activeInput = null;
-  app.formulaInput.value = '';
+  if (typeof app.setSelectionActiveCellId === 'function') {
+    app.setSelectionActiveCellId('');
+  } else {
+    app.activeCellId = '';
+  }
+  if (app.formulaInput) app.formulaInput.value = '';
+  if (app.editorOverlayInput) app.editorOverlayInput.value = '';
+  clearSelectionVisualState(app);
   clearSelectionRange(app);
   updateAxisHeaderHighlight(app);
   clearDependencyHighlight(app);
+  clearSpillSelectionHighlight(app);
   app.syncCellNameInput();
   app.syncCellFormatControl();
   app.syncCellPresentationControls();
   app.syncAIDraftLock();
   app.syncAttachButtonState();
+  if (typeof app.hideEditorOverlay === 'function') app.hideEditorOverlay();
 }
 
 export function ensureActiveCell(app) {
   if (app.isReportActive()) return;
-  if (app.activeInput) return;
-  var fallback = app.inputById['A1'] || app.inputs[0];
+  if (app.getActiveCellInput && app.getActiveCellInput()) return;
+  var activeCellId = getActiveCellId(app);
+  var fallback =
+    (activeCellId && app.inputById[activeCellId]) ||
+    (app.activeCellId && app.inputById[app.activeCellId]) ||
+    app.inputById['A1'] ||
+    app.inputs[0];
   if (!fallback) return;
   setActiveInput(app, fallback);
-  if (document.activeElement !== fallback) {
-    fallback.focus();
-  }
+  focusCellProxyRuntime(app, fallback);
 }
 
 export function setSelectionAnchor(app, cellId) {
+  if (typeof app.setSelectionAnchorCellId === 'function') {
+    app.setSelectionAnchorCellId(cellId);
+    return;
+  }
   app.selectionAnchorId = String(cellId || '').toUpperCase();
 }
 
 export function clearSelectionRange(app) {
-  app.selectionRange = null;
-  clearSelectionHighlight(app);
+  if (typeof app.clearSelectionRangeState === 'function') {
+    app.clearSelectionRangeState();
+  } else {
+    app.selectionRange = null;
+  }
+  clearSelectionVisualState(app);
   app.syncAttachButtonState();
-}
-
-export function clearSelectionHighlight(app) {
-  app.inputs.forEach((input) => {
-    input.parentElement.classList.remove('selected-range');
-  });
-  clearHeaderSelectionHighlight(app);
-}
-
-export function clearHeaderSelectionHighlight(app) {
-  var maxRow = app.table.rows.length - 1;
-  var maxCol = app.table.rows[0].cells.length - 1;
-
-  for (var col = 1; col <= maxCol; col++) {
-    app.table.rows[0].cells[col].classList.remove('selected-col-header');
-    app.table.rows[0].cells[col].classList.remove('active-col-header');
-  }
-  for (var row = 1; row <= maxRow; row++) {
-    app.table.rows[row].cells[0].classList.remove('selected-row-header');
-    app.table.rows[row].cells[0].classList.remove('active-row-header');
-  }
-  app.table.rows[0].cells[0].classList.remove('selected-corner-header');
-}
-
-export function clearDependencyHighlight(app) {
-  app.inputs.forEach((input) => {
-    input.parentElement.classList.remove('dependency-ref');
-  });
-
-  var maxRow = app.table.rows.length - 1;
-  var maxCol = app.table.rows[0].cells.length - 1;
-  for (var col = 1; col <= maxCol; col++) {
-    app.table.rows[0].cells[col].classList.remove('dependency-col-header');
-  }
-  for (var row = 1; row <= maxRow; row++) {
-    app.table.rows[row].cells[0].classList.remove('dependency-row-header');
-  }
-}
-
-export function applyDependencyHighlight(app) {
-  clearDependencyHighlight(app);
-  if (!app.activeInput) return;
-
-  var deps =
-    app.storage.getCellDependencies(app.activeSheetId, app.activeInput.id) ||
-    {};
-  var raw = String(app.getRawCellValue(app.activeInput.id) || '');
-  if (
-    (!Array.isArray(deps.cells) || !deps.cells.length) &&
-    (!Array.isArray(deps.namedRefs) || !deps.namedRefs.length) &&
-    (!Array.isArray(deps.attachments) || !deps.attachments.length) &&
-    raw
-  ) {
-    deps = collectDependencyHintsFromRaw(app, raw);
-  }
-  var seen = {};
-  var addCell = (sheetId, cellId) => {
-    var targetSheetId = String(sheetId || '');
-    var targetCellId = String(cellId || '').toUpperCase();
-    if (!targetSheetId || !targetCellId || targetSheetId !== app.activeSheetId)
-      return;
-    var key = targetSheetId + ':' + targetCellId;
-    if (seen[key]) return;
-    seen[key] = true;
-    var input = app.inputById[targetCellId];
-    if (!input || !input.parentElement) return;
-    input.parentElement.classList.add('dependency-ref');
-    var parsed = app.parseCellId(targetCellId);
-    if (!parsed) return;
-    if (parsed.col >= 1 && parsed.col < app.table.rows[0].cells.length) {
-      app.table.rows[0].cells[parsed.col].classList.add(
-        'dependency-col-header',
-      );
-    }
-    if (parsed.row >= 1 && parsed.row < app.table.rows.length) {
-      app.table.rows[parsed.row].cells[0].classList.add(
-        'dependency-row-header',
-      );
-    }
-  };
-
-  (Array.isArray(deps.cells) ? deps.cells : []).forEach((entry) => {
-    if (!entry || typeof entry !== 'object') return;
-    addCell(entry.sheetId, entry.cellId);
-  });
-
-  (Array.isArray(deps.attachments) ? deps.attachments : []).forEach((entry) => {
-    if (!entry || typeof entry !== 'object') return;
-    addCell(entry.sheetId, entry.cellId);
-  });
-
-  (Array.isArray(deps.namedRefs) ? deps.namedRefs : []).forEach((name) => {
-    var ref = app.storage.resolveNamedCell(name);
-    if (!ref || !ref.sheetId) return;
-    if (ref.cellId) {
-      addCell(ref.sheetId, ref.cellId);
-      return;
-    }
-    if (!ref.startCellId || !ref.endCellId) return;
-    var start = app.parseCellId(ref.startCellId);
-    var end = app.parseCellId(ref.endCellId);
-    if (!start || !end) return;
-    for (
-      var row = Math.min(start.row, end.row);
-      row <= Math.max(start.row, end.row);
-      row++
-    ) {
-      for (
-        var col = Math.min(start.col, end.col);
-        col <= Math.max(start.col, end.col);
-        col++
-      ) {
-        addCell(ref.sheetId, app.columnIndexToLabel(col) + row);
-      }
-    }
-  });
 }
 
 export function collectDependencyHintsFromRaw(app, rawValue, sheetIdOverride) {
@@ -310,113 +286,15 @@ export function setSelectionRange(app, anchorId, targetId) {
     return;
   }
 
-  app.selectionRange = {
+  var nextRange = {
     startCol: Math.min(source.col, target.col),
     endCol: Math.max(source.col, target.col),
     startRow: Math.min(source.row, target.row),
     endRow: Math.max(source.row, target.row),
   };
+  setSelectionRangeState(app, nextRange);
   highlightSelectionRange(app);
   app.syncAttachButtonState();
-}
-
-export function highlightSelectionRange(app) {
-  clearSelectionHighlight(app);
-  if (!app.selectionRange) return;
-  var maxRow = app.table.rows.length - 1;
-  var maxCol = app.table.rows[0].cells.length - 1;
-
-  app.inputs.forEach((input) => {
-    var parsed = app.parseCellId(input.id);
-    if (!parsed) return;
-    if (
-      parsed.col < app.selectionRange.startCol ||
-      parsed.col > app.selectionRange.endCol
-    )
-      return;
-    if (
-      parsed.row < app.selectionRange.startRow ||
-      parsed.row > app.selectionRange.endRow
-    )
-      return;
-    input.parentElement.classList.add('selected-range');
-  });
-
-  if (
-    app.selectionRange.startCol === 1 &&
-    app.selectionRange.endCol === maxCol
-  ) {
-    for (
-      var row = app.selectionRange.startRow;
-      row <= app.selectionRange.endRow;
-      row++
-    ) {
-      if (row < 1 || row > maxRow) continue;
-      app.table.rows[row].cells[0].classList.add('selected-row-header');
-    }
-  }
-  if (
-    app.selectionRange.startRow === 1 &&
-    app.selectionRange.endRow === maxRow
-  ) {
-    for (
-      var col = app.selectionRange.startCol;
-      col <= app.selectionRange.endCol;
-      col++
-    ) {
-      if (col < 1 || col > maxCol) continue;
-      app.table.rows[0].cells[col].classList.add('selected-col-header');
-    }
-  }
-  if (
-    app.selectionRange.startCol === 1 &&
-    app.selectionRange.endCol === maxCol &&
-    app.selectionRange.startRow === 1 &&
-    app.selectionRange.endRow === maxRow
-  ) {
-    app.table.rows[0].cells[0].classList.add('selected-corner-header');
-  }
-  updateAxisHeaderHighlight(app);
-}
-
-export function updateAxisHeaderHighlight(app) {
-  var maxRow = app.table.rows.length - 1;
-  var maxCol = app.table.rows[0].cells.length - 1;
-
-  for (var col = 1; col <= maxCol; col++) {
-    app.table.rows[0].cells[col].classList.remove('active-col-header');
-  }
-  for (var row = 1; row <= maxRow; row++) {
-    app.table.rows[row].cells[0].classList.remove('active-row-header');
-  }
-
-  if (app.selectionRange) {
-    for (
-      var c = app.selectionRange.startCol;
-      c <= app.selectionRange.endCol;
-      c++
-    ) {
-      if (c < 1 || c > maxCol) continue;
-      app.table.rows[0].cells[c].classList.add('active-col-header');
-    }
-    for (
-      var r = app.selectionRange.startRow;
-      r <= app.selectionRange.endRow;
-      r++
-    ) {
-      if (r < 1 || r > maxRow) continue;
-      app.table.rows[r].cells[0].classList.add('active-row-header');
-    }
-    return;
-  }
-
-  if (!app.activeInput) return;
-  var parsed = app.parseCellId(app.activeInput.id);
-  if (!parsed) return;
-  if (parsed.col >= 1 && parsed.col <= maxCol)
-    app.table.rows[0].cells[parsed.col].classList.add('active-col-header');
-  if (parsed.row >= 1 && parsed.row <= maxRow)
-    app.table.rows[parsed.row].cells[0].classList.add('active-row-header');
 }
 
 export function bindHeaderSelectionEvents(app) {
@@ -515,19 +393,20 @@ export function selectEntireRow(app, startRow, endRow) {
   var to = Math.max(1, Math.max(startRow, endRow));
   var anchorId = app.formatCellId(1, from);
   setSelectionAnchor(app, anchorId);
-  app.selectionRange = {
+  var nextRange = {
     startCol: 1,
     endCol: maxCol,
     startRow: from,
     endRow: to,
   };
+  setSelectionRangeState(app, nextRange);
   highlightSelectionRange(app);
   var target = app.inputById[app.formatCellId(1, from)];
   if (target) {
     app.extendSelectionNav = true;
     setActiveInput(app, target);
     app.extendSelectionNav = false;
-    target.focus();
+    focusCellProxyRuntime(app, target);
   }
 }
 
@@ -537,19 +416,20 @@ export function selectEntireColumn(app, startCol, endCol) {
   var to = Math.max(1, Math.max(startCol, endCol));
   var anchorId = app.formatCellId(from, 1);
   setSelectionAnchor(app, anchorId);
-  app.selectionRange = {
+  var nextRange = {
     startCol: from,
     endCol: to,
     startRow: 1,
     endRow: maxRow,
   };
+  setSelectionRangeState(app, nextRange);
   highlightSelectionRange(app);
   var target = app.inputById[app.formatCellId(from, 1)];
   if (target) {
     app.extendSelectionNav = true;
     setActiveInput(app, target);
     app.extendSelectionNav = false;
-    target.focus();
+    focusCellProxyRuntime(app, target);
   }
 }
 
@@ -571,9 +451,9 @@ export function moveSelectionByArrow(app, currentInput, key) {
   var nextInput = app.inputById[nextCellId];
   if (!nextInput) return;
 
-  var anchor = app.selectionAnchorId || currentInput.id;
+  var anchor = getAnchorCellId(app) || currentInput.id;
   app.extendSelectionNav = true;
-  nextInput.focus();
+  focusCellProxyRuntime(app, nextInput);
   app.extendSelectionNav = false;
   setSelectionRange(app, anchor, nextInput.id);
 }
@@ -584,16 +464,17 @@ export function moveToNextFilledCell(app, currentInput, key) {
   if (!targetCellId) return null;
   var target = app.inputById[targetCellId];
   if (!target) return null;
-  target.focus();
+  focusCellProxyRuntime(app, target);
   return target;
 }
 
 export function getSelectionEdgeInputForDirection(app, currentInput, key) {
-  if (!currentInput || !app.selectionRange) return currentInput;
+  var selectionRange = getSelectionRangeState(app);
+  if (!currentInput || !selectionRange) return currentInput;
   var active = app.parseCellId(currentInput.id);
   if (!active) return currentInput;
 
-  var range = app.selectionRange;
+  var range = selectionRange;
   var row = active.row;
   var col = active.col;
 
@@ -612,15 +493,16 @@ export function getSelectionEdgeInputForDirection(app, currentInput, key) {
 }
 
 export function extendSelectionRangeTowardCell(app, targetCellId, key) {
-  if (!app.selectionRange) return;
+  var selectionRange = getSelectionRangeState(app);
+  if (!selectionRange) return;
   var target = app.parseCellId(targetCellId);
   if (!target) return;
 
   var next = {
-    startCol: app.selectionRange.startCol,
-    endCol: app.selectionRange.endCol,
-    startRow: app.selectionRange.startRow,
-    endRow: app.selectionRange.endRow,
+    startCol: selectionRange.startCol,
+    endCol: selectionRange.endCol,
+    startRow: selectionRange.startRow,
+    endRow: selectionRange.endRow,
   };
 
   if (key === 'ArrowUp') {
@@ -635,7 +517,7 @@ export function extendSelectionRangeTowardCell(app, targetCellId, key) {
     return;
   }
 
-  app.selectionRange = next;
+  setSelectionRangeState(app, next);
   highlightSelectionRange(app);
 }
 
