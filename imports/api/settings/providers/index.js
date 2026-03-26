@@ -3,6 +3,7 @@ import { validateAIProviderDefinition } from './definition.js';
 import _CUSTOM from './CUSTOM.js';
 import _DEEPSEEK from './DEEPSEEK.js';
 import _FIREWORKS from './FIREWORKS.js';
+import _GEMINI from './GEMINI.js';
 import _GROQ from './GROQ.js';
 import _LM_STUDIO from './LM_STUDIO.js';
 import _OLLAMA from './OLLAMA.js';
@@ -15,6 +16,7 @@ const ALL_MODULES = {
   './CUSTOM.js': { default: _CUSTOM },
   './DEEPSEEK.js': { default: _DEEPSEEK },
   './FIREWORKS.js': { default: _FIREWORKS },
+  './GEMINI.js': { default: _GEMINI },
   './GROQ.js': { default: _GROQ },
   './LM_STUDIO.js': { default: _LM_STUDIO },
   './OLLAMA.js': { default: _OLLAMA },

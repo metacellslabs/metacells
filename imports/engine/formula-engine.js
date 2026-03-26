@@ -27,6 +27,13 @@ export class FormulaEngine {
 
     try {
       var raw = this.storageService.getCellValue(sheetId, cellId);
+      var generatedBy = this.storageService.getGeneratedCellSource(
+        sheetId,
+        cellId,
+      );
+      if (generatedBy) {
+        return this.coerce(raw);
+      }
       var attachment = this.parseAttachmentSource(raw);
       if (attachment) {
         this.recordDependencyAttachment(options, sheetId, cellId);
@@ -195,24 +202,6 @@ export class FormulaEngine {
         this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
       );
       var formulaSource = equalFormulaSpec.content;
-      var formulaEmptyMessage = this.getEmptyMentionDependencyMessage(
-        sheetId,
-        formulaSource,
-        stack,
-        options,
-      );
-      if (formulaEmptyMessage) {
-        this.recordExplicitMentionDependenciesFromText(
-          sheetId,
-          formulaSource,
-          options,
-        );
-        this.setDisplayPlaceholder(
-          options,
-          equalFormulaSpec.placeholder || formulaEmptyMessage,
-        );
-        return '';
-      }
       var tableSpill = this.tryDirectMentionTableSpill(
         sheetId,
         cellId,
@@ -239,7 +228,9 @@ export class FormulaEngine {
         return raw;
       }
 
-      var context = this.createContext(sheetId, cellId, stack, options);
+      var context = this.createContext(sheetId, cellId, stack, options, {
+        emptyMentionAsZero: this.shouldTreatEmptyMentionsAsZero(formulaSource),
+      });
       var expression = this.preprocessFormula(formulaSource, cellId);
 
       var fn = Function(
@@ -247,7 +238,22 @@ export class FormulaEngine {
         'with (context) { return (' + expression + '); }',
       );
       try {
-        return fn(context);
+        var result = fn(context);
+        var attachmentMeta = this.parseAttachmentSource(result);
+        if (attachmentMeta) {
+          var displayValue = '';
+          if (attachmentMeta.generatedAs === 'PDF') {
+            displayValue = String(attachmentMeta.type || 'application/pdf');
+          } else if (attachmentMeta.generatedAs) {
+            displayValue = String(attachmentMeta.generatedAs || '');
+          } else if (attachmentMeta.name) {
+            displayValue = String(attachmentMeta.name || '');
+          } else if (attachmentMeta.type) {
+            displayValue = String(attachmentMeta.type || '');
+          }
+          if (displayValue) this.setDisplayPlaceholder(options, displayValue);
+        }
+        return result;
       } catch (error) {
         var unknownFunctions = this.shouldUseUnknownFormulaFallback(
           raw.substring(1),
@@ -406,9 +412,30 @@ export class FormulaEngine {
     return result;
   }
 
-  createContext(sheetId, cellId, stack, options) {
+  shouldTreatEmptyMentionsAsZero(formulaSource) {
+    var source = String(formulaSource == null ? '' : formulaSource);
+    if (!source) return false;
+    if (!/[+\-*/]/.test(source)) return false;
+    if (/[&"'`]/.test(source)) return false;
+    if (/(?:===|==|!==|!=|<=|>=|<|>)/.test(source)) return false;
+    return true;
+  }
+
+  normalizeMentionFormulaValue(value, behavior) {
+    var mode = behavior && typeof behavior === 'object' ? behavior : null;
+    if (!mode || !mode.emptyMentionAsZero) return value;
+    if (value == null) return 0;
+    if (typeof value === 'string' && !value.trim()) return 0;
+    return this.coerce(value);
+  }
+
+  createContext(sheetId, cellId, stack, options, formulaBehavior) {
     var opts = options || {};
     var forceRefreshAI = !!opts.forceRefreshAI;
+    var behavior =
+      formulaBehavior && typeof formulaBehavior === 'object'
+        ? formulaBehavior
+        : null;
     var context = {
       askAI: (text) => {
         var dependencies = this.collectAIPromptDependencies(sheetId, text);
@@ -509,11 +536,14 @@ export class FormulaEngine {
       },
       mentionRef: (refCellId) => {
         this.recordDependencyCell(options, sheetId, refCellId);
-        return this.getMentionValue(
-          sheetId,
-          String(refCellId).toUpperCase(),
-          stack,
-          options,
+        return this.normalizeMentionFormulaValue(
+          this.getMentionValue(
+            sheetId,
+            String(refCellId).toUpperCase(),
+            stack,
+            options,
+          ),
+          behavior,
         );
       },
       mentionRawRef: (refCellId) => {
@@ -527,11 +557,14 @@ export class FormulaEngine {
         var refSheetId = this.findSheetIdByName(sheetName);
         if (!refSheetId) throw new Error('Unknown sheet: ' + sheetName);
         this.recordDependencyCell(options, refSheetId, refCellId);
-        return this.getMentionValue(
-          refSheetId,
-          String(refCellId).toUpperCase(),
-          stack,
-          options,
+        return this.normalizeMentionFormulaValue(
+          this.getMentionValue(
+            refSheetId,
+            String(refCellId).toUpperCase(),
+            stack,
+            options,
+          ),
+          behavior,
         );
       },
       mentionRawSheetRef: (sheetName, refCellId) => {
@@ -545,7 +578,10 @@ export class FormulaEngine {
       },
       mentionNamedRef: (cellName) => {
         this.recordDependencyNamedRef(options, cellName);
-        return this.getNamedOrSpecialValue(sheetId, cellName, stack, options);
+        return this.normalizeMentionFormulaValue(
+          this.getNamedOrSpecialValue(sheetId, cellName, stack, options),
+          behavior,
+        );
       },
       mentionRawNamedRef: (cellName) => {
         this.recordDependencyNamedRef(options, cellName);

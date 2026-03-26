@@ -69,6 +69,13 @@ function makeCellGraphKey(sheetId, cellId) {
   return `${String(sheetId || '')}:${String(cellId || '').toUpperCase()}`;
 }
 
+function isConflictError(error) {
+  return !!(
+    error &&
+    String(error.error || '').trim().toLowerCase() === 'conflict'
+  );
+}
+
 function buildChangedCellKeySet(changedSignals) {
   const result = {};
   const signals = Array.isArray(changedSignals) ? changedSignals : [];
@@ -136,6 +143,54 @@ function buildReverseDependencyIndexes(byCell) {
   };
 }
 
+function appendGeneratedCellDependents(workbookData, reverseIndexes) {
+  const workbook =
+    workbookData && typeof workbookData === 'object' ? workbookData : {};
+  const sheets =
+    workbook.sheets && typeof workbook.sheets === 'object'
+      ? workbook.sheets
+      : {};
+  const target =
+    reverseIndexes && typeof reverseIndexes === 'object' ? reverseIndexes : {};
+  const dependentsByCell =
+    target.dependentsByCell && typeof target.dependentsByCell === 'object'
+      ? target.dependentsByCell
+      : {};
+
+  const register = (key, sourceKey) => {
+    const normalizedKey = String(key || '');
+    const normalizedSourceKey = String(sourceKey || '');
+    if (!normalizedKey || !normalizedSourceKey) return;
+    if (!Array.isArray(dependentsByCell[normalizedKey])) {
+      dependentsByCell[normalizedKey] = [];
+    }
+    if (dependentsByCell[normalizedKey].indexOf(normalizedSourceKey) === -1) {
+      dependentsByCell[normalizedKey].push(normalizedSourceKey);
+    }
+  };
+
+  Object.keys(sheets).forEach((sheetId) => {
+    const cells =
+      sheets[sheetId] && typeof sheets[sheetId].cells === 'object'
+        ? sheets[sheetId].cells
+        : {};
+    Object.keys(cells).forEach((cellId) => {
+      const cell =
+        cells[cellId] && typeof cells[cellId] === 'object' ? cells[cellId] : null;
+      if (!cell) return;
+      const generatedBy = String(cell.generatedBy || '').toUpperCase();
+      if (!generatedBy) return;
+      register(
+        makeCellGraphKey(sheetId, generatedBy),
+        makeCellGraphKey(sheetId, cellId),
+      );
+    });
+  });
+
+  target.dependentsByCell = dependentsByCell;
+  return target;
+}
+
 function createDependencyCollector() {
   const cells = [];
   const namedRefs = [];
@@ -201,9 +256,12 @@ function getWorkbookDependencyGraph(workbookData) {
   const byCell =
     graph.byCell && typeof graph.byCell === 'object' ? graph.byCell : {};
   const reverse = buildReverseDependencyIndexes(byCell);
+  appendGeneratedCellDependents(workbookData, reverse);
   const dependentsByCell =
     graph.dependentsByCell && typeof graph.dependentsByCell === 'object'
-      ? graph.dependentsByCell
+      ? appendGeneratedCellDependents(workbookData, {
+          dependentsByCell: graph.dependentsByCell,
+        }).dependentsByCell
       : reverse.dependentsByCell;
   const dependentsByNamedRef =
     graph.dependentsByNamedRef && typeof graph.dependentsByNamedRef === 'object'
@@ -321,6 +379,20 @@ export function buildTargetCellMap(workbookData, changedSignals) {
   return bySheet;
 }
 
+export function buildExplicitTargetCellMap(activeSheetId, targetCellIds) {
+  const sheetId = String(activeSheetId || '');
+  const ids = Array.isArray(targetCellIds) ? targetCellIds : [];
+  if (!sheetId || !ids.length) return null;
+  const bySheet = {};
+  for (let i = 0; i < ids.length; i += 1) {
+    const cellId = String(ids[i] || '').toUpperCase();
+    if (!cellId) continue;
+    if (!bySheet[sheetId]) bySheet[sheetId] = {};
+    bySheet[sheetId][cellId] = true;
+  }
+  return Object.keys(bySheet).length ? bySheet : null;
+}
+
 export function invalidateWorkbookDependencies(workbookData, changedSignals) {
   const targetCellMap = buildTargetCellMap(workbookData, changedSignals);
   if (!targetCellMap) {
@@ -371,10 +443,23 @@ export function invalidateWorkbookDependencies(workbookData, changedSignals) {
       }
 
       if (isDirectlyChanged) {
+        const versionInfo = storageService.getCellVersionInfo(sheetId, cellId);
         storageService.setCellRuntimeState(sheetId, cellId, {
           value: rawValue,
+          displayValue: rawValue,
           state: 'resolved',
           error: '',
+          computedVersion:
+            Number(
+              versionInfo &&
+                (versionInfo.sourceVersion || versionInfo.computedVersion),
+            ) || 1,
+          dependencyVersion:
+            Number(
+              versionInfo &&
+                (versionInfo.sourceVersion || versionInfo.dependencyVersion),
+            ) || 1,
+          dependencySignature: '',
         });
       }
     });
@@ -458,8 +543,12 @@ export function rebuildWorkbookDependencyGraph(
 function inferComputedCellState(rawValue, computedValue) {
   const raw = String(rawValue || '');
   const value = String(computedValue == null ? '' : computedValue);
+  const attachment = parseAttachmentSource(raw);
 
   if (!raw) return 'resolved';
+  if (attachment && (attachment.pending === true || attachment.converting === true)) {
+    return 'pending';
+  }
   if (value === '#REF!' || value === '#ERROR' || value === '#SELECT_FILE')
     return 'error';
   if (value.indexOf('#AI_ERROR:') === 0) return 'error';
@@ -474,6 +563,17 @@ function inferComputedCellState(rawValue, computedValue) {
   return 'resolved';
 }
 
+function parseAttachmentSource(rawValue) {
+  const raw = String(rawValue == null ? '' : rawValue);
+  if (!raw.startsWith('__ATTACHMENT__:')) return null;
+  try {
+    const parsed = JSON.parse(raw.slice('__ATTACHMENT__:'.length));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function normalizeComputeError(error) {
   const message =
     error && error.message
@@ -482,8 +582,9 @@ function normalizeComputeError(error) {
   return message || 'Formula error';
 }
 
-function classifyComputeFailure(error) {
+function classifyComputeFailure(error, rawValue) {
   const message = normalizeComputeError(error);
+  const attachment = parseAttachmentSource(rawValue);
   if (
     /^Unknown sheet:/i.test(message) ||
     /^Unknown cell name:/i.test(message)
@@ -491,17 +592,27 @@ function classifyComputeFailure(error) {
     return {
       value: '#REF!',
       error: message,
+      state: 'error',
     };
   }
   if (message === '#SELECT_FILE' || /^#SELECT_FILE\b/i.test(message)) {
+    if (attachment && (attachment.pending === true || attachment.converting === true)) {
+      return {
+        value: String(rawValue || ''),
+        error: '',
+        state: 'pending',
+      };
+    }
     return {
       value: '#SELECT_FILE',
       error: 'Select a file first',
+      state: 'error',
     };
   }
   return {
     value: '#ERROR',
     error: message,
+    state: 'error',
   };
 }
 
@@ -617,6 +728,12 @@ function canReuseComputedCell(
   const raw = String(rawValue || '');
   if (!raw || !/^[='>#]/.test(raw)) return false;
   if (forceRefreshAI) return false;
+  if (raw.charAt(0) === '=') {
+    const displayValue = String(
+      storageService.getCellDisplayValue(sheetId, cellId) || '',
+    );
+    if (/^Params:\s+.+\s+are empty$/.test(displayValue)) return false;
+  }
   const state = String(storageService.getCellState(sheetId, cellId) || '');
   if (state !== 'resolved') return false;
   const value = String(
@@ -635,10 +752,12 @@ export async function computeSheetSnapshot({
   workbookData,
   activeSheetId,
   persistWorkbook,
+  reloadWorkbookData = null,
   channelPayloads = {},
   forceRefreshAI = false,
   manualTriggerAI = false,
   changedSignals = [],
+  explicitTargetCellMap = null,
 }) {
   const invalidatedWorkbook = invalidateWorkbookDependencies(
     workbookData,
@@ -674,6 +793,7 @@ export async function computeSheetSnapshot({
         if (!sheetValues || typeof sheetValues !== 'object') return;
         Object.keys(sheetValues).forEach((cellId) => {
           const rawValue = storageService.getCellValue(sheetId, cellId);
+          const versionInfo = storageService.getCellVersionInfo(sheetId, cellId);
           const errorMessage =
             computedErrors &&
             computedErrors[sheetId] &&
@@ -691,6 +811,9 @@ export async function computeSheetSnapshot({
             errorMessage,
             {
               displayValue: storageService.getCellDisplayValue(sheetId, cellId),
+              dependencySignature: String(
+                (versionInfo && versionInfo.dependencySignature) || '',
+              ),
             },
           );
           if (
@@ -709,16 +832,19 @@ export async function computeSheetSnapshot({
         });
       });
     }
-    await persistWorkbook(rawStorage.snapshot());
+    try {
+      await persistWorkbook(rawStorage.snapshot());
+    } catch (error) {
+      if (isConflictError(error)) {
+        return;
+      }
+      throw error;
+    }
   };
 
   const aiService = new AIService(
     storageService,
     async (queueMeta) => {
-      const asyncComputedValues = {};
-      const asyncComputedErrors = {};
-      const asyncProcessedEventIds = {};
-      const asyncDependenciesBySheet = {};
       const sourceSheetId =
         queueMeta && queueMeta.sourceCellId
           ? String(queueMeta.activeSheetId || activeSheetId || '')
@@ -737,6 +863,33 @@ export async function computeSheetSnapshot({
               },
             ]
           : [];
+      if (
+        sourceSheetId &&
+        sourceCellId &&
+        typeof reloadWorkbookData === 'function'
+      ) {
+        const latestWorkbook = await reloadWorkbookData();
+        if (latestWorkbook) {
+          await computeSheetSnapshot({
+            sheetDocumentId,
+            workbookData: latestWorkbook,
+            activeSheetId: sourceSheetId || activeSheetId,
+            persistWorkbook,
+            reloadWorkbookData,
+            channelPayloads,
+            forceRefreshAI,
+            manualTriggerAI: false,
+            changedSignals: asyncChangedSignals,
+            explicitTargetCellMap: null,
+          });
+          return;
+        }
+      }
+
+      const asyncComputedValues = {};
+      const asyncComputedErrors = {};
+      const asyncProcessedEventIds = {};
+      const asyncDependenciesBySheet = {};
       if (sourceSheetId && sourceCellId) {
         asyncComputedValues[sourceSheetId] = {};
         asyncComputedErrors[sourceSheetId] = {};
@@ -797,7 +950,10 @@ export async function computeSheetSnapshot({
               asyncProcessedEventIds[sourceSheetId][sourceCellId],
           });
         } catch (error) {
-          const failure = classifyComputeFailure(error);
+          const failure = classifyComputeFailure(
+            error,
+            storageService.getCellValue(sourceSheetId, sourceCellId),
+          );
           const sourceDependencies = sourceDependencyCollector.snapshot();
           const dependencySignature = buildDependencySignature(
             storageService,
@@ -812,7 +968,7 @@ export async function computeSheetSnapshot({
             sourceSheetId,
             sourceCellId,
             failure.value,
-            'error',
+            failure.state || 'error',
             failure.error,
             { dependencySignature },
           );
@@ -824,12 +980,20 @@ export async function computeSheetSnapshot({
           });
         }
         if (typeof persistWorkbook === 'function') {
-          await persistWorkbook(rawStorage.snapshot());
+          try {
+            await persistWorkbook(rawStorage.snapshot());
+          } catch (error) {
+            if (isConflictError(error)) {
+              return;
+            }
+            throw error;
+          }
         }
       }
       const asyncTargetCellMap = forceRefreshAI
         ? null
-        : buildTargetCellMap(rawStorage.snapshot(), asyncChangedSignals);
+        : explicitTargetCellMap ||
+          buildTargetCellMap(rawStorage.snapshot(), asyncChangedSignals);
       for (let i = 0; i < orderedSheetIds.length; i += 1) {
         const sheetId = orderedSheetIds[i];
         const evaluationPlan =
@@ -947,7 +1111,10 @@ export async function computeSheetSnapshot({
                 asyncProcessedEventIds[sheetId][cellId],
             });
           } catch (error) {
-            const failure = classifyComputeFailure(error);
+            const failure = classifyComputeFailure(
+              error,
+              storageService.getCellValue(sheetId, cellId),
+            );
             asyncComputedValues[sheetId][cellId] = failure.value;
             asyncComputedErrors[sheetId][cellId] = failure.error;
             asyncDependenciesBySheet[sheetId][cellId] =
@@ -961,7 +1128,7 @@ export async function computeSheetSnapshot({
               sheetId,
               cellId,
               failure.value,
-              'error',
+              failure.state || 'error',
               failure.error,
               { dependencySignature },
             );
@@ -993,6 +1160,9 @@ export async function computeSheetSnapshot({
         asyncComputedErrors,
         asyncProcessedEventIds,
       ).catch((error) => {
+        if (isConflictError(error)) {
+          return;
+        }
         console.error(
           '[sheet.compute] failed to persist async AI update',
           error,
@@ -1018,7 +1188,7 @@ export async function computeSheetSnapshot({
   const processedEventIdsBySheet = {};
   const targetCellMap = forceRefreshAI
     ? null
-    : buildTargetCellMap(workbookData, changedSignals);
+    : explicitTargetCellMap || buildTargetCellMap(workbookData, changedSignals);
 
   const evaluateWorkbook = () => {
     for (
@@ -1127,7 +1297,10 @@ export async function computeSheetSnapshot({
             lastProcessedChannelEventIds: sheetProcessedEventIds[cellId],
           });
         } catch (error) {
-          const failure = classifyComputeFailure(error);
+          const failure = classifyComputeFailure(
+            error,
+            storageService.getCellValue(sheetId, cellId),
+          );
           sheetValues[cellId] = failure.value;
           sheetErrors[cellId] = failure.error;
           sheetDependencies[cellId] = dependencyCollector.snapshot();
@@ -1144,7 +1317,7 @@ export async function computeSheetSnapshot({
             sheetId,
             cellId,
             failure.value,
-            'error',
+            failure.state || 'error',
             failure.error,
             { dependencySignature },
           );

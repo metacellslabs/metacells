@@ -544,6 +544,39 @@ describe('metacells', function () {
       assert.strictEqual(eqMeta.displayValue, 'Nothing yet');
     });
 
+    it('highlights only empty cells referenced by mention-style formulas', async function () {
+      const { shouldHighlightEmptyMentionedCell } =
+        await import('../imports/ui/metacell/runtime/cell-render-model.js');
+
+      const app = {
+        storage: {
+          getDependencyGraph() {
+            return {
+              dependentsByCell: {
+                'sheet-1:A1': ['sheet-1:B1'],
+                'sheet-1:C5': ['sheet-1:D4'],
+              },
+            };
+          },
+          getCellValue(sheetId, cellId) {
+            if (sheetId === 'sheet-1' && cellId === 'B1') return '=SUM(@A1, 1)';
+            if (sheetId === 'sheet-1' && cellId === 'D4')
+              return '# top 5 countries by gdp';
+            return '';
+          },
+        },
+      };
+
+      assert.strictEqual(
+        shouldHighlightEmptyMentionedCell(app, 'sheet-1', 'A1', ''),
+        true,
+      );
+      assert.strictEqual(
+        shouldHighlightEmptyMentionedCell(app, 'sheet-1', 'C5', ''),
+        false,
+      );
+    });
+
     it('persists display placeholders separately from computed values', async function () {
       const { WorkbookStorageAdapter } =
         await import('../imports/engine/workbook-storage-adapter.js');
@@ -1867,6 +1900,65 @@ describe('metacells', function () {
       assert.strictEqual(
         service.cache['AI_CACHE:\n---\nhello'],
         '#AI_ERROR: model is wrong',
+      );
+    });
+
+    it('fetches URL markdown and injects it into AI prompts before request', async function () {
+      const { AIService } =
+        await import('../imports/ui/metacell/runtime/ai-service.js');
+
+      const storage = {
+        getAIMode() {
+          return 'auto';
+        },
+        getCacheValue() {
+          return undefined;
+        },
+        setCacheValue() {},
+      };
+
+      const service = new AIService(storage, () => {}, {
+        sheetDocumentId: 'sheet-doc',
+        getActiveSheetId: () => 'sheet-1',
+      });
+
+      let capturedMessages = null;
+      service.fetchUrlAsMarkdown = (url) => {
+        assert.strictEqual(url, 'https://metacells.dev');
+        return Promise.resolve('# MetaCells\n\nAI spreadsheet runtime');
+      };
+      service.requestChat = (messages) => {
+        capturedMessages = messages;
+        return Promise.resolve('ok');
+      };
+
+      service.requestAsk(
+        'summarize https://metacells.dev',
+        'AI_CACHE:\n---\nsummarize https://metacells.dev',
+        false,
+        '',
+        null,
+      );
+      await tick();
+
+      assert.ok(Array.isArray(capturedMessages));
+      assert.strictEqual(capturedMessages.length, 1);
+      assert.strictEqual(capturedMessages[0].role, 'user');
+      assert.ok(
+        String(capturedMessages[0].content || '').includes('summarize'),
+      );
+      assert.ok(
+        String(capturedMessages[0].content || '').includes('<CONTENT START>'),
+      );
+      assert.ok(
+        String(capturedMessages[0].content || '').includes(
+          '# MetaCells\n\nAI spreadsheet runtime',
+        ),
+      );
+      assert.ok(
+        !String(capturedMessages[0].content || '').includes(
+          'https://metacells.dev',
+        ),
       );
     });
 

@@ -1,33 +1,94 @@
+import { getAttachmentDisplayLabel } from './attachment-render-runtime.js';
+import {
+  buildMentionAutocompleteUiState,
+  publishMentionAutocompleteUiState,
+  syncMentionAutocompleteUiToAnchor,
+} from './mention-autocomplete-facade.js';
+import { resolveCellAttachment } from './attachment-cell-facade.js';
+
+function restoreMentionEditorValue(input, value, start, end) {
+  if (!input) return;
+  if (String(input.value || '') !== String(value || '')) {
+    input.value = String(value || '');
+  }
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(start, end);
+  }
+}
+
+function applyReportEditorMentionSelection(app, state, item) {
+  var editor = state && state.input ? state.input : null;
+  var textNode = state && state.textNode ? state.textNode : null;
+  if (
+    !editor ||
+    !textNode ||
+    textNode.nodeType !== Node.TEXT_NODE ||
+    !item ||
+    typeof item.token !== 'string'
+  ) {
+    hideMentionAutocomplete(app);
+    return;
+  }
+
+  var source = String(textNode.nodeValue || '');
+  var start = Number.isInteger(state.startOffset) ? state.startOffset : 0;
+  var end = Number.isInteger(state.endOffset) ? state.endOffset : start;
+  var insertedToken = String(item.token || '') + ' ';
+  var nextValue = source.slice(0, start) + insertedToken + source.slice(end);
+  textNode.nodeValue = nextValue;
+
+  var caretOffset = start + insertedToken.length;
+  if (app) {
+    app.suppressReportMentionAutocompleteUntil = Date.now() + 180;
+  }
+  if (
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    typeof document.createRange === 'function' &&
+    typeof window.getSelection === 'function'
+  ) {
+    var selection = window.getSelection();
+    var range = document.createRange();
+    range.setStart(textNode, caretOffset);
+    range.collapse(true);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+
+  if (typeof editor.focus === 'function') {
+    editor.focus();
+  }
+  if (typeof editor.dispatchEvent === 'function') {
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  hideMentionAutocomplete(app);
+}
+
 export function ensureMentionAutocomplete(app) {
-  if (app.mentionAutocomplete) return app.mentionAutocomplete;
-  var el = document.createElement('div');
-  el.className = 'mention-autocomplete';
-  el.style.display = 'none';
-  el.innerHTML = "<div class='mention-autocomplete-list'></div>";
-  document.body.appendChild(el);
-  el.addEventListener('mousedown', (e) => {
-    var item =
-      e.target && e.target.closest
-        ? e.target.closest('.mention-autocomplete-item')
-        : null;
-    if (!item) return;
-    e.preventDefault();
-    var idx = parseInt(item.dataset.index || '-1', 10);
-    if (isNaN(idx) || idx < 0) return;
-    applyMentionAutocompleteSelection(app, idx);
-  });
-  app.mentionAutocomplete = el;
+  var el = document.querySelector('.mention-autocomplete');
+  app.mentionAutocomplete = el || null;
   return el;
 }
 
 export function setupMentionAutocomplete(app) {
   ensureMentionAutocomplete(app);
-  document.addEventListener('mousedown', (e) => {
+  document.addEventListener('mousedown', function (e) {
     if (!app.mentionAutocompleteState) return;
     var target = e.target;
     if (!target) return;
-    if (app.mentionAutocomplete && app.mentionAutocomplete.contains(target))
+    if (
+      app.mentionAutocomplete && app.mentionAutocomplete.contains(target)
+    ) {
       return;
+    }
+    if (
+      target.closest &&
+      target.closest('.mention-autocomplete')
+    ) {
+      return;
+    }
     if (target === app.formulaInput) return;
     if (target.tagName === 'INPUT') {
       hideMentionAutocompleteSoon(app);
@@ -35,16 +96,27 @@ export function setupMentionAutocomplete(app) {
     }
     hideMentionAutocomplete(app);
   });
-  window.addEventListener('resize', () => hideMentionAutocomplete(app));
+  window.addEventListener('resize', function () {
+    hideMentionAutocomplete(app);
+  });
 }
 
 export function hideMentionAutocompleteSoon(app) {
-  setTimeout(() => hideMentionAutocomplete(app), 120);
+  setTimeout(function () {
+    hideMentionAutocomplete(app);
+  }, 120);
 }
 
 export function hideMentionAutocomplete(app) {
-  if (app.mentionAutocomplete) app.mentionAutocomplete.style.display = 'none';
+  if (
+    !app.mentionAutocompleteState &&
+    app.mentionAutocompleteUiState &&
+    app.mentionAutocompleteUiState.visible !== true
+  ) {
+    return;
+  }
   app.mentionAutocompleteState = null;
+  publishMentionAutocompleteUiState(app, null);
 }
 
 export function updateMentionAutocomplete(app, input) {
@@ -53,10 +125,6 @@ export function updateMentionAutocomplete(app, input) {
   if (!ctx) return hideMentionAutocomplete(app);
   var items = getMentionAutocompleteItems(app, ctx.query, ctx.marker);
   if (!items.length) return hideMentionAutocomplete(app);
-
-  var menu = ensureMentionAutocomplete(app);
-  var list = menu.querySelector('.mention-autocomplete-list');
-  if (!list) return hideMentionAutocomplete(app);
 
   var activeIndex = 0;
   if (
@@ -82,14 +150,22 @@ export function updateMentionAutocomplete(app, input) {
 
   app.mentionAutocompleteState = {
     input: input,
+    inputId: String(input.id || ''),
     marker: ctx.marker,
     start: ctx.start,
     end: ctx.end,
     items: items,
     activeIndex: activeIndex,
   };
-  renderMentionAutocompleteList(app);
-  positionMentionAutocomplete(app, input);
+  var sourceKind = input === app.editorOverlayInput ? 'overlay' : 'default';
+  syncMentionAutocompleteUiToAnchor(app, {
+    visible: true,
+    anchorElement: input,
+    anchorCaret: input === app.editorOverlayInput,
+    sourceKind: sourceKind,
+    activeIndex: activeIndex,
+    items: items,
+  });
 }
 
 export function getMentionAutocompleteContext(app, input) {
@@ -117,7 +193,7 @@ export function getMentionAutocompleteItems(app, query, marker) {
   var target = String(query == null ? '' : query).toLowerCase();
   var items = [];
   var seen = {};
-  var addItem = (kind, label, token, search) => {
+  var addItem = function (kind, label, token, search) {
     var key = token.toLowerCase();
     if (seen[key]) return;
     var hay = (
@@ -136,6 +212,25 @@ export function getMentionAutocompleteItems(app, query, marker) {
       search: search || '',
     });
   };
+  var formatSheetCellToken = function (sheetName, cellId) {
+    var normalizedSheet = String(sheetName || '');
+    var normalizedCell = String(cellId || '').toUpperCase();
+    var needsQuotes = /[^A-Za-z0-9_]/.test(normalizedSheet);
+    var sheetToken = needsQuotes
+      ? "'" +
+        normalizedSheet.replace(/\\/g, '\\\\').replace(/'/g, "\\'") +
+        "'"
+      : normalizedSheet;
+    return marker + sheetToken + '!' + normalizedCell;
+  };
+  var formatAttachmentToken = function (sheetId, sheetName, cellId) {
+    var namedRef =
+      app.storage && typeof app.storage.getCellNameFor === 'function'
+        ? String(app.storage.getCellNameFor(sheetId, cellId) || '').trim()
+        : '';
+    if (namedRef) return 'File:@' + namedRef;
+    return 'File:' + formatSheetCellToken(sheetName, cellId);
+  };
 
   if (marker === '/') {
     for (var ch = 0; ch < app.availableChannels.length; ch++) {
@@ -148,16 +243,18 @@ export function getMentionAutocompleteItems(app, query, marker) {
         channel.label + ' channel',
       );
     }
-    items.sort((a, b) =>
-      a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }),
-    );
+    items.sort(function (a, b) {
+      return a.label.localeCompare(b.label, undefined, {
+        sensitivity: 'base',
+      });
+    });
     return items.slice(0, 16);
   }
 
   var named = app.storage.readNamedCells();
-  var namedKeys = Object.keys(named || {}).sort((a, b) =>
-    a.localeCompare(b, undefined, { sensitivity: 'base' }),
-  );
+  var namedKeys = Object.keys(named || {}).sort(function (a, b) {
+    return a.localeCompare(b, undefined, { sensitivity: 'base' });
+  });
   for (var i = 0; i < namedKeys.length; i++) {
     var name = namedKeys[i];
     var ref = named[name] || {};
@@ -174,14 +271,43 @@ export function getMentionAutocompleteItems(app, query, marker) {
     );
   }
 
+  var allCells =
+    app.storage && typeof app.storage.listAllCellIds === 'function'
+      ? app.storage.listAllCellIds()
+      : [];
+  for (var a = 0; a < allCells.length; a++) {
+    var entry = allCells[a];
+    if (!entry || !entry.sheetId || !entry.cellId) continue;
+    if (app.isReportTab(entry.sheetId)) continue;
+    var tab = null;
+    for (var ti = 0; ti < app.tabs.length; ti++) {
+      if (String(app.tabs[ti] && app.tabs[ti].id || '') === String(entry.sheetId)) {
+        tab = app.tabs[ti];
+        break;
+      }
+    }
+    if (!tab) continue;
+    var attachment = resolveCellAttachment(app, entry.sheetId, entry.cellId);
+    if (!attachment) continue;
+    var fileLabel = getAttachmentDisplayLabel(attachment);
+    var location = String(tab.name || '') + '!' + String(entry.cellId || '').toUpperCase();
+    addItem(
+      'attachment',
+      'File: ' + fileLabel + '  ' + location,
+      formatAttachmentToken(entry.sheetId, tab.name, entry.cellId),
+      fileLabel + ' file attachment ' + location,
+    );
+  }
+
   var reportTabs = [];
   for (var t = 0; t < app.tabs.length; t++) {
     var tab = app.tabs[t];
     if (!tab) continue;
     if (app.isReportTab(tab.id)) reportTabs.push(tab);
   }
-  if (reportTabs.length)
+  if (reportTabs.length) {
     addItem('report', '@report', marker + 'report', 'report default');
+  }
   for (var r = 0; r < reportTabs.length; r++) {
     var reportAlias = 'report' + (r + 1);
     addItem(
@@ -206,76 +332,114 @@ export function getMentionAutocompleteItems(app, query, marker) {
     );
   }
 
-  items.sort((a, b) => {
+  items.sort(function (a, b) {
     var aw = a.token.toLowerCase().indexOf(target) === marker.length ? 0 : 1;
     var bw = b.token.toLowerCase().indexOf(target) === marker.length ? 0 : 1;
     if (aw !== bw) return aw - bw;
-    return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+    return a.label.localeCompare(b.label, undefined, {
+      sensitivity: 'base',
+    });
   });
   return items.slice(0, 16);
 }
 
 export function renderMentionAutocompleteList(app) {
-  if (!app.mentionAutocomplete || !app.mentionAutocompleteState) return;
-  var list = app.mentionAutocomplete.querySelector(
-    '.mention-autocomplete-list',
+  if (!app.mentionAutocompleteState) return;
+  var prevUi =
+    app.mentionAutocompleteUiState &&
+    typeof app.mentionAutocompleteUiState === 'object'
+      ? app.mentionAutocompleteUiState
+      : null;
+  publishMentionAutocompleteUiState(
+    app,
+    buildMentionAutocompleteUiState({
+      visible: true,
+      anchorRect:
+        prevUi && Number.isFinite(prevUi.left) && Number.isFinite(prevUi.top)
+          ? {
+              left: prevUi.left,
+              bottom: prevUi.top - 4,
+              width: Number(prevUi.minWidth || 240),
+            }
+          : null,
+      sourceKind:
+        app.mentionAutocompleteState &&
+        app.mentionAutocompleteState.input === app.editorOverlayInput
+          ? 'overlay'
+          : 'default',
+      activeIndex: app.mentionAutocompleteState.activeIndex,
+      items: app.mentionAutocompleteState.items,
+    }),
   );
-  if (!list) return;
-  list.innerHTML = '';
-  for (var i = 0; i < app.mentionAutocompleteState.items.length; i++) {
-    var item = app.mentionAutocompleteState.items[i];
-    var row = document.createElement('button');
-    row.type = 'button';
-    row.className =
-      'mention-autocomplete-item' +
-      (i === app.mentionAutocompleteState.activeIndex ? ' active' : '');
-    row.dataset.index = String(i);
-    row.textContent = item.label;
-    list.appendChild(row);
-  }
-  app.mentionAutocomplete.style.display = 'block';
 }
 
 export function positionMentionAutocomplete(app, input) {
-  if (!app.mentionAutocomplete) return;
-  var rect = input.getBoundingClientRect();
-  var left = rect.left;
-  var top = rect.bottom + 4;
-  var maxWidth = Math.max(240, rect.width);
-  app.mentionAutocomplete.style.left = Math.round(left) + 'px';
-  app.mentionAutocomplete.style.top = Math.round(top) + 'px';
-  app.mentionAutocomplete.style.minWidth =
-    Math.round(Math.min(maxWidth, 460)) + 'px';
+  syncMentionAutocompleteUiToAnchor(app, {
+    visible: true,
+    anchorElement: input,
+    anchorCaret: input === app.editorOverlayInput,
+    sourceKind: input === app.editorOverlayInput ? 'overlay' : 'default',
+    activeIndex:
+      app.mentionAutocompleteState &&
+      Number.isFinite(app.mentionAutocompleteState.activeIndex)
+        ? app.mentionAutocompleteState.activeIndex
+        : 0,
+    items:
+      app.mentionAutocompleteState &&
+      Array.isArray(app.mentionAutocompleteState.items)
+        ? app.mentionAutocompleteState.items
+        : [],
+  });
 }
 
 export function handleMentionAutocompleteKeydown(app, e, input) {
   if (
     !app.mentionAutocompleteState ||
-    app.mentionAutocompleteState.input !== input
-  )
+    (app.mentionAutocompleteState.input !== input &&
+      String(app.mentionAutocompleteState.inputId || '') !==
+        String((input && input.id) || ''))
+  ) {
     return false;
+  }
   if (e.key === 'ArrowDown') {
+    var downValue = String(input && input.value != null ? input.value : '');
+    var downStart =
+      input && typeof input.selectionStart === 'number'
+        ? input.selectionStart
+        : downValue.length;
+    var downEnd =
+      input && typeof input.selectionEnd === 'number'
+        ? input.selectionEnd
+        : downValue.length;
     e.preventDefault();
     var next = app.mentionAutocompleteState.activeIndex + 1;
     if (next >= app.mentionAutocompleteState.items.length) next = 0;
     app.mentionAutocompleteState.activeIndex = next;
     renderMentionAutocompleteList(app);
+    restoreMentionEditorValue(input, downValue, downStart, downEnd);
     return true;
   }
   if (e.key === 'ArrowUp') {
+    var upValue = String(input && input.value != null ? input.value : '');
+    var upStart =
+      input && typeof input.selectionStart === 'number'
+        ? input.selectionStart
+        : upValue.length;
+    var upEnd =
+      input && typeof input.selectionEnd === 'number'
+        ? input.selectionEnd
+        : upValue.length;
     e.preventDefault();
     var prev = app.mentionAutocompleteState.activeIndex - 1;
     if (prev < 0) prev = app.mentionAutocompleteState.items.length - 1;
     app.mentionAutocompleteState.activeIndex = prev;
     renderMentionAutocompleteList(app);
+    restoreMentionEditorValue(input, upValue, upStart, upEnd);
     return true;
   }
   if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();
-    applyMentionAutocompleteSelection(
-      app,
-      app.mentionAutocompleteState.activeIndex,
-    );
+    applyMentionAutocompleteSelection(app, app.mentionAutocompleteState.activeIndex);
     return true;
   }
   if (e.key === 'Escape') {
@@ -286,28 +450,66 @@ export function handleMentionAutocompleteKeydown(app, e, input) {
   return false;
 }
 
+import { applyActiveSourceCellEdit } from './source-edit-facade.js';
+
 export function applyMentionAutocompleteSelection(app, index) {
   if (!app.mentionAutocompleteState) return;
   var state = app.mentionAutocompleteState;
   var input = state.input;
   var item = state.items[index];
   if (!input || !item) return hideMentionAutocomplete(app);
+  if (state.kind === 'reportEditor') {
+    applyReportEditorMentionSelection(app, state, item);
+    return;
+  }
 
   var value = String(input.value == null ? '' : input.value);
   var next = value.slice(0, state.start) + item.token + value.slice(state.end);
   input.value = next;
   var caret = state.start + item.token.length;
-  if (typeof input.setSelectionRange === 'function')
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(caret, caret, input);
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(caret, caret);
+  }
   input.focus();
 
   if (input === app.formulaInput) {
     if (app.activeInput) {
-      app.activeInput.value = next;
-      app.setRawCellValue(app.activeInput.id, next);
+      app.syncActiveEditorValue(next, { syncOverlay: false });
+      applyActiveSourceCellEdit(app, {
+        cellId: app.activeInput.id,
+        rawValue: next,
+      });
     }
-  } else if (app.activeInput === input) {
-    app.formulaInput.value = next;
+  } else if (input === app.editorOverlayInput) {
+    if (app.activeInput) {
+      app.syncActiveEditorValue(next);
+      if (typeof app.updateEditingSessionDraft === 'function') {
+        app.updateEditingSessionDraft(next, {
+          origin: 'cell',
+        });
+      }
+      if (typeof app.handleCellInputDraft === 'function') {
+        app.handleCellInputDraft(app.activeInput, {
+          origin: 'cell',
+          mentionInput: app.editorOverlayInput,
+        });
+      }
+      if (typeof app.publishUiState === 'function') {
+        app.publishUiState();
+      }
+      if (typeof input.focus === 'function') {
+        input.focus();
+      }
+      if (typeof app.setEditorSelectionRange === 'function') {
+        app.setEditorSelectionRange(caret, caret, input);
+      } else if (typeof input.setSelectionRange === 'function') {
+        input.setSelectionRange(caret, caret);
+      }
+    }
+  } else if (app.activeInput === input && app.formulaInput) {
+    app.syncActiveEditorValue(next, { syncOverlay: false });
   }
 
   hideMentionAutocomplete(app);
@@ -328,6 +530,9 @@ export function setAvailableChannels(app, channels) {
           return !!(channel && channel.label);
         })
     : [];
+  if (typeof app.syncChannelBindingControl === 'function') {
+    app.syncChannelBindingControl();
+  }
   if (app.mentionAutocompleteState && app.mentionAutocompleteState.input) {
     updateMentionAutocomplete(app, app.mentionAutocompleteState.input);
   }
@@ -339,6 +544,8 @@ export function canInsertFormulaMention(app, raw) {
   var prefix = text.charAt(0);
   return prefix === '=' || prefix === '#' || prefix === "'";
 }
+
+import { getSelectionRangeState } from './selection-range-facade.js';
 
 export function findSheetIdByName(app, sheetName) {
   var target = String(sheetName || '');
@@ -353,27 +560,25 @@ export function findSheetIdByName(app, sheetName) {
   }
 }
 
-export function buildMentionTokenForSelection(
-  app,
-  fallbackCellId,
-  isRangeMode,
-) {
+export function buildMentionTokenForSelection(app, fallbackCellId, isRangeMode) {
+  var selectionRange = getSelectionRangeState(app);
   var sheetPrefix = getMentionSheetPrefix(app);
-  if (!isRangeMode || !app.selectionRange) {
+  if (!isRangeMode || !selectionRange) {
     var localLabel = app.getPreferredMentionLabel(
       String(fallbackCellId).toUpperCase(),
     );
-    if (sheetPrefix)
+    if (sheetPrefix) {
       return '@' + sheetPrefix + String(fallbackCellId).toUpperCase();
+    }
     return '@' + localLabel;
   }
   var startCellId = app.formatCellId(
-    app.selectionRange.startCol,
-    app.selectionRange.startRow,
+    selectionRange.startCol,
+    selectionRange.startRow,
   );
   var endCellId = app.formatCellId(
-    app.selectionRange.endCol,
-    app.selectionRange.endRow,
+    selectionRange.endCol,
+    selectionRange.endRow,
   );
   if (startCellId === endCellId) {
     if (sheetPrefix) return '@' + sheetPrefix + startCellId;
@@ -384,9 +589,14 @@ export function buildMentionTokenForSelection(
 }
 
 export function getMentionSheetPrefix(app) {
-  if (!app.crossTabMentionContext) return '';
-  if (app.activeSheetId === app.crossTabMentionContext.sourceSheetId) return '';
-  var tab = app.findTabById(app.activeSheetId);
+  var crossSheetPickContext = app.getCrossSheetPickContext();
+  if (!crossSheetPickContext) return '';
+  var visibleSheetId =
+    typeof app.getVisibleSheetId === 'function'
+      ? String(app.getVisibleSheetId() || '')
+      : String(app.activeSheetId || '');
+  if (visibleSheetId === crossSheetPickContext.sourceSheetId) return '';
+  var tab = app.findTabById(visibleSheetId);
   if (!tab || !tab.name) return '';
   var safe = String(tab.name).replace(/'/g, '');
   return "'" + safe + "'!";
@@ -399,18 +609,26 @@ export function insertTextIntoInputAtCursor(app, input, text) {
   if (!insertion) return;
 
   var start =
-    typeof input.selectionStart === 'number'
-      ? input.selectionStart
-      : value.length;
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input).start
+      : typeof input.selectionStart === 'number'
+        ? input.selectionStart
+        : value.length;
   var end =
-    typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input).end
+      : typeof input.selectionEnd === 'number'
+        ? input.selectionEnd
+        : value.length;
   var needsSpace =
     start > 0 && !/\s|\(|,|\+|-|\*|\/|:/.test(value.charAt(start - 1));
   var prefix = needsSpace ? ' ' : '';
   var nextValue = value.slice(0, start) + prefix + insertion + value.slice(end);
   input.value = nextValue;
   var cursor = start + prefix.length + insertion.length;
-  if (typeof input.setSelectionRange === 'function') {
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(cursor, cursor, input);
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(cursor, cursor);
   }
 }
@@ -420,12 +638,21 @@ export function applyFormulaMentionPreview(app, input, token) {
   var text = String(token == null ? '' : token);
   if (!text) return;
   var value = String(input.value == null ? '' : input.value);
-  var caretStart =
-    typeof input.selectionStart === 'number'
-      ? input.selectionStart
-      : value.length;
-  var caretEnd =
-    typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+  var range =
+    app && typeof app.getEditorSelectionRange === 'function'
+      ? app.getEditorSelectionRange(input)
+      : {
+          start:
+            typeof input.selectionStart === 'number'
+              ? input.selectionStart
+              : value.length,
+          end:
+            typeof input.selectionEnd === 'number'
+              ? input.selectionEnd
+              : value.length,
+        };
+  var caretStart = range.start;
+  var caretEnd = range.end;
 
   if (
     app.formulaMentionPreview &&
@@ -449,11 +676,20 @@ export function applyFormulaMentionPreview(app, input, token) {
       input.value = value;
       app.formulaMentionPreview.start = start;
       app.formulaMentionPreview.end = start + text.length;
-      if (typeof input.setSelectionRange === 'function') {
+      if (app && typeof app.setEditorSelectionRange === 'function') {
+        app.setEditorSelectionRange(
+          app.formulaMentionPreview.end,
+          app.formulaMentionPreview.end,
+          input,
+        );
+      } else if (typeof input.setSelectionRange === 'function') {
         input.setSelectionRange(
           app.formulaMentionPreview.end,
           app.formulaMentionPreview.end,
         );
+      }
+      if (typeof app.updateEditingSessionDraft === 'function') {
+        app.updateEditingSessionDraft(input.value, { origin: 'cell' });
       }
       return;
     }
@@ -473,14 +709,29 @@ export function applyFormulaMentionPreview(app, input, token) {
     start: startPos,
     end: startPos + inserted.length,
   };
-  if (typeof input.setSelectionRange === 'function') {
+  if (app && typeof app.setEditorSelectionRange === 'function') {
+    app.setEditorSelectionRange(
+      app.formulaMentionPreview.end,
+      app.formulaMentionPreview.end,
+      input,
+    );
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(
       app.formulaMentionPreview.end,
       app.formulaMentionPreview.end,
     );
   }
+  if (typeof app.updateEditingSessionDraft === 'function') {
+    app.updateEditingSessionDraft(input.value, { origin: 'cell' });
+  }
 }
 
-export function clearFormulaMentionPreview(app) {
-  app.formulaMentionPreview = null;
+export function clearFormulaMentionPreview(app, input) {
+  var inputId = input ? String(input.id || '') : '';
+  if (
+    app.formulaMentionPreview &&
+    (!inputId || app.formulaMentionPreview.inputId === inputId)
+  ) {
+    app.formulaMentionPreview = null;
+  }
 }

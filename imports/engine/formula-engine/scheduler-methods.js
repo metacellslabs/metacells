@@ -121,18 +121,22 @@ export const schedulerMethods = {
   },
 
   collectCellDependencies(sheetId, cellId) {
+    var generatedBy = String(
+      this.storageService.getGeneratedCellSource(sheetId, cellId) || '',
+    );
+    if (generatedBy) return [];
     var raw = String(this.storageService.getCellValue(sheetId, cellId) || '');
     if (!raw) return [];
 
     if (raw.charAt(0) === "'") {
-      return this.collectFormulaReferenceDependencies(
+      return this.collectAIPromptDependencies(
         sheetId,
         this.stripOptionalFormulaQuestionMarker(raw.substring(1)),
       );
     }
 
     if (raw.charAt(0) === '>') {
-      return this.collectFormulaReferenceDependencies(
+      return this.collectAIPromptDependencies(
         sheetId,
         this.parseListShortcutPrompt(raw),
       );
@@ -144,7 +148,7 @@ export const schedulerMethods = {
           ? this.parseChannelFeedPromptSpec(raw)
           : null;
       if (channelSpec && channelSpec.prompt) {
-        return this.collectFormulaReferenceDependencies(
+        return this.collectAIPromptDependencies(
           sheetId,
           channelSpec.prompt,
         );
@@ -153,7 +157,7 @@ export const schedulerMethods = {
         typeof this.parseTablePromptSpec === 'function'
           ? this.parseTablePromptSpec(raw)
           : null;
-      return this.collectFormulaReferenceDependencies(
+      return this.collectAIPromptDependencies(
         sheetId,
         spec && spec.prompt
           ? spec.prompt

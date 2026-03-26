@@ -8,6 +8,58 @@ import {
 
 // Description: ai methods extracted from FormulaEngine for smaller logical modules.
 export const aiMethods = {
+  shouldApplyAsyncPromptResult(
+    sheetId,
+    sourceCellId,
+    promptText,
+    expectedSourceRaw,
+    expectedPreparedPrompt,
+    stack,
+    options,
+  ) {
+    var currentRaw = String(
+      this.storageService.getCellValue(sheetId, sourceCellId) || '',
+    );
+    if (currentRaw !== String(expectedSourceRaw || '')) {
+      return false;
+    }
+    var expectedPrepared =
+      expectedPreparedPrompt && typeof expectedPreparedPrompt === 'object'
+        ? expectedPreparedPrompt
+        : {
+            userPrompt: expectedPreparedPrompt,
+            systemPrompt: '',
+            userContent: '',
+          };
+    var expectedUserPrompt = String(expectedPrepared.userPrompt || '');
+    var expectedSystemPrompt = String(expectedPrepared.systemPrompt || '');
+    var expectedUserContent = String(expectedPrepared.userContent || '');
+    if (!expectedUserPrompt && !expectedSystemPrompt && !expectedUserContent) {
+      return true;
+    }
+    try {
+      if (!this.arePromptDependenciesResolved(sheetId, promptText, options)) {
+        return false;
+      }
+      var prepared = this.prepareAIPrompt(
+        sheetId,
+        promptText,
+        stack || {},
+        options,
+      );
+      return (
+        String((prepared && prepared.userPrompt) || '') ===
+          expectedUserPrompt &&
+        String((prepared && prepared.systemPrompt) || '') ===
+          expectedSystemPrompt &&
+        String((prepared && prepared.userContent) || '') ===
+          expectedUserContent
+      );
+    } catch (_error) {
+      return false;
+    }
+  },
+
   stripAIPromptImagePlaceholders(text) {
     return String(text == null ? '' : text)
       .replace(
@@ -982,9 +1034,23 @@ export const aiMethods = {
       total,
       (items) => {
         if (
-          String(this.storageService.getCellValue(sheetId, sourceCellId) || '') !==
-          sourceRaw
+          !this.shouldApplyAsyncPromptResult(
+            sheetId,
+            sourceCellId,
+            text,
+            sourceRaw,
+            prepared,
+            stack,
+            options,
+          )
         ) {
+          if (
+            String(this.storageService.getCellValue(sheetId, sourceCellId) || '') ===
+              sourceRaw &&
+            typeof this.deferRecalc === 'function'
+          ) {
+            this.deferRecalc(sheetId, sourceCellId);
+          }
           return;
         }
         var rows = (Array.isArray(items) ? items : [])
@@ -1047,9 +1113,23 @@ export const aiMethods = {
         forceRefresh: !!forceRefresh,
         onResult: (matrix) => {
           if (
-            String(this.storageService.getCellValue(sheetId, sourceCellId) || '') !==
-            sourceRaw
+            !this.shouldApplyAsyncPromptResult(
+              sheetId,
+              sourceCellId,
+              text,
+              sourceRaw,
+              prepared,
+              stack,
+              options,
+            )
           ) {
+            if (
+              String(this.storageService.getCellValue(sheetId, sourceCellId) || '') ===
+                sourceRaw &&
+              typeof this.deferRecalc === 'function'
+            ) {
+              this.deferRecalc(sheetId, sourceCellId);
+            }
             return;
           }
           this.spillMatrixToSheet(sheetId, sourceCellId, matrix, {

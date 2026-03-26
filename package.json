@@ -6,28 +6,24 @@
     "name": "MetaCells Team",
     "email": "team@metacells.com"
   },
-  "main": "electron/main.cjs",
   "private": true,
   "version": "0.1.0",
   "scripts": {
     "start": "node server.js",
-    "start:server": "node server.js",
-    "start:client": "vite",
+    "start:server": "npm run check && node server.js",
+    "start:client": "node node_modules/vite/bin/vite.js",
     "start:worker": "cross-env METACELLS_ROLE=worker node server.js",
-    "build": "vite build",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "check": "node scripts/run-checks.mjs",
     "preview": "node server.js",
-    "desktop:dev": "node scripts/electron-dev.cjs",
-    "desktop:dev:frontend-only": "METACELLS_DESKTOP_NO_SERVER=1 node scripts/electron-dev.cjs",
-    "desktop:prepare": "node scripts/desktop-prepare.cjs",
-    "desktop:pack": "node scripts/desktop-package.cjs --dir",
-    "desktop:dist": "node scripts/desktop-package.cjs",
-    "desktop:dist:mac": "npm run desktop:dist:mac:arm64 && npm run desktop:dist:mac:x64",
-    "desktop:dist:mac:arm64": "node scripts/desktop-package.cjs --mac --arm64",
-    "desktop:dist:mac:x64": "node scripts/desktop-package.cjs --mac --x64",
-    "desktop:dist:linux": "node scripts/desktop-package.cjs --linux",
-    "desktop:dist:win": "node scripts/desktop-package.cjs --win --x64"
+    "desktop:prepare:tauri": "node scripts/desktop-prepare.cjs",
+    "desktop:dev:tauri": "node scripts/tauri-run.cjs dev --config src-tauri/tauri.conf.json",
+    "desktop:dist:tauri": "node scripts/tauri-run.cjs build --config src-tauri/tauri.conf.json",
+    "desktop:dist:tauri:mac": "node scripts/tauri-package-mac.cjs",
+    "desktop:dist:tauri:win": "node scripts/tauri-package-win.cjs"
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.1",
     "exifr": "^7.1.3",
     "express": "^5.1.0",
     "fast-xml-parser": "^5.3.1",
@@ -37,85 +33,22 @@
     "imapflow": "^1.2.13",
     "jszip": "^3.10.1",
     "link-preview-js": "^3.2.0",
-    "mammoth": "^1.10.0",
-    "pdf-parse": "^1.1.1",
+    "nodemailer": "^8.0.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "telegraf": "^4.16.3",
     "turndown": "^7.2.1",
     "turndown-plugin-gfm": "^1.0.2",
-    "xlsx": "^0.18.5"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@vitejs/plugin-react": "^4.5.2",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "^37.2.6",
-    "electron-builder": "^26.0.12",
     "node-addon-api": "^8.6.0",
     "node-gyp": "^12.2.0",
     "vite": "^6.3.5",
     "vite-plugin-svgr": "^4.3.0"
-  },
-  "build": {
-    "appId": "com.metacells.desktop",
-    "productName": "MetaCells",
-    "asar": true,
-    "icon": "electron/assets/app-icon.png",
-    "npmRebuild": false,
-    "nodeGypRebuild": false,
-    "afterSign": "scripts/notarize.js",
-    "directories": {
-      "output": "dist/electron"
-    },
-    "extraResources": [
-      {
-        "from": ".desktop-runtime",
-        "to": "desktop-runtime"
-      }
-    ],
-    "files": [
-      "electron/**/*",
-      "package.json",
-      "public/logo.png",
-      "electron/assets/app-icon.png",
-      "!node_modules/**/*",
-      "!client/**/*",
-      "!imports/**/*",
-      "!server/**/*",
-      "!tests/**/*",
-      "!docs/**/*",
-      "!scripts/**/*",
-      "!dist/**/*",
-      "!.desktop-runtime/**/*",
-      "!README.md"
-    ],
-    "mac": {
-      "icon": "electron/assets/app-icon.png",
-      "category": "public.app-category.productivity",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "dmg": {
-      "backgroundColor": "#ffffff",
-      "icon": null
-    },
-    "win": {
-      "icon": "electron/assets/app-icon.png",
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "linux": {
-      "icon": "electron/assets/app-icon.png",
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    }
   }
 }

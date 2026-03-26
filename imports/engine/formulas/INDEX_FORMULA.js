@@ -14,6 +14,8 @@ export default defineFormula({
         helpers.toNumber(typeof args[2] === 'undefined' ? 1 : args[2]),
       ),
     );
-    return helpers.matrixCell(matrix, rowNumber - 1, columnNumber - 1);
+    return helpers.coerceScalar(
+      helpers.matrixCell(matrix, rowNumber - 1, columnNumber - 1),
+    );
   },
 });

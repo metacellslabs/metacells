@@ -20,6 +20,13 @@ import {
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
 } from '../sheets/workbook-codec.js';
+import { updateSheetRuntimeFields } from '../sheets/sheet-update-helpers.js';
+import {
+  cloneCellRecordWithSchedule,
+  getCellRuntimeValueText,
+  getCellSourceText,
+  getWorkbookCellRecord,
+} from '../sheets/cell-record-helpers.js';
 import { getActiveChannelPayloadMap } from '../channels/runtime-state.js';
 import { hydrateWorkbookAttachmentArtifacts, stripWorkbookAttachmentInlineData } from '../artifacts/index.js';
 import { computeSheetSnapshot } from '../sheets/server/compute.js';
@@ -132,8 +139,8 @@ function buildScheduleDoc(sheetDocumentId, sheetId, cellId, schedule, cell) {
     updatedAt: new Date(),
     sourceHash: String((normalizedSchedule && normalizedSchedule.sourceHash) || ''),
     sourcePreview: String((normalizedSchedule && normalizedSchedule.sourcePreview) || ''),
-    lastKnownSource: String((cell && cell.source) || ''),
-    lastKnownValue: String((cell && cell.value) || ''),
+    lastKnownSource: getCellSourceText(cell),
+    lastKnownValue: getCellRuntimeValueText(cell),
   };
 }
 
@@ -234,12 +241,14 @@ async function updateWorkbookCellSchedule(
   );
   if (!sheetDoc) return null;
   const workbook = decodeWorkbookDocument(sheetDoc.workbook || {});
-  const sheet =
-    workbook.sheets && workbook.sheets[sheetId] && typeof workbook.sheets[sheetId] === 'object'
-      ? workbook.sheets[sheetId]
-      : null;
-  if (!sheet || !sheet.cells || !isPlainObject(sheet.cells[cellId])) return null;
-  const cell = sheet.cells[cellId];
+  const normalizedSheetId = String(sheetId || '');
+  const normalizedCellId = String(cellId || '').toUpperCase();
+  const cell = getWorkbookCellRecord(
+    workbook,
+    normalizedSheetId,
+    normalizedCellId,
+  );
+  if (!cell) return null;
   const currentSchedule = normalizeCellSchedule(cell.schedule);
   if (currentSchedule && currentSchedule.origin === 'manual') return currentSchedule;
 
@@ -253,18 +262,18 @@ async function updateWorkbookCellSchedule(
         updatedAt: new Date().toISOString(),
       }
     : null;
-  cell.schedule = normalizeCellSchedule(nextSchedule);
-  await Sheets.updateAsync(
-    { _id: sheetDocumentId },
-    {
-      $set: {
-        workbook: encodeWorkbookForDocument(stripWorkbookAttachmentInlineData(workbook)),
-        updatedAt: new Date(),
-      },
-      $unset: { storage: '' },
+  workbook.sheets[normalizedSheetId].cells[normalizedCellId] =
+    cloneCellRecordWithSchedule(cell, normalizeCellSchedule(nextSchedule));
+  await updateSheetRuntimeFields(sheetDocumentId, {
+    set: {
+      workbook: encodeWorkbookForDocument(
+        stripWorkbookAttachmentInlineData(workbook),
+      ),
+      runtimeUpdatedAt: new Date(),
     },
-  );
-  return cell.schedule || null;
+    unset: { storage: '' },
+  });
+  return workbook.sheets[normalizedSheetId].cells[normalizedCellId].schedule || null;
 }
 
 async function syncManualSchedules(sheetDocumentId, workbook) {
@@ -493,16 +502,13 @@ async function recomputeScheduledCell(scheduleDoc) {
       const persistedNextWorkbook = stripWorkbookAttachmentInlineData(
         decodeWorkbookDocument(nextWorkbook),
       );
-      await Sheets.updateAsync(
-        { _id: sheetDocumentId },
-        {
-          $set: {
-            workbook: encodeWorkbookForDocument(persistedNextWorkbook),
-            updatedAt: new Date(),
-          },
-          $unset: { storage: '' },
+      await updateSheetRuntimeFields(sheetDocumentId, {
+        set: {
+          runtimeWorkbook: encodeWorkbookForDocument(persistedNextWorkbook),
+          runtimeUpdatedAt: new Date(),
         },
-      );
+        unset: { storage: '' },
+      });
       await syncWorkbookSchedulesOnSave({
         sheetDocumentId,
         previousWorkbook: persistedWorkbook,

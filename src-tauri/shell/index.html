@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Starting MetaCells</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #18241f;
+        --muted: #5e6e67;
+        --accent: #1f7a59;
+        --panel: rgba(255, 252, 245, 0.92);
+        --line: rgba(24, 36, 31, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(213, 178, 111, 0.35), transparent 30%),
+          radial-gradient(circle at right 20%, rgba(31, 122, 89, 0.2), transparent 26%),
+          linear-gradient(160deg, #f3eddf 0%, #ebe6d8 45%, #e2ebdf 100%);
+      }
+
+      main {
+        width: min(760px, calc(100vw - 48px));
+        padding: 28px 30px;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--panel);
+        box-shadow: 0 24px 80px rgba(39, 42, 33, 0.14);
+        backdrop-filter: blur(16px);
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        font: 600 12px/1.2 "Segoe UI", sans-serif;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 34px;
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .meter {
+        margin-top: 24px;
+        width: 100%;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(24, 36, 31, 0.08);
+        overflow: hidden;
+      }
+
+      .meter > span {
+        display: block;
+        width: 62%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #1f7a59 0%, #d5b26f 100%);
+        animation: progress 1.8s ease-in-out infinite alternate;
+      }
+
+      pre {
+        margin: 18px 0 0;
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: rgba(24, 36, 31, 0.9);
+        color: #f8faf9;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap;
+      }
+
+      @keyframes progress {
+        from {
+          transform: translateX(-22%);
+        }
+        to {
+          transform: translateX(42%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Starting MetaCells</h1>
+      <p>
+        Preparing the local workbook runtime and launching the bundled app
+        server.
+      </p>
+      <div class="meter"><span></span></div>
+      <pre id="detail">Loading desktop workspace...</pre>
+    </main>
+    <script>
+      window.__METACELLS_SET_DETAIL__ = function setDetail(text) {
+        var detail = document.getElementById('detail');
+        if (!detail) return;
+        detail.textContent = String(text || '');
+      };
+    </script>
+  </body>
+</html>

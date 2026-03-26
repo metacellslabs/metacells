@@ -1,406 +1,448 @@
-# MetaCells
+# MetaCells `vite`
+
+This directory contains the standalone `vite` runtime: client app, Express server, SQLite-backed persistence, workbook compute engine, AI execution, channels, files, schedules, and desktop packaging support.
+
+This README is a technical map of the implemented system on both client and server, with the main code paths for:
+
+- changing cells
+- formula evaluation
+- AI formulas
+- channels
+- settings / providers / connector registration
+
+## Top-Level Runtime Layout
+
+### Client
+
+- `client/main.jsx`
+  - frontend bootstrap entry
+- `imports/startup/client/index.jsx`
+  - mounts the React app
+- `imports/ui/app/App.jsx`
+  - top-level application shell
+- `imports/ui/app/router.jsx`
+  - page routing
+- `imports/ui/app/pages/SheetPage.jsx`
+  - workbook page that hosts the spreadsheet runtime
+- `imports/ui/metacell/runtime/index.js`
+  - spreadsheet app class and workbook UI runtime glue
+
+### Server
+
+- `server.js`
+  - Express server bootstrap
+  - loads all API modules
+  - mounts RPC
+  - mounts artifact and channel-attachment routes
+  - starts websocket server
+  - starts worker-side background systems
+- `imports/startup/server/index.js`
+  - startup validation and middleware bootstrap
+
+### Shared Engine / Storage
+
+- `imports/engine/storage-service.js`
+  - workbook cell/raw/computed storage operations
+- `imports/engine/formula-engine.js`
+  - formula engine entry
+- `imports/engine/formula-engine/*.js`
+  - parser, mentions, references, recalc, AI methods
+- `imports/engine/workbook-storage-adapter.js`
+  - workbook document adapter
+
+## Main Implemented Subsystems
+
+### Workbook UI Runtime
+
+The workbook runtime is assembled from many small runtime modules under:
+
+- `imports/ui/metacell/runtime/`
+
+Important pieces:
+
+- `index.js`
+  - SpreadsheetApp runtime entry
+  - integrates formulas, mentions, AI, channels, attachments, selection, history
+- `app-bootstrap-init-runtime.js`
+  - creates app services and FormulaEngine instance
+- `app-bootstrap-setup-runtime.js`
+  - initial render and first compute
+- `app-methods-runtime-core.js`
+  - binds render/compute methods onto SpreadsheetApp
+- `compute-runtime.js`
+  - render pass + compute orchestration
+- `app-methods-cell-update.js`
+  - raw cell updates, pending edit detection, AI draft locks
+- `editor-controller-runtime.js`
+  - edit enter/commit/cancel behavior
+- `selection-runtime.js`
+  - active cell and selection state
+- `mention-runtime.js`
+  - mention autocomplete and insertion
+- `drag-selection-runtime.js`
+  - selection drag + mention drag flows
+- `ai-service.js`
+  - client-side AI formula request orchestration
 
-**MetaCells** is an open-source spreadsheet runtime for AI workflows, automations, files, and integrations.
-![Demo](output.gif)
-Instead of hiding logic in scripts, prompts, and backend glue code, **everything lives in cells**:
+### Sheets API
 
-- formulas
-- AI prompts
-- files
-- reports
-- connectors
-- actions
+- `imports/api/sheets/index.js`
+  - workbook CRUD and sheet/server methods
+  - server-side workbook recompute hooks
+  - channel-triggered sheet recompute
+- `imports/api/sheets/server/compute.js`
+  - server-side compute graph and dependency propagation
 
-Your entire workflow becomes **visible, editable, and composable inside a spreadsheet**.
+### AI API
 
-Think:
+- `imports/api/ai/index.js`
+  - active provider resolution
+  - durable `ai.requestChat`
+  - provider-specific transport code
+  - server-side request execution
 
-**Spreadsheets + AI agents + automations, in one open system.**
+### Settings / Providers / Channels
 
----
+- `imports/api/settings/index.js`
+  - saved settings document
+  - AI provider persistence
+  - active provider selection
+- `imports/api/settings/providers/*.js`
+  - AI provider registry entries
+- `imports/api/channels/connectors/*.js`
+  - channel connector definitions shown in UI and formulas
+- `imports/api/channels/server/index.js`
+  - channel runtime, send/search/poll/subscribe orchestration
+- `imports/api/channels/server/handlers/*.js`
+  - connector-specific transport implementations
+- `imports/api/channels/runtime-state.js`
+  - builds active channel payload map for formulas and assistant context
 
-## Why MetaCells exists
+## Cell Change Path
 
-AI workflows today are fragmented.
+This is the main path when a user edits a cell in the workbook UI.
 
-Logic lives across:
+### 1. User edits a cell
 
-- prompts
-- scripts
-- cron jobs
-- automation tools
-- connectors
-- backend glue code
+Key files:
 
-MetaCells turns this into something simpler:
+- `imports/ui/metacell/runtime/editing-input-runtime.js`
+- `imports/ui/metacell/runtime/editor-controller-runtime.js`
+- `imports/ui/metacell/runtime/app-methods-cell-update.js`
 
-**a programmable spreadsheet where cells can think, compute, and act.**
+Flow:
 
----
+1. input enters editing mode
+2. edit session is tracked
+3. commit/cancel is handled by editor controller
+4. committed raw value is written into storage
 
-## Example
+The actual raw write lands in:
 
-A simple workbook might look like this:
+- `SpreadsheetApp.prototype.setRawCellValue`
+- file: `imports/ui/metacell/runtime/app-methods-cell-update.js`
 
-```text
-Input:@idea:[Describe your startup idea]
-'Summarize the idea in one sentence: @idea
->top 10 user complaints about products like @idea
-#compare @idea with competitors;4;6
-/tg Launch update is live
-/sf:send:{"to":"team@example.com","subj":"Status","body":"See @report"}
-```
+That calls:
 
-Each cell can:
+- `this.storage.setCellValue(...)`
+- file: `imports/engine/storage-service.js`
 
-- generate text
-- produce lists
-- create tables
-- trigger actions
-- feed other cells
+### 2. Compute is triggered
 
-Everything updates reactively.
+The UI then calls:
 
-Newer workbook patterns also supported:
+- `app.computeAll(...)`
+- file: `imports/ui/metacell/runtime/compute-runtime.js`
 
-```text
-'Write with @@brief and @idea
-'Audit _@idea
-!@idea
-=update(@target, "#compare @idea with competitors;4;6")
-=B1>5 && recalc(B1>5, @target)
-/x shipping update is live
-```
+This is the main recomputation entry for the client workbook.
 
----
-## 🔥 Hot fixes wanted
+### 3. Render is refreshed
 
-<!-- featured-issues:start -->
+After compute:
 
-### ui/ux
+- changed cells are rerendered
+- formula bar is synced
+- editor overlay is synced
+- dependency highlight is updated
+- report live values are refreshed
 
-- [#3 Formula bar behavior](https://github.com/metacellslabs/MetaCells/issues/3)
+Core render methods:
 
-### enhancement
+- `renderCurrentSheetFromStorage`
+- `renderChangedCellIds`
+- file: `imports/ui/metacell/runtime/compute-runtime.js`
 
-- [#5 npm license compliance check](https://github.com/metacellslabs/MetaCells/issues/5)
+## Formula Evaluation Path
 
-<!-- featured-issues:end -->
+### Formula registry
 
-## What you can build
+Formula exports are exposed from:
 
-MetaCells is a **runtime for AI-native workflows**.
+- `imports/ui/metacell/runtime/formulas/index.js`
+  - re-exports from engine formulas
+- `imports/engine/formulas/index.js`
+  - actual formula registry
 
-### AI research notebooks
+### Formula engine
 
-- summarize PDFs
-- compare competitors
-- generate structured insights
+Main engine entry:
 
-### Internal AI tools
+- `imports/engine/formula-engine.js`
 
-- AI reports
-- document processing
-- automated analysis
+Important internal modules:
 
-### Automation workspaces
+- `formula-engine/parser-methods.js`
+  - parses formulas and mentions
+- `formula-engine/reference-methods.js`
+  - cell/range references
+- `formula-engine/mention-methods.js`
+  - `@A1`, named refs, raw refs, region refs, sheet refs
+- `formula-engine/recalc-methods.js`
+  - update/recalc behaviors
+- `formula-engine/ai-methods.js`
+  - `'`, `>`, `#` AI formulas and AI helpers
 
-- process email
-- react to Telegram messages
-- generate reports
-- trigger actions
+### What happens
 
-### AI agents in spreadsheets
+When `computeAll()` runs:
 
-Cells can call AI, generate outputs, and pass results to other cells.
+1. raw cell contents are scanned
+2. formula-like cells are parsed
+3. dependencies are collected
+4. computed values / display values / errors / state are written into storage
+5. spill results and generated cells are updated
 
-No hidden pipelines.
+The same engine is also used on the server in:
 
----
+- `imports/api/sheets/server/compute.js`
+- `imports/api/ai/index.js`
+- `imports/api/sheets/index.js`
 
-## Why developers fork MetaCells
+## AI Formula Path
 
-MetaCells is designed to be **forkable infrastructure**.
+AI formulas are workbook-native and are handled through the formula engine plus the AI service.
 
-You can extend it with:
+### Client-side orchestration
 
-- new formulas
-- new AI providers
-- new connectors
-- custom workflow primitives
+- `imports/ui/metacell/runtime/ai-service.js`
 
-Developers fork MetaCells to build:
+Responsibilities:
 
-- internal AI tools
-- automation systems
-- research environments
-- AI notebook platforms
+- queues AI requests
+- debounces in auto mode
+- supports manual mode
+- caches results
+- attaches workbook queue metadata
+- calls RPC `ai.requestChat`
 
-If you ever wanted to build something like:
+Main entry:
 
-- Airtable for AI
-- AI-native spreadsheets
-- automation workbooks
+- `AIService.requestChat(...)`
 
-MetaCells gives you the base runtime.
+### Where AI formulas originate
 
----
+AI formula behavior lives in:
 
-## Core ideas
+- `imports/engine/formula-engine/ai-methods.js`
 
-### Cells are programmable
+This covers prompt formulas like:
 
-Cells are not just data.
+- `'...`
+- `>...`
+- `#...`
 
-They can be:
+and workbook AI helpers such as generated result tracking, attachment context inclusion, and mention expansion.
 
-- prompts
-- formulas
-- reports
-- file inputs
-- integrations
-- actions
+### Server-side AI execution
 
-### AI is a native cell operation
+- `imports/api/ai/index.js`
 
-Example:
+Responsibilities:
 
-```text
-'Write 3 launch taglines for @idea
-```
+- resolves active provider from settings
+- selects model
+- normalizes messages
+- sends provider request
+- returns content back into workbook flow
 
-### Tables spill automatically
+Currently implemented provider routing includes OpenAI-compatible providers and Gemini-specific transport.
 
-```text
-#compare @product with competitors;4;6
-```
+### AI provider definitions
 
-### Files become AI context
+Registry path:
 
-```text
-File:@policy:[Upload policy PDF]
-```
+- `imports/api/settings/providers/index.js`
 
-AI prompts can read the file automatically.
+Provider files:
 
-### Reports can collect inputs directly
+- `imports/api/settings/providers/OPENAI.js`
+- `imports/api/settings/providers/DEEPSEEK.js`
+- `imports/api/settings/providers/GEMINI.js`
+- `imports/api/settings/providers/OPENROUTER.js`
+- `imports/api/settings/providers/LM_STUDIO.js`
+- others in the same directory
 
-MetaCells report views can render controls that write back into cells.
+### AI settings persistence
 
-```text
-Input:@case:[Enter your business case]
-File:@policy:[Upload policy PDF]
-```
+- `imports/api/settings/index.js`
 
-This makes it possible to build guided AI workflows and internal tools without leaving the workbook.
+Relevant methods:
 
-### Cells can generate files
+- `settings.get`
+- `settings.upsertAIProvider`
+- `settings.setActiveAIProvider`
 
-You can turn any cell content into a downloadable attachment.
+## Channels Path
 
-```text
-=pdf("invoice.pdf", A1)
-=FILE("invoice.pdf", A1, "PDF")
-```
+Channels are split into connector metadata + runtime handlers.
 
-This is useful when another cell already contains the text you want to package, including content extracted from an uploaded file.
+### Connector registry
 
-```text
-File:@policy:[Upload policy PDF]
-=PDF("policy-copy.pdf", @policy)
-```
+- `imports/api/channels/connectors/index.js`
 
-### Cells can trigger actions
+Each connector defines:
 
-```text
-/tg Launch update is live
-/x shipping update is live
-/sf:send:{"to":"team@example.com","subj":"Report","body":"See @summary"}
-```
+- id / type / name
+- settings fields
+- capabilities
+- mentioning formulas
+- help text
 
-### Mentioning is first-class
+Files:
 
-MetaCells supports several ways to reference workbook context:
+- `imports/api/channels/connectors/*.js`
 
-- `@idea` for the computed value of a named cell
-- `@@brief` for hidden AI context
-- `_@idea` for the raw source of a cell
-- `!@idea` for an internal report link
-- `A1:B5` for a region
-- `@policy` for extracted file contents from a file cell
-- `https://...` inside AI prompts to fetch page content into the prompt
+### Handler runtime
 
----
+- `imports/api/channels/server/handlers/*.js`
 
-## How it works
+Each handler may implement:
 
-MetaCells uses a spreadsheet-native computation model:
+- `testConnection`
+- `send`
+- `poll`
+- `subscribe`
+- `normalizeEvent`
+- `search`
 
-```text
-data -> formulas -> prompts -> AI computation -> new data -> actions
-```
+### Server orchestration
 
-Cells reference each other with:
+- `imports/api/channels/server/index.js`
 
-```text
-@cell
-```
+This file handles:
 
-Everything updates reactively across the workbook.
+- saving channel configs
+- polling/subscription worker
+- incoming event normalization
+- saving channel events
+- search/send RPC methods
+- recomputing sheets mentioning a channel
 
-Formulas can also drive workflow control:
+Important methods:
 
-```text
-=update(@target, newValue)
-=recalc(condition, @target)
-```
+- `settings.upsertCommunicationChannel`
+- `settings.testCommunicationChannel`
+- `channels.pollNow`
+- `channels.send`
+- `channels.sendByLabel`
+- `channels.search`
+- `channels.searchByLabel`
 
-This makes it possible to build chained flows and conditional reruns directly in the sheet model.
+### Channel payloads in formulas
 
----
+Active channel payloads are built in:
 
-## Quick start
+- `imports/api/channels/runtime-state.js`
 
-### Run locally
+Sheet recompute hooks that react to channel events:
 
-Requirements:
+- `imports/api/channels/server/index.js`
+- `imports/api/sheets/index.js`
 
-- Node.js 20+
-- MongoDB (external instance or the app will use an embedded one for Electron)
+Specific recompute entry:
 
-Install dependencies:
+- `recomputeSheetsMentioningChannel(channelLabel)`
+- file: `imports/api/sheets/index.js`
 
-```bash
-npm install
-```
+## Path for Changing a Normal Cell
 
-Start the server:
+Use these files if the change is about plain values, editing UX, or cell commit behavior:
 
-```bash
-npm start
-```
+- `imports/ui/metacell/runtime/editing-input-runtime.js`
+- `imports/ui/metacell/runtime/editor-controller-runtime.js`
+- `imports/ui/metacell/runtime/app-methods-cell-update.js`
+- `imports/engine/storage-service.js`
+- `imports/ui/metacell/runtime/compute-runtime.js`
 
-For development, run the Vite dev server and Express backend separately:
+## Path for Changing Formula Behavior
 
-```bash
-npm run start:server   # Express API server
-npm run start:client   # Vite dev server
-```
+Use these files if the change is about parsing, references, dependencies, or formula evaluation:
 
-Open:
+- `imports/engine/formula-engine.js`
+- `imports/engine/formula-engine/parser-methods.js`
+- `imports/engine/formula-engine/reference-methods.js`
+- `imports/engine/formula-engine/mention-methods.js`
+- `imports/engine/formula-engine/recalc-methods.js`
+- `imports/engine/formulas/index.js`
+- formula implementations under `imports/engine/formulas/`
 
-```text
-http://localhost:3400
-```
+## Path for Changing AI Formula Behavior
 
-Optional worker for background jobs and connectors:
+Use these files if the change is about prompt formulas, queueing, provider calls, or AI result handling:
 
-```bash
-npm run start:worker
-```
+- `imports/engine/formula-engine/ai-methods.js`
+- `imports/ui/metacell/runtime/ai-service.js`
+- `imports/api/ai/index.js`
+- `imports/api/settings/providers/*.js`
+- `imports/api/settings/index.js`
 
-### Run with Electron
+## Path for Changing Channels
 
-Electron is configured as a desktop shell for the Express server.
+Use these files if the change is about receive/send/search/mentions/channel configuration:
 
-Development mode starts the server and Electron together:
+- `imports/api/channels/connectors/*.js`
+- `imports/api/channels/server/handlers/*.js`
+- `imports/api/channels/server/index.js`
+- `imports/api/channels/runtime-state.js`
+- `imports/api/channels/events.js`
+- `imports/ui/app/pages/SettingsPage.jsx`
+- `imports/ui/app/components/settings/SettingsSections.jsx`
 
-```bash
-npm run desktop:dev
-```
+## Path for Changing Server-Side Workbook Compute
 
-If you already have the server running elsewhere, point Electron at that URL:
+Use these files if the change is about durable workbook recompute, dependency graphs, or worker-driven updates:
 
-```bash
-METACELLS_DESKTOP_URL=http://127.0.0.1:3400 npm run desktop:dev:frontend-only
-```
+- `imports/api/sheets/server/compute.js`
+- `imports/api/sheets/index.js`
+- `imports/api/ai/index.js`
+- `imports/api/jobs/index.js`
 
-### Build desktop packages
+## Entry Points to Keep in Mind
 
-Install dependencies first:
+### Client entrypoints
 
-```bash
-npm install
-```
+- `client/main.jsx`
+- `imports/startup/client/index.jsx`
+- `imports/ui/app/App.jsx`
+- `imports/ui/app/router.jsx`
+- `imports/ui/app/pages/SheetPage.jsx`
 
-Build the client assets:
+### Server entrypoints
 
-```bash
-npm run build
-```
+- `server.js`
+- `imports/startup/server/index.js`
 
-Build a self-contained desktop app for the current host platform:
+## Practical Rule of Thumb
 
-```bash
-npm run desktop:dist
-```
+If you need to change:
 
-Build platform-specific self-contained packages:
-
-```bash
-npm run desktop:dist:mac
-npm run desktop:dist:mac:arm64
-npm run desktop:dist:mac:x64
-npm run desktop:dist:linux
-npm run desktop:dist:win
-```
-
-Create an unpacked app directory without installers:
-
-```bash
-npm run desktop:pack
-```
-
-Artifacts are written to:
-
-```text
-dist/electron
-```
-
-The package commands prepare a bundled local backend before packaging:
-
-- Express server bundle with production dependencies
-- Vite-built client assets
-- MongoDB server binary for the current host OS/architecture
-
-The first packaging run may take longer because it downloads the MongoDB binary.
-
-### Run with Docker
-
-```bash
-docker compose up --build
-```
-
-Open:
-
-```text
-http://localhost:3400
-```
-
-## First 3 minutes
-
-1. Open MetaCells.
-2. Create a workbook.
-3. Open `Settings`.
-4. Add an AI provider.
-
-Supported providers:
-
-- OpenAI
-- Groq
-- DeepSeek
-- OpenRouter
-- Ollama
-- LM Studio
-- Together
-- Fireworks
-- xAI
-
-The Settings page includes:
-
-- AI provider configuration
-- communication channel setup and testing
-- job/worker controls
-- general and advanced runtime settings
-
-In the Electron app, Settings is also available from the native application menu.
+- edit UX or local commit behavior
+  - start in `ui/metacell/runtime/*`
+- formula semantics
+  - start in `engine/formula-engine/*` and `engine/formulas/*`
+- AI provider or transport
+  - start in `api/ai/index.js` and `api/settings/providers/*`
+- channels
+  - start in `api/channels/connectors/*`, `api/channels/server/handlers/*`, and `api/channels/server/index.js`
+- workbook persistence or computed state storage
+  - start in `engine/storage-service.js` and `api/sheets/*`

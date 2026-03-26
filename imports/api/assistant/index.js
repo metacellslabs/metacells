@@ -7,6 +7,11 @@ import {
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
 } from '../sheets/workbook-codec.js';
+import {
+  getCellSourceText,
+  getCellRuntimeValueText,
+  listWorkbookCellEntries,
+} from '../sheets/cell-record-helpers.js';
 import { WorkbookStorageAdapter } from '../../engine/workbook-storage-adapter.js';
 import { StorageService } from '../../engine/storage-service.js';
 import { getRegisteredFormulas } from '../../engine/formulas/index.js';
@@ -21,11 +26,17 @@ import {
 } from '../settings/index.js';
 import { getRegisteredAIProviders } from '../settings/providers/index.js';
 import {
-  buildAttachmentSourceValue,
   getArtifactText,
   hydrateWorkbookAttachmentArtifacts,
   parseAttachmentSourceValue,
 } from '../artifacts/index.js';
+import {
+  clearWorkbookCell,
+  setWorkbookCellFromUpload,
+  setWorkbookCellPresentation,
+  setWorkbookCellSchedule,
+  setWorkbookCellSource,
+} from './workbook-mutation-facade.js';
 
 const assistantToolRegistry = [];
 export const AssistantConversations = defineModel('assistant_conversations');
@@ -205,22 +216,6 @@ async function removeAssistantConversationUpload(sheetDocumentId, uploadId) {
   );
   await saveAssistantConversationUploads(sheetDocumentId, nextUploads);
   return nextUploads;
-}
-
-function buildAttachmentSourceFromAssistantUpload(upload) {
-  if (!upload) {
-    throw new Error('Assistant upload not found');
-  }
-  return buildAttachmentSourceValue({
-    name: String(upload.name || 'Attached file'),
-    type: String(upload.type || ''),
-    content: '',
-    contentArtifactId: String(upload.contentArtifactId || ''),
-    binaryArtifactId: String(upload.binaryArtifactId || ''),
-    downloadUrl: String(upload.downloadUrl || ''),
-    previewUrl: String(upload.previewUrl || ''),
-    pending: false,
-  });
 }
 
 async function getAssistantUploadById(sheetDocumentId, uploadId) {
@@ -796,18 +791,21 @@ function buildChannelPromptContext(manifest) {
 function buildWorkbookPromptContext(workbook) {
   const normalized = decodeWorkbookDocument(workbook || {});
   const tabs = Array.isArray(normalized.tabs) ? normalized.tabs : [];
-  const sheets = isPlainObject(normalized.sheets) ? normalized.sheets : {};
   const fileCells = [];
   const populatedCells = [];
+  const entriesBySheetId = new Map();
+
+  listWorkbookCellEntries(normalized).forEach((entry) => {
+    const list = entriesBySheetId.get(entry.sheetId) || [];
+    list.push(entry);
+    entriesBySheetId.set(entry.sheetId, list);
+  });
 
   tabs.forEach((tab) => {
-    const sheet = sheets[tab.id] || {};
-    const cells = isPlainObject(sheet.cells) ? sheet.cells : {};
-    Object.keys(cells).forEach((cellId) => {
-      const cell = cells[cellId];
-      if (!isPlainObject(cell)) return;
-      const source = String(cell.source || '');
-      const value = String(cell.value || '');
+    const entries = entriesBySheetId.get(String(tab.id || '')) || [];
+    entries.forEach(({ cellId, cell }) => {
+      const source = getCellSourceText(cell);
+      const value = getCellRuntimeValueText(cell);
       const attachment = parseAttachmentSourceValue(source);
       if (attachment) {
         fileCells.push({
@@ -952,7 +950,12 @@ async function persistAssistantWorkbook(sheetDocumentId, workbook) {
   const result = await computeGrid(
     sheetDocumentId,
     activeTabId,
-    { workbookSnapshot: workbook, forceRefreshAI: false, manualTriggerAI: false },
+    {
+      workbookSnapshot: workbook,
+      forceRefreshAI: false,
+      manualTriggerAI: false,
+      includeWorkbookSnapshot: true,
+    },
   );
   return result && result.workbook ? decodeWorkbookDocument(result.workbook) : decodeWorkbookDocument(workbook);
 }
@@ -1074,13 +1077,12 @@ function registerBuiltInAssistantTools() {
         const sheetId = String(update.sheetId || '');
         const cellId = String(update.cellId || '').toUpperCase();
         if (update.clear === true) {
-          context.storage.setCellSchedule(sheetId, cellId, null);
-          context.storage.setCellValue(sheetId, cellId, '');
+          clearWorkbookCell(context, sheetId, cellId);
           changed.push({ kind: 'clear_cell', sheetId, cellId });
           continue;
         }
         if (Object.prototype.hasOwnProperty.call(update, 'source')) {
-          context.storage.setCellValue(sheetId, cellId, String(update.source || ''));
+          setWorkbookCellSource(context, sheetId, cellId, update.source);
           changed.push({ kind: 'set_cell_source', sheetId, cellId });
         }
         if (Object.prototype.hasOwnProperty.call(update, 'attachmentUploadId')) {
@@ -1091,11 +1093,7 @@ function registerBuiltInAssistantTools() {
               `Assistant upload not found: ${String(update.attachmentUploadId || '')}`,
             );
           }
-          context.storage.setCellValue(
-            sheetId,
-            cellId,
-            buildAttachmentSourceFromAssistantUpload(upload),
-          );
+          setWorkbookCellFromUpload(context, sheetId, cellId, upload);
           changed.push({
             kind: 'set_file_cell',
             sheetId,
@@ -1105,15 +1103,11 @@ function registerBuiltInAssistantTools() {
         }
         if (Object.prototype.hasOwnProperty.call(update, 'presentation')) {
           check(update.presentation, Match.Where(isPlainObject));
-          context.storage.setCellPresentation(sheetId, cellId, update.presentation);
+          setWorkbookCellPresentation(context, sheetId, cellId, update.presentation);
           changed.push({ kind: 'set_cell_presentation', sheetId, cellId });
         }
         if (Object.prototype.hasOwnProperty.call(update, 'schedule')) {
-          context.storage.setCellSchedule(
-            sheetId,
-            cellId,
-            update.schedule == null ? null : update.schedule,
-          );
+          setWorkbookCellSchedule(context, sheetId, cellId, update.schedule);
           changed.push({ kind: 'set_cell_schedule', sheetId, cellId });
         }
       }
@@ -1204,11 +1198,7 @@ function registerBuiltInAssistantTools() {
       if (!upload) {
         throw new Error(`Assistant upload not found: ${String(args.uploadId || '')}`);
       }
-      context.storage.setCellValue(
-        args.sheetId,
-        args.cellId,
-        buildAttachmentSourceFromAssistantUpload(upload),
-      );
+      setWorkbookCellFromUpload(context, args.sheetId, args.cellId, upload);
       context.markMutated('set_file_cell_from_upload', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1245,7 +1235,7 @@ function registerBuiltInAssistantTools() {
       check(args.sheetId, String);
       check(args.cellId, String);
       check(args.source, String);
-      context.storage.setCellValue(args.sheetId, args.cellId, args.source);
+      setWorkbookCellSource(context, args.sheetId, args.cellId, args.source);
       context.markMutated('set_cell_source', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1265,8 +1255,7 @@ function registerBuiltInAssistantTools() {
     run: async (args, context) => {
       check(args.sheetId, String);
       check(args.cellId, String);
-      context.storage.setCellSchedule(args.sheetId, args.cellId, null);
-      context.storage.setCellValue(args.sheetId, args.cellId, '');
+      clearWorkbookCell(context, args.sheetId, args.cellId);
       context.markMutated('clear_cell', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1288,11 +1277,7 @@ function registerBuiltInAssistantTools() {
       check(args.sheetId, String);
       check(args.cellId, String);
       check(args.presentation, Match.Where(isPlainObject));
-      context.storage.setCellPresentation(
-        args.sheetId,
-        args.cellId,
-        args.presentation,
-      );
+      setWorkbookCellPresentation(context, args.sheetId, args.cellId, args.presentation);
       context.markMutated('set_cell_presentation', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1313,11 +1298,7 @@ function registerBuiltInAssistantTools() {
     run: async (args, context) => {
       check(args.sheetId, String);
       check(args.cellId, String);
-      context.storage.setCellSchedule(
-        args.sheetId,
-        args.cellId,
-        args.schedule == null ? null : args.schedule,
-      );
+      setWorkbookCellSchedule(context, args.sheetId, args.cellId, args.schedule);
       context.markMutated('set_cell_schedule', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),

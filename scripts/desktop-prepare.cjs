@@ -1,26 +1,32 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const runtimeRoot = path.join(projectRoot, '.desktop-runtime');
 const cacheRoot = path.join(projectRoot, '.desktop-cache');
+const desktopToolsRoot = path.join(projectRoot, '.desktop-tools');
+const backendRuntimeDependenciesPath = path.join(
+  projectRoot,
+  'scripts',
+  'desktop-backend-runtime-dependencies.json',
+);
 const stagedBackendRoot = path.join(runtimeRoot, 'backend');
+const stagedNodeRoot = path.join(runtimeRoot, 'node');
 const targetPlatform = process.env.METACELLS_DESKTOP_TARGET_PLATFORM || process.platform;
 const targetArch = process.env.METACELLS_DESKTOP_TARGET_ARCH || process.arch;
-const BACKEND_RUNTIME_DEPENDENCIES = [
-  'exifr',
-  'express',
-  'fast-xml-parser',
-  'image-size',
-  'imapflow',
-  'jszip',
-  'mammoth',
-  'pdf-parse',
-  'turndown',
-  'turndown-plugin-gfm',
-  'xlsx',
-];
+const desktopMode = String(process.env.METACELLS_DESKTOP_MODE || 'build').trim().toLowerCase();
+const NODE_MODULES_PRUNE_DIR_NAMES = new Set([
+  'test',
+  'tests',
+  'docs',
+  'doc',
+  'example',
+  'examples',
+  '.github',
+  '.husky',
+  'benchmarks',
+]);
 
 function getSpawnEnv() {
   const env = { ...process.env };
@@ -51,6 +57,149 @@ function run(command, args, options = {}) {
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function pruneNodeModulesJunk(nodeModulesRoot) {
+  if (!fs.existsSync(nodeModulesRoot)) return;
+
+  const stack = [nodeModulesRoot];
+  while (stack.length) {
+    const currentPath = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true });
+    } catch (_error) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const entryPath = path.join(currentPath, entry.name);
+      if (NODE_MODULES_PRUNE_DIR_NAMES.has(entry.name)) {
+        fs.rmSync(entryPath, { recursive: true, force: true });
+        continue;
+      }
+      stack.push(entryPath);
+    }
+  }
+}
+
+function getBundledNodeFilename() {
+  return targetPlatform === 'win32' ? 'node.exe' : 'node';
+}
+
+function getDesktopToolsTargetSuffix() {
+  return `${targetPlatform}-${targetArch}`;
+}
+
+function listDynamicLibraries(binaryPath) {
+  if (process.platform !== 'darwin') return [];
+  const output = execFileSync('otool', ['-L', binaryPath], {
+    cwd: projectRoot,
+    env: getSpawnEnv(),
+    encoding: 'utf8',
+  });
+  return String(output)
+    .split('\n')
+    .slice(1)
+    .map((line) => String(line || '').trim())
+    .filter(Boolean)
+    .map((line) => line.split(' (')[0].trim())
+    .filter(Boolean);
+}
+
+function assertPortableMacNodeBinary(binaryPath) {
+  if (targetPlatform !== 'darwin') return;
+  const dylibs = listDynamicLibraries(binaryPath);
+  const externalDeps = dylibs.filter((libPath) => {
+    return !(
+      libPath.startsWith('/System/') ||
+      libPath.startsWith('/usr/lib/') ||
+      libPath.startsWith('@executable_path/') ||
+      libPath.startsWith('@loader_path/') ||
+      libPath.startsWith('@rpath/')
+    );
+  });
+  if (!externalDeps.length) return;
+  throw new Error(
+    [
+      `Bundled Node binary is not portable: ${binaryPath}`,
+      'It links against non-system dynamic libraries:',
+      ...externalDeps.map((libPath) => `- ${libPath}`),
+      'Use METACELLS_DESKTOP_NODE_BINARY with a standalone Node build that does not depend on Homebrew dylibs.',
+    ].join('\n'),
+  );
+}
+
+function isPortableMacNodeBinary(binaryPath) {
+  try {
+    assertPortableMacNodeBinary(binaryPath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function resolveManagedNodeBinarySource() {
+  if (!fs.existsSync(desktopToolsRoot)) return '';
+
+  const nodeFilename = getBundledNodeFilename();
+  const targetSuffix = getDesktopToolsTargetSuffix();
+  const candidates = fs
+    .readdirSync(desktopToolsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.includes(targetSuffix))
+    .map((entry) => path.join(desktopToolsRoot, entry.name, 'bin', nodeFilename))
+    .filter((candidatePath) => fs.existsSync(candidatePath))
+    .sort()
+    .reverse();
+
+  for (const candidatePath of candidates) {
+    if (targetPlatform === 'darwin' && !isPortableMacNodeBinary(candidatePath)) {
+      continue;
+    }
+    return candidatePath;
+  }
+
+  return '';
+}
+
+function resolveNodeBinarySource() {
+  const explicitPath = String(process.env.METACELLS_DESKTOP_NODE_BINARY || '').trim();
+  if (explicitPath) {
+    const resolved = path.resolve(projectRoot, explicitPath);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(
+        `METACELLS_DESKTOP_NODE_BINARY does not exist: ${resolved}`,
+      );
+    }
+    return resolved;
+  }
+
+  const managedNodeBinary = resolveManagedNodeBinarySource();
+  if (managedNodeBinary) {
+    return managedNodeBinary;
+  }
+
+  if (desktopMode === 'dev' && !isCrossTargetBuild()) {
+    if (targetPlatform !== 'darwin' || isPortableMacNodeBinary(process.execPath)) {
+      return process.execPath;
+    }
+    throw new Error(
+      [
+        `Bundled Node binary is not portable: ${process.execPath}`,
+        'A managed standalone runtime was not found under .desktop-tools.',
+        'Use METACELLS_DESKTOP_NODE_BINARY with a standalone Node build that does not depend on Homebrew dylibs.',
+      ].join('\n'),
+    );
+  }
+
+  throw new Error(
+    [
+      `No portable bundled Node runtime was found for ${targetPlatform}/${targetArch}.`,
+      'Desktop build mode does not allow falling back to the builder machine Node binary.',
+      'Provide METACELLS_DESKTOP_NODE_BINARY or stage a standalone runtime under .desktop-tools.',
+    ].join('\n'),
+  );
 }
 
 function removeDirRobust(dirPath) {
@@ -86,16 +235,40 @@ function readProjectPackageJson() {
   return JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 }
 
+function readBackendRuntimeDependencies() {
+  const source = JSON.parse(
+    fs.readFileSync(backendRuntimeDependenciesPath, 'utf8'),
+  );
+  if (!Array.isArray(source) || !source.length) {
+    throw new Error(
+      `Backend runtime dependency list is empty: ${backendRuntimeDependenciesPath}`,
+    );
+  }
+  return source.map((value) => String(value || '').trim()).filter(Boolean);
+}
+
+function readInstalledPackageVersion(name) {
+  const packageJsonPath = path.join(projectRoot, 'node_modules', name, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) return '';
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  return String(packageJson.version || '').trim();
+}
+
+function resolveRuntimeDependencyVersion(name, rootDependencies) {
+  if (rootDependencies[name]) return rootDependencies[name];
+  const installedVersion = readInstalledPackageVersion(name);
+  if (installedVersion) return `^${installedVersion}`;
+  throw new Error(`Missing runtime dependency "${name}" in package.json and node_modules`);
+}
+
 function buildDesktopRuntimePackageJson() {
   const rootPackageJson = readProjectPackageJson();
   const rootDependencies = rootPackageJson.dependencies || {};
+  const runtimeDependencyNames = readBackendRuntimeDependencies();
   const dependencies = {};
 
-  BACKEND_RUNTIME_DEPENDENCIES.forEach((name) => {
-    if (!rootDependencies[name]) {
-      throw new Error(`Missing runtime dependency "${name}" in root package.json`);
-    }
-    dependencies[name] = rootDependencies[name];
+  runtimeDependencyNames.forEach((name) => {
+    dependencies[name] = resolveRuntimeDependencyVersion(name, rootDependencies);
   });
 
   return {
@@ -127,12 +300,37 @@ async function stageServerBundle() {
     JSON.stringify(runtimePackageJson, null, 2),
   );
 
-  const directoriesToCopy = ['server', 'lib', 'imports'];
+  const directoriesToCopy = ['server', 'lib'];
   for (const directory of directoriesToCopy) {
     const sourceDir = path.join(projectRoot, directory);
     if (fs.existsSync(sourceDir)) {
       fs.cpSync(sourceDir, path.join(bundleRoot, directory), { recursive: true });
     }
+  }
+
+  const importsRoot = path.join(projectRoot, 'imports');
+  const stagedImportsRoot = path.join(bundleRoot, 'imports');
+  ensureDir(stagedImportsRoot);
+  const importSubtreesToCopy = ['api', 'engine', 'lib', 'startup/server'];
+  for (const relativePath of importSubtreesToCopy) {
+    const sourceDir = path.join(importsRoot, relativePath);
+    if (fs.existsSync(sourceDir)) {
+      fs.cpSync(sourceDir, path.join(stagedImportsRoot, relativePath), {
+        recursive: true,
+      });
+    }
+  }
+  const importFilesToCopy = [
+    'ui/metacell/runtime/ai-service.js',
+    'ui/metacell/runtime/ai-prompts.js',
+    'ui/metacell/runtime/constants.js',
+  ];
+  for (const relativePath of importFilesToCopy) {
+    const sourceFile = path.join(importsRoot, relativePath);
+    if (!fs.existsSync(sourceFile)) continue;
+    const targetFile = path.join(stagedImportsRoot, relativePath);
+    ensureDir(path.dirname(targetFile));
+    fs.copyFileSync(sourceFile, targetFile);
   }
 
   const clientDistSrc = path.join(projectRoot, 'dist', 'client');
@@ -154,23 +352,50 @@ async function stageServerBundle() {
   try {
     await run('npm', installArgs, { cwd: bundleRoot });
   } catch (error) {
-    if (isCrossTargetBuild()) {
-      throw new Error(
-        `Cross-target dependency staging failed for ${targetPlatform}/${targetArch}: ${error.message}`,
-      );
+    if (desktopMode === 'dev' && !isCrossTargetBuild()) {
+      console.warn('[desktop:prepare] npm install failed, falling back to copied workspace node_modules');
+      console.warn(error.message);
+      copyRootNodeModules(bundleRoot);
+      pruneNodeModulesJunk(path.join(bundleRoot, 'node_modules'));
+      return;
     }
-    console.warn('[desktop:prepare] npm install failed, falling back to copied workspace node_modules');
-    console.warn(error.message);
-    copyRootNodeModules(bundleRoot);
+    throw new Error(
+      [
+        `Desktop dependency staging failed for ${targetPlatform}/${targetArch}: ${error.message}`,
+        'Build mode does not allow falling back to workspace node_modules.',
+      ].join('\n'),
+    );
   }
+
+  pruneNodeModulesJunk(path.join(bundleRoot, 'node_modules'));
 }
 
-function writeManifest() {
+function stageNodeBinary() {
+  ensureDir(stagedNodeRoot);
+  const sourceBinary = resolveNodeBinarySource();
+  assertPortableMacNodeBinary(sourceBinary);
+  const targetBinary = path.join(stagedNodeRoot, getBundledNodeFilename());
+  fs.copyFileSync(sourceBinary, targetBinary);
+  if (targetPlatform !== 'win32') {
+    fs.chmodSync(targetBinary, 0o755);
+  }
+  return {
+    sourceBinary,
+    targetBinary,
+  };
+}
+
+function writeManifest(nodeInfo) {
   const manifestPath = path.join(runtimeRoot, 'manifest.json');
   const manifest = {
     createdAt: new Date().toISOString(),
     backend: {
       main: 'backend/bundle/server.js',
+    },
+    node: {
+      binary: `node/${path.basename(nodeInfo.targetBinary)}`,
+      targetPlatform,
+      targetArch,
     },
   };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -181,11 +406,13 @@ async function main() {
   ensureDir(runtimeRoot);
 
   await stageServerBundle();
-  writeManifest();
+  const nodeInfo = stageNodeBinary();
+  writeManifest(nodeInfo);
   console.log('[desktop:prepare] ready', {
     runtimeRoot,
     targetPlatform,
     targetArch,
+    nodeBinary: nodeInfo.targetBinary,
   });
 }
 

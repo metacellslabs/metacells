@@ -2,9 +2,11 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import http from 'http';
 import { connectToDatabase } from './lib/db.js';
 import { getMethodHandler, getRegisteredMethodNames } from './lib/rpc.js';
 import { runStartupHooks } from './lib/startup-hooks.js';
+import { setupWorkbookWebSocketServer } from './server/ws.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +20,7 @@ import './imports/api/files/index.js';
 import './imports/api/artifacts/index.js';
 import './imports/api/assistant/index.js';
 import './imports/api/schedules/index.js';
+import './imports/api/testing/index.js';
 
 // --- Import channel system ---
 import { startChannelPollingWorker } from './imports/api/channels/server/index.js';
@@ -44,6 +47,7 @@ import { getRuntimeRole, isWorkerRuntime } from './imports/startup/server/runtim
 
 // --- Build Express app ---
 const app = express();
+const server = http.createServer(app);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -70,6 +74,11 @@ app.post('/api/rpc', async (req, res) => {
     res.status(statusCode).json({
       error: err.reason || err.message || 'Internal server error',
       errorType: err.error || undefined,
+      details:
+        err && err.details && typeof err.details === 'object'
+          ? err.details
+          : undefined,
+      statusCode,
     });
   }
 });
@@ -80,20 +89,11 @@ app.use(createChannelEventAttachmentMiddleware());
 
 // --- Serve frontend (Vite dev middleware or production static files) ---
 async function setupFrontend() {
-  if (process.env.NODE_ENV === 'production') {
-    const clientDir = path.join(__dirname, 'dist', 'client');
-    app.use(express.static(clientDir));
-    app.get('/{*path}', (req, res) => {
-      res.sendFile(path.join(clientDir, 'index.html'));
-    });
-  } else {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  }
+  const clientDir = path.join(__dirname, 'dist', 'client');
+  app.use(express.static(clientDir));
+  app.get('/{*path}', (req, res) => {
+    res.sendFile(path.join(clientDir, 'index.html'));
+  });
 }
 
 // --- Start server ---
@@ -163,7 +163,8 @@ async function main() {
   await setupFrontend();
 
   // 8. Start listening
-  app.listen(PORT, '0.0.0.0', () => {
+  setupWorkbookWebSocketServer(server);
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] listening on http://0.0.0.0:${PORT}`);
   });
 }

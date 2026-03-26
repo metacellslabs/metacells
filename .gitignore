@@ -5,17 +5,17 @@ meteor/local
 npm-debug.log
 _build/
 .tmp-ci/
-.vscode/
-dist/
 .data/
 .desktop-runtime/
 .desktop-cache/
+.desktop-tools/
 
 # Meteor Modern-Tools build context directories
 _build
 */build-assets
 */build-chunks
 .rsdoctor
+
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -25,6 +25,8 @@ dist/
 build/
 .electron/
 *.log
+src-tauri/target/
+src-tauri/gen/
 
 # IDE
 .idea/

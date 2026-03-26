@@ -24,6 +24,9 @@ export const DEFAULT_DEEPSEEK_PROVIDER =
 export const DEFAULT_LM_STUDIO_PROVIDER =
   getRegisteredAIProviderById('lm-studio');
 let cachedJobSettings = { ...DEFAULT_JOB_SETTINGS };
+let cachedActiveAIProviderType = String(
+  DEFAULT_DEEPSEEK_PROVIDER?.type || DEFAULT_AI_PROVIDERS[0]?.type || '',
+);
 
 function getContainerHostAlias() {
   return String(process.env.METACELLS_CONTAINER_HOST_ALIAS || '').trim();
@@ -257,10 +260,29 @@ function updateCachedJobSettings(jobSettings) {
   return cachedJobSettings;
 }
 
+function updateCachedActiveAIProviderType(settingsDoc) {
+  const settings =
+    settingsDoc && typeof settingsDoc === 'object' ? settingsDoc : {};
+  const providers = normalizeProviders(settings.aiProviders);
+  const fallbackActiveId = String(
+    DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
+  );
+  const activeId = String(settings.activeAIProviderId || fallbackActiveId);
+  const activeProvider =
+    providers.find((item) => item && item.id === activeId && item.enabled !== false) ||
+    providers.find((item) => item && item.enabled !== false) ||
+    normalizeProvider(DEFAULT_AI_PROVIDERS[0], DEFAULT_AI_PROVIDERS[0]);
+  cachedActiveAIProviderType = String(
+    (activeProvider && activeProvider.type) || '',
+  ).trim();
+  return cachedActiveAIProviderType;
+}
+
 export async function ensureDefaultSettings() {
   const existing = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
   if (existing) {
     updateCachedJobSettings(existing.jobSettings);
+    updateCachedActiveAIProviderType(existing);
     return existing;
   }
 
@@ -268,6 +290,7 @@ export async function ensureDefaultSettings() {
   try {
     await AppSettings.insertAsync(doc);
     updateCachedJobSettings(doc.jobSettings);
+    updateCachedActiveAIProviderType(doc);
     return doc;
   } catch (error) {
     if (!error || String(error.code || '') !== '11000') {
@@ -276,6 +299,7 @@ export async function ensureDefaultSettings() {
     const current = await AppSettings.findOneAsync(DEFAULT_SETTINGS_ID);
     if (current) {
       updateCachedJobSettings(current.jobSettings);
+      updateCachedActiveAIProviderType(current);
       return current;
     }
     throw error;
@@ -369,9 +393,20 @@ export function getJobSettingsSync() {
   return normalizeJobSettings(cachedJobSettings);
 }
 
+export function getEffectiveAIChatConcurrencySync() {
+  const providerType = String(cachedActiveAIProviderType || '')
+    .trim()
+    .toLowerCase();
+  if (providerType === 'openai' || providerType === 'gemini') {
+    return 10;
+  }
+  return normalizeJobSettings(cachedJobSettings).aiChatConcurrency;
+}
+
 export async function initSettings() {
   const settings = await ensureDefaultSettings();
   updateCachedJobSettings(settings && settings.jobSettings);
+  updateCachedActiveAIProviderType(settings);
   const resetUrl = await resetLMStudioBaseUrlInDb();
   console.log('[settings] lmStudioBaseUrl.reset', { baseUrl: resetUrl });
 }
@@ -436,6 +471,10 @@ registerMethods({
         },
       },
     );
+    updateCachedActiveAIProviderType({
+      ...(current || {}),
+      aiProviders: nextProviders,
+    });
   },
 
   async 'settings.setActiveAIProvider'(providerId) {
@@ -458,6 +497,11 @@ registerMethods({
         },
       },
     );
+    updateCachedActiveAIProviderType({
+      ...(current || {}),
+      activeAIProviderId: String(providerId),
+      aiProviders: providers,
+    });
   },
 
   async 'settings.updateJobSettings'(jobSettings) {

@@ -3,6 +3,8 @@ import { defineModel } from '../../../lib/orm.js';
 import { check, Match } from '../../../lib/check.js';
 import { registerMethods } from '../../../lib/rpc.js';
 import crypto from 'crypto';
+import { publishServerEvent } from '../../../server/ws-events.js';
+import { syncManagedJobFromLowLevelEvent } from './manager.js';
 
 export const Jobs = defineModel('jobs');
 export const JobLogs = defineModel('job_logs');
@@ -40,6 +42,30 @@ let recoverySweepTimer = null;
 
 function log(event, payload) {
   console.log(`[jobs] ${event}`, payload);
+}
+
+function publishJobEvent(type, job, payload = {}) {
+  const source = job && typeof job === 'object' ? job : {};
+  const result = publishServerEvent({
+    type,
+    scope: 'jobs',
+    jobId: String(source._id || source.jobId || ''),
+    jobType: String(source.type || ''),
+    jobStatus: String(source.status || ''),
+    payload: {
+      attempts: Number(source.attempts) || 0,
+      dedupeKey: String(source.dedupeKey || ''),
+      ...payload,
+    },
+  });
+  syncManagedJobFromLowLevelEvent(type, source, payload).catch((error) => {
+    log('manager.sync_error', {
+      type,
+      jobId: String(source._id || source.jobId || ''),
+      message: toErrorMessage(error),
+    });
+  });
+  return result;
 }
 
 function nowDate() {
@@ -212,6 +238,7 @@ async function appendJobLog(jobOrFields, event, details = {}) {
       message: toErrorMessage(error),
     });
   }
+  publishJobEvent(`jobs.${entry.event}`, source, entry.details);
 }
 
 async function appendDeadLetter(job, error, reason) {
@@ -406,7 +433,7 @@ async function markJobRunning(job) {
 
 async function markJobCompleted(job, resultValue) {
   const completedAt = nowDate();
-  await Jobs.rawCollection().findOneAndUpdate(
+  const result = await Jobs.rawCollection().findOneAndUpdate(
     {
       _id: job._id,
       lockToken: job.lockToken,
@@ -432,12 +459,48 @@ async function markJobCompleted(job, resultValue) {
       returnDocument: 'after',
     },
   );
-  await appendJobLog(job, 'completed', {});
+  const nextJob =
+    result && Object.prototype.hasOwnProperty.call(result, 'value')
+      ? result.value
+      : result || null;
+  const completedJob = nextJob || job;
+  if (completedJob && completedJob.type && completedJob.dedupeKey) {
+    await Jobs.updateAsync(
+      {
+        _id: { $ne: completedJob._id },
+        type: String(completedJob.type || ''),
+        dedupeKey: String(completedJob.dedupeKey || ''),
+        status: {
+          $in: [JOB_STATUS.QUEUED, JOB_STATUS.RETRYING],
+        },
+      },
+      {
+        $set: {
+          status: JOB_STATUS.CANCELLED,
+          updatedAt: completedAt,
+          completedAt,
+          lastError: 'Cancelled as duplicate of completed job',
+          lockUntil: null,
+        },
+        $unset: {
+          leaseTimeoutMs: '',
+          heartbeatIntervalMs: '',
+          lockToken: '',
+        },
+      },
+      { multi: true },
+    );
+  }
+  await appendJobLog(completedJob, 'completed', {});
+  publishJobEvent('jobs.state', completedJob, {
+    status: JOB_STATUS.COMPLETED,
+    hasResult: resultValue !== undefined,
+  });
 }
 
 async function markJobCancelled(job, reason) {
   const cancelledAt = nowDate();
-  await Jobs.rawCollection().findOneAndUpdate(
+  const result = await Jobs.rawCollection().findOneAndUpdate(
     {
       _id: job._id,
       lockToken: job.lockToken,
@@ -461,7 +524,11 @@ async function markJobCancelled(job, reason) {
       returnDocument: 'after',
     },
   );
-  await appendJobLog(job, 'cancelled', {
+  const nextJob =
+    result && Object.prototype.hasOwnProperty.call(result, 'value')
+      ? result.value
+      : result || null;
+  await appendJobLog(nextJob || job, 'cancelled', {
     reason: String(reason || 'cancelled'),
   });
 }
@@ -505,6 +572,11 @@ async function requeueDeferredJob(job, outcome) {
   log('deferred', {
     jobId: job._id,
     type: job.type,
+    delayMs,
+    reason: outcome && outcome.reason ? String(outcome.reason) : '',
+  });
+  publishJobEvent('jobs.state', job, {
+    status: JOB_STATUS.RETRYING,
     delayMs,
     reason: outcome && outcome.reason ? String(outcome.reason) : '',
   });
@@ -569,6 +641,12 @@ async function requeueFailedJob(job, error) {
       message: toErrorMessage(error),
       delayMs: nextDelayMs,
     });
+    publishJobEvent('jobs.state', job, {
+      status: JOB_STATUS.RETRYING,
+      delayMs: nextDelayMs,
+      message: toErrorMessage(error),
+      maxAttempts,
+    });
     return;
   }
 
@@ -608,6 +686,11 @@ async function requeueFailedJob(job, error) {
     type: job.type,
     attempts: job.attempts,
     message: toErrorMessage(error),
+  });
+  publishJobEvent('jobs.state', job, {
+    status: JOB_STATUS.FAILED,
+    message: toErrorMessage(error),
+    maxAttempts,
   });
 }
 
@@ -871,6 +954,23 @@ export async function enqueueDurableJob({
       });
       return existing;
     }
+
+    const completed = await Jobs.findOneAsync(
+      {
+        type: normalizedType,
+        dedupeKey: normalizedDedupeKey,
+        status: JOB_STATUS.COMPLETED,
+      },
+      {
+        sort: { completedAt: -1, updatedAt: -1, createdAt: -1 },
+      },
+    );
+    if (completed) {
+      await appendJobLog(completed, 'dedupe_hit_completed', {
+        dedupeKey: normalizedDedupeKey,
+      });
+      return completed;
+    }
   }
 
   const createdAt = nowDate();
@@ -921,6 +1021,10 @@ export async function enqueueDurableJob({
   await appendJobLog(job, 'queued', {
     dedupeKey: normalizedDedupeKey,
     runAt: job && job.runAt,
+  });
+  publishJobEvent('jobs.state', job, {
+    status: JOB_STATUS.QUEUED,
+    runAt: job && job.runAt ? job.runAt : null,
   });
   scheduleDrain(normalizedType);
   return job;

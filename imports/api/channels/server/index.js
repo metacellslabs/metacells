@@ -20,6 +20,7 @@ import {
   ChannelEvents,
 } from '../events.js';
 import { getRegisteredChannelHandlerById } from './handlers/index.js';
+import { publishServerEvent } from '../../../../server/ws-events.js';
 
 const activeChannelPolls = new Set();
 const activeChannelSubscriptions = new Map();
@@ -27,6 +28,21 @@ let channelPollingWorkerStarted = false;
 
 function logChannelRuntime(event, payload) {
   console.log(`[channels] ${event}`, payload);
+}
+
+function publishChannelEvent(type, channel, payload = {}) {
+  const source = channel && typeof channel === 'object' ? channel : {};
+  return publishServerEvent({
+    type,
+    scope: 'channels',
+    channelId: String(source.id || payload.channelId || ''),
+    channelLabel: String(source.label || payload.channelLabel || ''),
+    payload: {
+      connectorId: String(source.connectorId || source.type || ''),
+      status: String(source.status || payload.status || ''),
+      ...payload,
+    },
+  });
 }
 
 function normalizeChannelSettings(connector, currentSettings) {
@@ -208,6 +224,7 @@ async function saveChannelRuntimeState(channelId, updates) {
       },
     },
   );
+  publishChannelEvent('channels.state', { id: channelId }, source);
 }
 
 async function migrateLegacyChannelEvents() {
@@ -299,6 +316,13 @@ async function applyChannelEvent(channel, payload, nextUid) {
     lastPolledAt: new Date(),
   });
 
+  publishChannelEvent('channels.event.received', channel, {
+    eventId: String((savedEvent && savedEvent._id) || ''),
+    eventType: String(normalizedMessage.event || ''),
+    preview: buildChannelEventPreview(savedEvent),
+    nextUid: Number(nextUid) || 0,
+  });
+
   await triggerChannelMentionRecompute(channel.label);
 }
 
@@ -346,8 +370,30 @@ async function pollSingleChannel(channel) {
         events: 0,
       };
     }
+    if (
+      !connector.capabilities ||
+      connector.capabilities.poll !== true
+    ) {
+      logChannelRuntime('poll.skip', {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        reason: 'poll-disabled',
+      });
+      return {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        skipped: true,
+        reason: 'poll-disabled',
+        events: 0,
+      };
+    }
     const handler = getChannelHandler(connector.id);
-    if (typeof handler.poll !== 'function') {
+    if (
+      !handler ||
+      !handler.capabilities ||
+      handler.capabilities.poll !== true ||
+      typeof handler.poll !== 'function'
+    ) {
       logChannelRuntime('poll.skip', {
         channelId,
         label: String((channel && channel.label) || ''),
@@ -384,6 +430,11 @@ async function pollSingleChannel(channel) {
         lastSeenUid,
         lastPolledAt: new Date(),
       });
+      publishChannelEvent('channels.poll.complete', channel, {
+        ok: true,
+        events: 0,
+        lastSeenUid,
+      });
       return {
         channelId,
         label: String((channel && channel.label) || ''),
@@ -401,6 +452,11 @@ async function pollSingleChannel(channel) {
     logChannelRuntime('poll.channel.complete', {
       channelId,
       label: String((channel && channel.label) || ''),
+      events: events.length,
+      lastSeenUid,
+    });
+    publishChannelEvent('channels.poll.complete', channel, {
+      ok: true,
       events: events.length,
       lastSeenUid,
     });
@@ -426,6 +482,10 @@ async function pollSingleChannel(channel) {
       status: 'error',
       watchError: message,
       lastPolledAt: new Date(),
+    });
+    publishChannelEvent('channels.poll.failed', channel, {
+      ok: false,
+      message,
     });
     return {
       channelId,
@@ -474,6 +534,11 @@ async function pollEnabledChannels() {
     results,
   };
   logChannelRuntime('poll.scan.complete', summary);
+  publishServerEvent({
+    type: 'channels.poll.summary',
+    scope: 'channels',
+    payload: summary,
+  });
   return summary;
 }
 
@@ -558,10 +623,16 @@ async function ensureChannelSubscription(channel) {
       label: String((channel && channel.label) || ''),
       connectorId: String((channel && channel.connectorId) || ''),
     });
+    publishChannelEvent('channels.subscription.started', channel, {
+      connectorId: String((channel && channel.connectorId) || ''),
+    });
   } catch (error) {
     logChannelRuntime('subscribe.start_failed', {
       channelId,
       label: String((channel && channel.label) || ''),
+      message: error && error.message ? error.message : String(error),
+    });
+    publishChannelEvent('channels.subscription.failed', channel, {
       message: error && error.message ? error.message : String(error),
     });
   }

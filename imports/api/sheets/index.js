@@ -3,6 +3,8 @@ import { AppError } from '../../../lib/app-error.js';
 import { check, Match } from '../../../lib/check.js';
 import { registerMethods } from '../../../lib/rpc.js';
 import {
+  buildExplicitTargetCellMap,
+  collectAffectedCellKeysFromSignals,
   computeSheetSnapshot,
   invalidateWorkbookDependencies,
   isDependencyGraphAuthoritative,
@@ -15,12 +17,34 @@ import {
 } from '../artifacts/index.js';
 import { decodeStorageMap } from './storage-codec.js';
 import {
+  buildClientWorkbookSnapshot,
   buildWorkbookFromFlatStorage,
   decodeSheetDocumentStorage,
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
   flattenWorkbook,
 } from './workbook-codec.js';
+import {
+  buildWorkbookCellPatchRecordFromCell,
+  buildRuntimeCellSnapshotFromRecord,
+  getCellSourceText,
+  getWorkbookCellRecord,
+  hasRuntimeCellFields,
+  listWorkbookCellEntries,
+  normalizeDocumentPersistCellRecord,
+  normalizeRuntimeCellForDiffRecord,
+} from './cell-record-helpers.js';
+import {
+  deleteWorkbookCellRecord,
+  getWorkbookSheetRecord,
+  listWorkbookSheetCellEntries,
+  listWorkbookSheetIds,
+  setWorkbookCellRecord,
+} from './cell-snapshot-facade.js';
+import {
+  updateSheetDocumentFields,
+  updateSheetRuntimeFields,
+} from './sheet-update-helpers.js';
 import {
   notifyQueuedSheetDependenciesChanged,
   registerAIQueueSheetRuntimeHooks,
@@ -47,8 +71,26 @@ import {
   buildComputedFinancialModelWorkbook,
   buildComputedFormulaTestWorkbook,
 } from './formula-test-workbook.js';
+import { publishWorkbookEvent } from './events/events-bus.js';
+import { publishServerEvent } from '../../../server/ws-events.js';
 
 export const Sheets = defineModel('sheets');
+
+function publishSheetsEvent(type, payload = {}) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  return publishServerEvent({
+    type,
+    scope: 'sheets',
+    sheetId: String(source.sheetId || source._id || ''),
+    payload: {
+      sheetId: String(source.sheetId || source._id || ''),
+      name: String(source.name || ''),
+      createdAt: source.createdAt || null,
+      updatedAt: source.updatedAt || null,
+      runtimeUpdatedAt: source.runtimeUpdatedAt || null,
+    },
+  });
+}
 
 const isPlainObject = Match.Where((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -60,6 +102,21 @@ const isPlainObject = Match.Where((value) => {
 function startOfToday() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function toWorkbookRevision(value) {
+  if (!value) return '';
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value || '') : parsed.toISOString();
+}
+
+function getDocumentRevisionFromSheetDocument(sheetDocument) {
+  return toWorkbookRevision(sheetDocument && sheetDocument.updatedAt);
+}
+
+function getRuntimeRevisionFromSheetDocument(sheetDocument) {
+  return toWorkbookRevision(sheetDocument && sheetDocument.runtimeUpdatedAt);
 }
 
 function escapeRegex(value) {
@@ -277,7 +334,17 @@ async function loadChannelEventsForWindow(label, days, afterCreatedAt) {
 async function normalizeSheetDocument(sheetId) {
   const sheetDocument = await Sheets.findOneAsync(
     { _id: sheetId },
-    { fields: { workbook: 1, storage: 1 } },
+    {
+      fields: {
+        name: 1,
+        workbook: 1,
+        runtimeWorkbook: 1,
+        runtimeUpdatedAt: 1,
+        storage: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    },
   );
   if (!sheetDocument) return null;
 
@@ -302,35 +369,136 @@ async function normalizeSheetDocument(sheetId) {
     );
   }
 
-  if (!isDependencyGraphAuthoritative(workbook)) {
-    workbook = rebuildWorkbookDependencyGraph(workbook);
-  }
-
-  const encodedWorkbook = encodeWorkbookForDocument(workbook);
+  const encodedWorkbook = encodeWorkbookForDocument(
+    stripDependencyGraphFromDocumentWorkbook(workbook, 'document-persist'),
+  );
   const shouldUpdateWorkbook =
     JSON.stringify(sheetDocument.workbook || null) !==
     JSON.stringify(encodedWorkbook);
   const shouldUnsetStorage = typeof sheetDocument.storage !== 'undefined';
+  const normalizedUpdatedAt =
+    shouldUpdateWorkbook || shouldUnsetStorage
+      ? sheetDocument.updatedAt || new Date()
+      : sheetDocument.updatedAt;
 
   if (shouldUpdateWorkbook || shouldUnsetStorage) {
-    await Sheets.updateAsync(
-      { _id: sheetId },
-      {
-        $set: {
-          workbook: encodedWorkbook,
-          updatedAt: new Date(),
-        },
-        $unset: {
-          storage: '',
-        },
+    await updateSheetDocumentFields(sheetId, {
+      set: {
+        workbook: encodedWorkbook,
+        updatedAt: normalizedUpdatedAt,
       },
-    );
+      unset: {
+        storage: '',
+      },
+    });
   }
 
   return {
     ...sheetDocument,
     workbook: encodedWorkbook,
+    updatedAt: normalizedUpdatedAt,
+    runtimeUpdatedAt: sheetDocument.runtimeUpdatedAt || null,
   };
+}
+
+function mergeRuntimeWorkbook(documentWorkbookValue, runtimeWorkbookValue) {
+  const documentWorkbook = decodeWorkbookDocument(documentWorkbookValue || {});
+  const runtimeWorkbook = decodeWorkbookDocument(runtimeWorkbookValue || {});
+  const mergedWorkbook = decodeWorkbookDocument(documentWorkbook);
+
+  listWorkbookSheetIds(runtimeWorkbook).forEach((sheetId) => {
+    listWorkbookSheetCellEntries(runtimeWorkbook, sheetId).forEach(
+      ({ cellId, cell: runtimeCell }) => {
+      const runtimeCellWithoutSource = { ...runtimeCell };
+      delete runtimeCellWithoutSource.source;
+      const previousCell =
+        getWorkbookCellRecord(mergedWorkbook, sheetId, cellId) || {};
+      setWorkbookCellRecord(mergedWorkbook, sheetId, cellId, {
+        ...previousCell,
+        ...runtimeCellWithoutSource,
+      });
+    });
+  });
+
+  if (
+    runtimeWorkbook.dependencyGraph &&
+    typeof runtimeWorkbook.dependencyGraph === 'object'
+  ) {
+    mergedWorkbook.dependencyGraph = runtimeWorkbook.dependencyGraph;
+  }
+  mergedWorkbook.caches = {
+    ...(documentWorkbook.caches || {}),
+    ...(runtimeWorkbook.caches || {}),
+  };
+  mergedWorkbook.globals = {
+    ...(documentWorkbook.globals || {}),
+    ...(runtimeWorkbook.globals || {}),
+  };
+  return mergedWorkbook;
+}
+
+function getMergedWorkbookFromSheetDocument(sheetDocument) {
+  if (!sheetDocument || typeof sheetDocument !== 'object') {
+    return decodeWorkbookDocument({});
+  }
+  return mergeRuntimeWorkbook(
+    sheetDocument.workbook || {},
+    sheetDocument.runtimeWorkbook || {},
+  );
+}
+
+function createEmptyRuntimeDependencyGraph(reason) {
+  return {
+    byCell: {},
+    dependentsByCell: {},
+    dependentsByNamedRef: {},
+    dependentsByChannel: {},
+    dependentsByAttachment: {},
+    meta: {
+      authoritative: false,
+      version: 1,
+      repairedAt: '',
+      reason: String(reason || 'runtime-snapshot'),
+    },
+  };
+}
+
+function stripDependencyGraphFromDocumentWorkbook(workbookValue, reason) {
+  const workbook = decodeWorkbookDocument(workbookValue || {});
+  const nextWorkbook = decodeWorkbookDocument(workbook);
+  nextWorkbook.dependencyGraph = createEmptyRuntimeDependencyGraph(
+    reason || 'document-normalize',
+  );
+  return nextWorkbook;
+}
+
+function buildRuntimeWorkbookSnapshot(workbookValue) {
+  const workbook = decodeWorkbookDocument(workbookValue || {});
+  const nextWorkbook = {
+    version: workbook.version,
+    sheets: {},
+    dependencyGraph:
+      workbook.dependencyGraph && typeof workbook.dependencyGraph === 'object'
+        ? workbook.dependencyGraph
+        : createEmptyRuntimeDependencyGraph('runtime-snapshot'),
+    caches: {
+      ...(workbook.caches || {}),
+    },
+    globals: {
+      ...(workbook.globals || {}),
+    },
+  };
+
+  listWorkbookSheetIds(workbook).forEach((sheetId) => {
+    listWorkbookSheetCellEntries(workbook, sheetId).forEach(({ cellId, cell }) => {
+      if (!hasRuntimeCellFields(cell)) return;
+      const runtimeCell = buildRuntimeCellSnapshotFromRecord(cell);
+      if (!runtimeCell) return;
+      setWorkbookCellRecord(nextWorkbook, sheetId, cellId, runtimeCell);
+    });
+  });
+
+  return nextWorkbook;
 }
 
 async function migrateAllSheetsToWorkbook() {
@@ -370,20 +538,20 @@ async function rebuildSheetDependencyGraph(sheetId) {
   const sheetDocument = await normalizeSheetDocument(sheetId);
   if (!sheetDocument) return null;
 
-  const workbook = decodeWorkbookDocument(sheetDocument.workbook || {});
+  const workbook = getMergedWorkbookFromSheetDocument(sheetDocument);
   const rebuiltWorkbook = rebuildWorkbookDependencyGraph(workbook);
-  await Sheets.updateAsync(
-    { _id: sheetId },
-    {
-      $set: {
-        workbook: encodeWorkbookForDocument(rebuiltWorkbook),
-        updatedAt: new Date(),
-      },
-      $unset: {
-        storage: '',
-      },
+  const persistedAt = new Date();
+  await updateSheetRuntimeFields(sheetId, {
+    set: {
+      runtimeWorkbook: encodeWorkbookForDocument(
+        buildRuntimeWorkbookSnapshot(rebuiltWorkbook),
+      ),
+      runtimeUpdatedAt: persistedAt,
     },
-  );
+    unset: {
+      storage: '',
+    },
+  });
 
   return rebuiltWorkbook;
 }
@@ -431,6 +599,19 @@ function collectChangedDependencySignals(previousWorkbook, nextWorkbook) {
       return;
     }
 
+    const generatedCellMatch =
+      /^SHEET:([^:]+):CELL_GEN_SOURCE:([A-Za-z]+[0-9]+)$/.exec(
+        String(key || ''),
+      );
+    if (generatedCellMatch) {
+      changes.push({
+        kind: 'cell',
+        sheetId: generatedCellMatch[1],
+        cellId: String(generatedCellMatch[2]).toUpperCase(),
+      });
+      return;
+    }
+
     if (String(key) === 'NAMED_CELLS') {
       const previousNamedCells =
         previousWorkbook &&
@@ -466,14 +647,151 @@ function collectChangedDependencySignals(previousWorkbook, nextWorkbook) {
   return changes;
 }
 
-function mergeWorkbookForCompute(persistedWorkbookValue, clientWorkbookValue) {
+function mergeWorkbookDocument(persistedWorkbookValue, clientWorkbookValue) {
   const persistedWorkbook = decodeWorkbookDocument(
     persistedWorkbookValue || {},
   );
   const clientWorkbook = decodeWorkbookDocument(clientWorkbookValue || {});
-  const mergedWorkbook = decodeWorkbookDocument(
-    clientWorkbookValue || persistedWorkbookValue || {},
+  const mergedWorkbook = decodeWorkbookDocument(persistedWorkbookValue || {});
+
+  const normalizeMergedDocumentCell = (previousCellValue, mergedCellValue) => {
+    const previousCell =
+      previousCellValue && typeof previousCellValue === 'object'
+        ? previousCellValue
+        : {};
+    const mergedCell =
+      mergedCellValue && typeof mergedCellValue === 'object' ? mergedCellValue : {};
+    const source = String(mergedCell.source || '');
+    const previousSource = String(previousCell.source || '');
+    const sourceChanged = source !== previousSource;
+    const isFormula = !!source && /^[='>#]/.test(source);
+    const nextSourceVersion = sourceChanged
+      ? Math.max(
+          1,
+          (Number(previousCell.sourceVersion) ||
+            Number(previousCell.version) ||
+            0) + 1,
+        )
+      : Math.max(
+          1,
+          Number(mergedCell.sourceVersion) ||
+            Number(previousCell.sourceVersion) ||
+            Number(mergedCell.version) ||
+            Number(previousCell.version) ||
+            1,
+        );
+
+    if (!sourceChanged) {
+      return {
+        ...mergedCell,
+        sourceVersion: nextSourceVersion,
+        version: nextSourceVersion,
+      };
+    }
+
+    if (isFormula) {
+      return {
+        ...mergedCell,
+        sourceVersion: nextSourceVersion,
+        version: nextSourceVersion,
+        value: '',
+        displayValue: '',
+        state: 'stale',
+        error: '',
+        generatedBy: '',
+        lastProcessedChannelEventIds: {},
+        channelFeedMeta: null,
+        computedVersion: 0,
+        dependencyVersion: 0,
+        dependencySignature: '',
+      };
+    }
+
+    return {
+      ...mergedCell,
+      sourceVersion: nextSourceVersion,
+      version: nextSourceVersion,
+      value: source,
+      displayValue: source,
+      state: source ? 'resolved' : '',
+      error: '',
+      generatedBy: '',
+      lastProcessedChannelEventIds: {},
+      channelFeedMeta: null,
+      computedVersion: nextSourceVersion,
+      dependencyVersion: nextSourceVersion,
+      dependencySignature: '',
+    };
+  };
+
+  mergedWorkbook.tabs = Array.isArray(clientWorkbook.tabs)
+    ? clientWorkbook.tabs
+    : persistedWorkbook.tabs;
+  mergedWorkbook.activeTabId = String(
+    clientWorkbook.activeTabId || persistedWorkbook.activeTabId || '',
   );
+  mergedWorkbook.aiMode = clientWorkbook.aiMode || persistedWorkbook.aiMode;
+  mergedWorkbook.namedCells = {
+    ...(persistedWorkbook.namedCells || {}),
+    ...(clientWorkbook.namedCells || {}),
+  };
+  mergedWorkbook.sheets = {
+    ...(persistedWorkbook.sheets || {}),
+  };
+
+  listWorkbookSheetIds(clientWorkbook).forEach((sheetId) => {
+    const persistedSheet = getWorkbookSheetRecord(persistedWorkbook, sheetId);
+    const clientSheet = getWorkbookSheetRecord(clientWorkbook, sheetId);
+    const mergedSheet = {
+      ...(persistedSheet && typeof persistedSheet === 'object'
+        ? persistedSheet
+        : {}),
+      ...(clientSheet && typeof clientSheet === 'object' ? clientSheet : {}),
+      cells: {},
+      columnWidths:
+        clientSheet && clientSheet.columnWidths && typeof clientSheet.columnWidths === 'object'
+          ? { ...clientSheet.columnWidths }
+          : persistedSheet &&
+              persistedSheet.columnWidths &&
+              typeof persistedSheet.columnWidths === 'object'
+            ? { ...persistedSheet.columnWidths }
+            : {},
+      rowHeights:
+        clientSheet && clientSheet.rowHeights && typeof clientSheet.rowHeights === 'object'
+          ? { ...clientSheet.rowHeights }
+          : persistedSheet &&
+              persistedSheet.rowHeights &&
+              typeof persistedSheet.rowHeights === 'object'
+            ? { ...persistedSheet.rowHeights }
+            : {},
+      reportContent: String(
+        (clientSheet && clientSheet.reportContent) ||
+          (persistedSheet && persistedSheet.reportContent) ||
+          '',
+      ),
+    };
+    mergedWorkbook.sheets[sheetId] = mergedSheet;
+
+    listWorkbookSheetCellEntries(mergedWorkbook, sheetId).forEach(({ cellId }) => {
+      deleteWorkbookCellRecord(mergedWorkbook, sheetId, cellId);
+    });
+
+    listWorkbookSheetCellEntries(clientWorkbook, sheetId).forEach(
+      ({ cellId, cell: clientCell }) => {
+        const previousCell =
+          getWorkbookCellRecord(persistedWorkbook, sheetId, cellId) || {};
+        setWorkbookCellRecord(
+          mergedWorkbook,
+          sheetId,
+          cellId,
+          normalizeMergedDocumentCell(previousCell, {
+            ...previousCell,
+            ...(clientCell && typeof clientCell === 'object' ? clientCell : {}),
+          }),
+        );
+      },
+    );
+  });
 
   mergedWorkbook.caches = {
     ...(persistedWorkbook.caches || {}),
@@ -484,59 +802,12 @@ function mergeWorkbookForCompute(persistedWorkbookValue, clientWorkbookValue) {
     ...(clientWorkbook.globals || {}),
   };
 
-  const persistedDependencyGraph =
-    persistedWorkbook.dependencyGraph &&
-    typeof persistedWorkbook.dependencyGraph === 'object'
-      ? persistedWorkbook.dependencyGraph
-      : {
-          byCell: {},
-          dependentsByCell: {},
-          dependentsByNamedRef: {},
-          dependentsByChannel: {},
-          dependentsByAttachment: {},
-        };
-  const clientDependencyGraph =
-    clientWorkbook.dependencyGraph &&
-    typeof clientWorkbook.dependencyGraph === 'object'
-      ? clientWorkbook.dependencyGraph
-      : {
-          byCell: {},
-          dependentsByCell: {},
-          dependentsByNamedRef: {},
-          dependentsByChannel: {},
-          dependentsByAttachment: {},
-        };
-  const persistedByCell =
-    persistedDependencyGraph.byCell &&
-    typeof persistedDependencyGraph.byCell === 'object'
-      ? persistedDependencyGraph.byCell
-      : {};
-  const clientByCell =
-    clientDependencyGraph.byCell &&
-    typeof clientDependencyGraph.byCell === 'object'
-      ? clientDependencyGraph.byCell
-      : {};
   mergedWorkbook.dependencyGraph = {
-    byCell: {
-      ...persistedByCell,
-      ...clientByCell,
-    },
-    dependentsByCell:
-      clientDependencyGraph.dependentsByCell ||
-      persistedDependencyGraph.dependentsByCell ||
-      {},
-    dependentsByNamedRef:
-      clientDependencyGraph.dependentsByNamedRef ||
-      persistedDependencyGraph.dependentsByNamedRef ||
-      {},
-    dependentsByChannel:
-      clientDependencyGraph.dependentsByChannel ||
-      persistedDependencyGraph.dependentsByChannel ||
-      {},
-    dependentsByAttachment:
-      clientDependencyGraph.dependentsByAttachment ||
-      persistedDependencyGraph.dependentsByAttachment ||
-      {},
+    byCell: {},
+    dependentsByCell: {},
+    dependentsByNamedRef: {},
+    dependentsByChannel: {},
+    dependentsByAttachment: {},
     meta: {
       authoritative: false,
       version: 1,
@@ -544,101 +815,36 @@ function mergeWorkbookForCompute(persistedWorkbookValue, clientWorkbookValue) {
       reason: 'merged-snapshots',
     },
   };
+  return mergedWorkbook;
+}
 
-  const sheetIds = new Set([
-    ...Object.keys(persistedWorkbook.sheets || {}),
-    ...Object.keys(clientWorkbook.sheets || {}),
-  ]);
+function stripWorkbookRuntimeStateForDocumentPersist(workbookValue) {
+  const workbook = decodeWorkbookDocument(workbookValue || {});
+  const nextWorkbook = decodeWorkbookDocument(workbook);
 
-  sheetIds.forEach((sheetId) => {
-    const persistedSheet =
-      persistedWorkbook.sheets && persistedWorkbook.sheets[sheetId];
-    const clientSheet = clientWorkbook.sheets && clientWorkbook.sheets[sheetId];
-    const mergedSheet = mergedWorkbook.sheets && mergedWorkbook.sheets[sheetId];
-    if (!mergedSheet || typeof mergedSheet !== 'object') return;
-
-    const persistedCells =
-      persistedSheet && typeof persistedSheet.cells === 'object'
-        ? persistedSheet.cells
-        : {};
-    const clientCells =
-      clientSheet && typeof clientSheet.cells === 'object'
-        ? clientSheet.cells
-        : {};
-    const mergedCells =
-      mergedSheet && typeof mergedSheet.cells === 'object'
-        ? mergedSheet.cells
-        : {};
-    const cellIds = new Set([
-      ...Object.keys(persistedCells),
-      ...Object.keys(clientCells),
-    ]);
-
-    cellIds.forEach((cellId) => {
-      const persistedCell =
-        persistedCells[cellId] && typeof persistedCells[cellId] === 'object'
-          ? persistedCells[cellId]
-          : null;
-      const clientCell =
-        clientCells[cellId] && typeof clientCells[cellId] === 'object'
-          ? clientCells[cellId]
-          : null;
-      const mergedCell =
-        mergedCells[cellId] && typeof mergedCells[cellId] === 'object'
-          ? mergedCells[cellId]
-          : null;
-      if (!mergedCell) {
-        const generatedBy = persistedCell
-          ? String(persistedCell.generatedBy || '').toUpperCase()
-          : '';
-        if (persistedCell && generatedBy && !clientCell) {
-          const persistedSourceCell =
-            persistedCells[generatedBy] &&
-            typeof persistedCells[generatedBy] === 'object'
-              ? persistedCells[generatedBy]
-              : null;
-          const clientSourceCell =
-            clientCells[generatedBy] &&
-            typeof clientCells[generatedBy] === 'object'
-              ? clientCells[generatedBy]
-              : null;
-          const persistedSourceRaw = String(
-            (persistedSourceCell && persistedSourceCell.source) || '',
-          );
-          const clientSourceRaw = String(
-            (clientSourceCell && clientSourceCell.source) || '',
-          );
-          if (!persistedSourceRaw || persistedSourceRaw !== clientSourceRaw) {
-            return;
-          }
-          mergedCells[cellId] = JSON.parse(JSON.stringify(persistedCell));
-        }
-        return;
-      }
-
-      const sourceMatches =
-        persistedCell &&
-        clientCell &&
-        String(persistedCell.source || '') === String(clientCell.source || '');
-
-      if (!sourceMatches) return;
-
-      if (persistedCell) {
-        mergedCell.value = String(
-          persistedCell.value == null ? '' : persistedCell.value,
-        );
-        mergedCell.displayValue = String(
-          persistedCell.displayValue == null ? '' : persistedCell.displayValue,
-        );
-        mergedCell.state = String(
-          persistedCell.state || mergedCell.state || '',
-        );
-        mergedCell.error = String(persistedCell.error || '');
-      }
-    });
+  listWorkbookCellEntries(nextWorkbook).forEach(({ sheetId, cellId, cell }) => {
+    const normalized = normalizeDocumentPersistCellRecord(cell);
+    if (!normalized) {
+      deleteWorkbookCellRecord(nextWorkbook, sheetId, cellId);
+      return;
+    }
+    setWorkbookCellRecord(nextWorkbook, sheetId, cellId, normalized);
   });
 
-  return mergedWorkbook;
+  nextWorkbook.dependencyGraph = {
+    byCell: {},
+    dependentsByCell: {},
+    dependentsByNamedRef: {},
+    dependentsByChannel: {},
+    dependentsByAttachment: {},
+    meta: {
+      authoritative: false,
+      version: 1,
+      repairedAt: '',
+      reason: 'document-persist',
+    },
+  };
+  return nextWorkbook;
 }
 
 export function workbookMentionsChannel(workbookValue, channelLabel) {
@@ -646,23 +852,11 @@ export function workbookMentionsChannel(workbookValue, channelLabel) {
   const target = normalizeChannelLabel(channelLabel);
   if (!target) return false;
 
-  const sheets =
-    workbook && workbook.sheets && typeof workbook.sheets === 'object'
-      ? workbook.sheets
-      : {};
-  return Object.keys(sheets).some((sheetId) => {
-    const sheet = sheets[sheetId];
-    const cells =
-      sheet && sheet.cells && typeof sheet.cells === 'object'
-        ? sheet.cells
-        : {};
-    return Object.keys(cells).some((cellId) => {
-      const cell = cells[cellId];
-      const source = String((cell && cell.source) || '');
+  return listWorkbookCellEntries(workbook).some(({ cell }) => {
+      const source = getCellSourceText(cell);
       if (!source) return false;
       const labels = extractChannelMentionLabels(source);
       return labels.indexOf(target) !== -1;
-    });
   });
 }
 
@@ -712,20 +906,9 @@ function collectChannelBatchTasks(
   const target = normalizeChannelLabel(channelLabel);
   const historyOnly = !!(options && options.historyOnly);
   const tasks = [];
-  const sheets =
-    workbook && workbook.sheets && typeof workbook.sheets === 'object'
-      ? workbook.sheets
-      : {};
-
-  Object.keys(sheets).forEach((sheetId) => {
-    const cells =
-      sheets[sheetId] && typeof sheets[sheetId].cells === 'object'
-        ? sheets[sheetId].cells
-        : {};
-    Object.keys(cells).forEach((cellId) => {
-      const cell =
-        cells[cellId] && typeof cells[cellId] === 'object' ? cells[cellId] : {};
-      const source = String(cell.source || '');
+  listWorkbookSheetIds(workbook).forEach((sheetId) => {
+    listWorkbookSheetCellEntries(workbook, sheetId).forEach(({ cellId, cell }) => {
+      const source = getCellSourceText(cell);
       if (!source) return;
       const channelFeedSpec =
         source.charAt(0) === '#'
@@ -1207,13 +1390,16 @@ export async function recomputeSheetsMentioningChannel(channelLabel) {
   }
 
   const channelPayloads = await getActiveChannelPayloadMap();
-  const docs = await Sheets.find({}, { fields: { workbook: 1 } }).fetchAsync();
+  const docs = await Sheets.find(
+    {},
+    { fields: { workbook: 1, runtimeWorkbook: 1 } },
+  ).fetchAsync();
   let matched = 0;
   let recomputed = 0;
 
   for (let i = 0; i < docs.length; i += 1) {
     const doc = docs[i];
-    const workbook = decodeWorkbookDocument((doc && doc.workbook) || {});
+    const workbook = getMergedWorkbookFromSheetDocument(doc);
     if (!workbookMentionsChannel(workbook, target)) continue;
     matched += 1;
 
@@ -1231,20 +1417,22 @@ export async function recomputeSheetsMentioningChannel(channelLabel) {
       channelPayloads,
       changedSignals: [{ kind: 'channel', label: target }],
       persistWorkbook: async (nextWorkbook) => {
-        await Sheets.updateAsync(
-          { _id: doc._id },
-          {
-            $set: {
-              workbook: encodeWorkbookForDocument(
-                decodeWorkbookDocument(nextWorkbook),
+        const persistedAt = new Date();
+        await updateSheetRuntimeFields(doc._id, {
+          set: {
+            runtimeWorkbook: encodeWorkbookForDocument(
+              buildRuntimeWorkbookSnapshot(
+                stripWorkbookAttachmentInlineData(
+                  decodeWorkbookDocument(nextWorkbook),
+                ),
               ),
-              updatedAt: new Date(),
-            },
-            $unset: {
-              storage: '',
-            },
+            ),
+            runtimeUpdatedAt: persistedAt,
           },
-        );
+          unset: {
+            storage: '',
+          },
+        });
       },
     });
     const nextWorkbook = await runChannelBatchForWorkbook({
@@ -1256,20 +1444,22 @@ export async function recomputeSheetsMentioningChannel(channelLabel) {
       channelLabel: target,
       channelPayloads,
     });
-    await Sheets.updateAsync(
-      { _id: doc._id },
-      {
-        $set: {
-          workbook: encodeWorkbookForDocument(
-            decodeWorkbookDocument(nextWorkbook),
+    const persistedAt = new Date();
+    await updateSheetRuntimeFields(doc._id, {
+      set: {
+        runtimeWorkbook: encodeWorkbookForDocument(
+          buildRuntimeWorkbookSnapshot(
+            stripWorkbookAttachmentInlineData(
+              decodeWorkbookDocument(nextWorkbook),
+            ),
           ),
-          updatedAt: new Date(),
-        },
-        $unset: {
-          storage: '',
-        },
+        ),
+        runtimeUpdatedAt: persistedAt,
       },
-    );
+      unset: {
+        storage: '',
+      },
+    });
     recomputed += 1;
   }
 
@@ -1281,7 +1471,7 @@ registerAIQueueSheetRuntimeHooks({
     const sheetDocument = await normalizeSheetDocument(sheetId);
     if (!sheetDocument) return null;
     return hydrateWorkbookAttachmentArtifacts(
-      decodeWorkbookDocument(sheetDocument.workbook || {}),
+      getMergedWorkbookFromSheetDocument(sheetDocument),
     );
   },
 });
@@ -1314,9 +1504,130 @@ async function removeWorkbookSchedulesAfterDelete(sheetId) {
   }
 }
 
+function buildChangedCellIdsForSheet(workbook, activeSheetId, changedSignals) {
+  const normalizedSheetId = String(activeSheetId || '');
+  if (!normalizedSheetId) return [];
+  const affected = collectAffectedCellKeysFromSignals(workbook, changedSignals);
+  if (!affected) return [];
+  return Object.keys(affected)
+    .map((cellKey) => {
+      const separatorIndex = cellKey.indexOf(':');
+      if (separatorIndex === -1) return '';
+      const sheetId = cellKey.slice(0, separatorIndex);
+      const cellId = cellKey.slice(separatorIndex + 1);
+      return sheetId === normalizedSheetId ? String(cellId || '').toUpperCase() : '';
+    })
+    .filter(Boolean);
+}
+
+function publishWorkbookDocumentUpdatedEvent({
+  sheetDocumentId,
+  activeSheetId,
+  revision,
+  documentRevision = '',
+  runtimeRevision = '',
+  changedCellIds = [],
+  channelLabel = '',
+  cellPatchBySheet = null,
+}) {
+  publishWorkbookEvent({
+    type: 'workbook.document.updated',
+    sheetDocumentId,
+    activeSheetId,
+    revision: String(revision || documentRevision || runtimeRevision || ''),
+    documentRevision: String(documentRevision || ''),
+    runtimeRevision: String(runtimeRevision || ''),
+    changedCellIds,
+    cellPatchBySheet,
+  });
+}
+
+function publishWorkbookRuntimeUpdatedEvent({
+  sheetDocumentId,
+  activeSheetId,
+  revision,
+  documentRevision = '',
+  runtimeRevision = '',
+  changedCellIds = [],
+  pendingCellIds = [],
+  cellPatchBySheet = null,
+  channelLabel = '',
+}) {
+  publishWorkbookEvent({
+    type: 'workbook.runtime.updated',
+    sheetDocumentId,
+    activeSheetId,
+    revision: String(runtimeRevision || revision || documentRevision || ''),
+    documentRevision: String(documentRevision || ''),
+    runtimeRevision: String(runtimeRevision || ''),
+    changedCellIds,
+    pendingCellIds: Array.isArray(pendingCellIds) ? pendingCellIds : [],
+    cellPatchBySheet,
+    channelLabel: String(channelLabel || ''),
+  });
+}
+
+function buildWorkbookCellPatchRecord(workbook, sheetId, cellId) {
+  const normalizedSheetId = String(sheetId || '');
+  const normalizedCellId = String(cellId || '').toUpperCase();
+  if (!normalizedSheetId || !normalizedCellId) return null;
+  const cell = getWorkbookCellRecord(workbook, normalizedSheetId, normalizedCellId);
+  return buildWorkbookCellPatchRecordFromCell(cell);
+}
+
+function normalizeRuntimeCellForDiff(cellValue) {
+  return normalizeRuntimeCellForDiffRecord(cellValue);
+}
+
+function collectChangedRuntimeCellIdsForSheet(
+  previousWorkbook,
+  nextWorkbook,
+  activeSheetId,
+) {
+  const normalizedSheetId = String(activeSheetId || '');
+  if (!normalizedSheetId) return [];
+  const cellIds = new Set(
+    [
+      ...listWorkbookSheetCellEntries(previousWorkbook, normalizedSheetId),
+      ...listWorkbookSheetCellEntries(nextWorkbook, normalizedSheetId),
+    ].map((entry) => String((entry && entry.cellId) || '').toUpperCase()),
+  );
+
+  return Array.from(cellIds)
+    .filter(Boolean)
+    .filter((cellId) => {
+      const before = normalizeRuntimeCellForDiff(
+        getWorkbookCellRecord(previousWorkbook, normalizedSheetId, cellId),
+      );
+      const after = normalizeRuntimeCellForDiff(
+        getWorkbookCellRecord(nextWorkbook, normalizedSheetId, cellId),
+      );
+      return JSON.stringify(before) !== JSON.stringify(after);
+    });
+}
+
+function buildCellPatchBySheet(workbook, sheetId, changedCellIds = []) {
+  const normalizedSheetId = String(sheetId || '');
+  const normalizedCellIds = Array.isArray(changedCellIds)
+    ? changedCellIds
+        .map((cellId) => String(cellId || '').toUpperCase())
+        .filter(Boolean)
+    : [];
+  if (!normalizedSheetId || !normalizedCellIds.length) return null;
+  const sheetPatch = {};
+  normalizedCellIds.forEach((cellId) => {
+    const patch = buildWorkbookCellPatchRecord(workbook, normalizedSheetId, cellId);
+    if (!patch) return;
+    sheetPatch[cellId] = patch;
+  });
+  if (!Object.keys(sheetPatch).length) return null;
+  return {
+    [normalizedSheetId]: sheetPatch,
+  };
+}
+
 export async function initSheets() {
-  const result = await migrateAllSheetsToWorkbook();
-  console.log('[sheets] workbook migration complete', result);
+  return undefined;
 }
 
 registerMethods({
@@ -1333,12 +1644,16 @@ registerMethods({
   async 'sheets.one'(sheetId) {
     check(sheetId, String);
 
-    return Sheets.findOneAsync(
-      { _id: sheetId },
-      {
-        fields: { name: 1, workbook: 1, createdAt: 1, updatedAt: 1 },
-      },
-    );
+    const sheetDocument = await normalizeSheetDocument(sheetId);
+    if (!sheetDocument) return null;
+    return {
+      ...sheetDocument,
+      workbook: encodeWorkbookForDocument(
+        getMergedWorkbookFromSheetDocument(sheetDocument),
+      ),
+      documentRevision: getDocumentRevisionFromSheetDocument(sheetDocument),
+      runtimeRevision: getRuntimeRevisionFromSheetDocument(sheetDocument),
+    };
   },
 
   async 'sheets.create'(name) {
@@ -1349,12 +1664,21 @@ registerMethods({
     const sheetName = String(name || '').trim() || `Metacell ${count}`;
     const workbook = buildWorkbookFromFlatStorage({});
 
-    return Sheets.insertAsync({
+    const sheetId = await Sheets.insertAsync({
       name: sheetName,
       workbook: encodeWorkbookForDocument(workbook),
+      runtimeWorkbook: encodeWorkbookForDocument({}),
+      createdAt: now,
+      updatedAt: now,
+      runtimeUpdatedAt: null,
+    });
+    publishSheetsEvent('sheets.created', {
+      sheetId,
+      name: sheetName,
       createdAt: now,
       updatedAt: now,
     });
+    return sheetId;
   },
 
   async 'sheets.createFormulaTestWorkbook'(name) {
@@ -1364,12 +1688,21 @@ registerMethods({
     const workbook = await buildComputedFormulaTestWorkbook();
     const sheetName = String(name || '').trim() || 'Formula Test Bench';
 
-    return Sheets.insertAsync({
+    const sheetId = await Sheets.insertAsync({
       name: sheetName,
       workbook: encodeWorkbookForDocument(workbook),
+      runtimeWorkbook: encodeWorkbookForDocument({}),
+      createdAt: now,
+      updatedAt: now,
+      runtimeUpdatedAt: null,
+    });
+    publishSheetsEvent('sheets.created', {
+      sheetId,
+      name: sheetName,
       createdAt: now,
       updatedAt: now,
     });
+    return sheetId;
   },
 
   async 'sheets.createFinancialModelWorkbook'(name) {
@@ -1380,12 +1713,21 @@ registerMethods({
     const sheetName =
       String(name || '').trim() || 'AI Startup Financial Model';
 
-    return Sheets.insertAsync({
+    const sheetId = await Sheets.insertAsync({
       name: sheetName,
       workbook: encodeWorkbookForDocument(workbook),
+      runtimeWorkbook: encodeWorkbookForDocument({}),
+      createdAt: now,
+      updatedAt: now,
+      runtimeUpdatedAt: null,
+    });
+    publishSheetsEvent('sheets.created', {
+      sheetId,
+      name: sheetName,
       createdAt: now,
       updatedAt: now,
     });
+    return sheetId;
   },
 
   async 'sheets.rename'(sheetId, name) {
@@ -1397,21 +1739,33 @@ registerMethods({
       throw new AppError('invalid-name', 'Workbook name is required');
     }
 
-    await Sheets.updateAsync(
-      { _id: sheetId },
-      {
-        $set: {
-          name: nextName,
-          updatedAt: new Date(),
-        },
+    await updateSheetDocumentFields(sheetId, {
+      set: {
+        name: nextName,
+        updatedAt: new Date(),
       },
-    );
+    });
+    publishSheetsEvent('sheets.renamed', {
+      sheetId,
+      name: nextName,
+      updatedAt: new Date(),
+    });
   },
 
   async 'sheets.remove'(sheetId) {
     check(sheetId, String);
+    const existing = await Sheets.findOneAsync(
+      { _id: sheetId },
+      { fields: { name: 1, createdAt: 1, updatedAt: 1 } },
+    );
     await removeWorkbookSchedulesAfterDelete(sheetId);
     await Sheets.removeAsync({ _id: sheetId });
+    publishSheetsEvent('sheets.removed', {
+      sheetId,
+      name: String((existing && existing.name) || ''),
+      createdAt: existing && existing.createdAt ? existing.createdAt : null,
+      updatedAt: new Date(),
+    });
   },
 
   async 'sheets.migrateAllToWorkbook'() {
@@ -1431,15 +1785,34 @@ registerMethods({
     return rebuildAllSheetDependencyGraphs();
   },
 
-  async 'sheets.saveWorkbook'(sheetId, workbook) {
+  async 'sheets.saveWorkbook'(sheetId, workbook, options) {
     check(sheetId, String);
     check(workbook, isPlainObject);
+    check(options, Match.Maybe(isPlainObject));
 
+    const clientWorkbook = buildClientWorkbookSnapshot(workbook);
     const sheetDocument = await normalizeSheetDocument(sheetId);
+    if (!sheetDocument) {
+      throw new AppError('not-found', 'Workbook not found');
+    }
+    const currentRevision = getDocumentRevisionFromSheetDocument(sheetDocument);
+    const currentRuntimeRevision =
+      getRuntimeRevisionFromSheetDocument(sheetDocument);
+    const expectedRevision = String(
+      options && typeof options === 'object' ? options.expectedRevision || '' : '',
+    );
+    if (expectedRevision && currentRevision && expectedRevision !== currentRevision) {
+      throw new AppError('conflict', 'Workbook changed on the server', {
+        revision: currentRevision,
+        documentRevision: currentRevision,
+        runtimeRevision: currentRuntimeRevision,
+        expectedRevision,
+      });
+    }
     const previousWorkbook = decodeWorkbookDocument(
       (sheetDocument && sheetDocument.workbook) || {},
     );
-    const nextWorkbook = mergeWorkbookForCompute(previousWorkbook, workbook);
+    const nextWorkbook = mergeWorkbookDocument(previousWorkbook, clientWorkbook);
     const changes = collectChangedDependencySignals(
       previousWorkbook,
       nextWorkbook,
@@ -1447,27 +1820,36 @@ registerMethods({
     const invalidatedWorkbook = decodeWorkbookDocument(
       invalidateWorkbookDependencies(nextWorkbook, changes),
     );
-    const repairedWorkbook =
-      rebuildWorkbookDependencyGraph(invalidatedWorkbook);
+    const repairedWorkbook = rebuildWorkbookDependencyGraph(invalidatedWorkbook);
     const persistedWorkbook =
-      stripWorkbookAttachmentInlineData(repairedWorkbook);
+      stripWorkbookAttachmentInlineData(
+        stripWorkbookRuntimeStateForDocumentPersist(repairedWorkbook),
+      );
 
-    await Sheets.updateAsync(
-      { _id: sheetId },
-      {
-        $set: {
-          workbook: encodeWorkbookForDocument(persistedWorkbook),
-          updatedAt: new Date(),
-        },
-        $unset: {
-          storage: '',
-        },
+    const persistedAt = new Date();
+    await updateSheetDocumentFields(sheetId, {
+      set: {
+        workbook: encodeWorkbookForDocument(persistedWorkbook),
+        updatedAt: persistedAt,
       },
-    );
+      unset: {
+        storage: '',
+        runtimeWorkbook: '',
+        runtimeUpdatedAt: '',
+      },
+    });
 
     if (changes.length) {
       await notifyQueuedSheetDependenciesChanged(sheetId, changes);
     }
+    publishWorkbookDocumentUpdatedEvent({
+      sheetDocumentId: sheetId,
+      activeSheetId: '',
+      revision: toWorkbookRevision(persistedAt),
+      documentRevision: toWorkbookRevision(persistedAt),
+      runtimeRevision: '',
+      changedCellIds: [],
+    });
     await syncWorkbookSchedulesAfterPersist(
       {
         sheetDocumentId: sheetId,
@@ -1476,6 +1858,11 @@ registerMethods({
       },
       'Failed to sync workbook schedules after save',
     );
+    return {
+      revision: toWorkbookRevision(persistedAt),
+      documentRevision: toWorkbookRevision(persistedAt),
+      runtimeRevision: '',
+    };
   },
 
   async 'sheets.computeGrid'(sheetId, activeSheetId, options) {
@@ -1490,6 +1877,11 @@ registerMethods({
       },
     );
     if (profiler) profiler.step('computeGrid.start');
+    const includeWorkbookSnapshot = !!(
+      options &&
+      typeof options === 'object' &&
+      options.includeWorkbookSnapshot
+    );
 
     const sheetDocument = await normalizeSheetDocument(sheetId);
     if (profiler) profiler.step('normalize.done');
@@ -1498,15 +1890,31 @@ registerMethods({
       throw new AppError('not-found', 'Workbook not found');
     }
 
-    const persistedWorkbook = decodeWorkbookDocument(
-      sheetDocument.workbook || {},
+    const persistedWorkbook = getMergedWorkbookFromSheetDocument(sheetDocument);
+    const documentRevision = getDocumentRevisionFromSheetDocument(sheetDocument);
+    let runtimeRevision = getRuntimeRevisionFromSheetDocument(sheetDocument);
+    const expectedRevision = String(
+      options && typeof options === 'object' ? options.expectedRevision || '' : '',
     );
-    const sourceWorkbook =
+    if (expectedRevision && documentRevision && expectedRevision !== documentRevision) {
+      throw new AppError('conflict', 'Workbook changed on the server', {
+        revision: documentRevision,
+        documentRevision,
+        runtimeRevision,
+      });
+    }
+    const requestWorkbookDocumentSnapshot =
       options &&
       options.workbookSnapshot &&
       typeof options.workbookSnapshot === 'object'
-        ? mergeWorkbookForCompute(persistedWorkbook, options.workbookSnapshot)
-        : persistedWorkbook;
+        ? buildClientWorkbookSnapshot(options.workbookSnapshot)
+        : null;
+    const sourceWorkbook = requestWorkbookDocumentSnapshot
+      ? mergeWorkbookDocument(
+          persistedWorkbook,
+          requestWorkbookDocumentSnapshot,
+        )
+      : persistedWorkbook;
     if (profiler) profiler.step('merge.done');
     const repairedWorkbook = isDependencyGraphAuthoritative(sourceWorkbook)
       ? sourceWorkbook
@@ -1524,57 +1932,114 @@ registerMethods({
       persistedWorkbook,
       sourceWorkbook,
     );
+    const explicitTargetCellMap =
+      options &&
+      Array.isArray(options.targetCellIds) &&
+      options.targetCellIds.length
+        ? buildExplicitTargetCellMap(activeSheetId, options.targetCellIds)
+        : null;
 
     const result = await computeSheetSnapshot({
       sheetDocumentId: sheetId,
       workbookData: hydratedWorkbook,
       activeSheetId,
+      reloadWorkbookData: async () => {
+        const latestSheetDocument = await Sheets.findOneAsync(
+          { _id: sheetId },
+          { fields: { workbook: 1, runtimeWorkbook: 1 } },
+        );
+        const latestMergedWorkbook = getMergedWorkbookFromSheetDocument(
+          latestSheetDocument,
+        );
+        const latestSourceWorkbook = requestWorkbookDocumentSnapshot
+          ? mergeWorkbookDocument(
+              latestMergedWorkbook,
+              requestWorkbookDocumentSnapshot,
+            )
+          : latestMergedWorkbook;
+        return hydrateWorkbookAttachmentArtifacts(
+          latestSourceWorkbook,
+        );
+      },
       channelPayloads,
       forceRefreshAI: !!(options && options.forceRefreshAI),
       manualTriggerAI: !!(options && options.manualTriggerAI),
       changedSignals,
+      explicitTargetCellMap,
       persistWorkbook: async (nextWorkbook) => {
         const normalizedNextWorkbook = decodeWorkbookDocument(nextWorkbook);
         const latestSheetDocument = await Sheets.findOneAsync(
           { _id: sheetId },
-          { fields: { workbook: 1 } },
+          { fields: { workbook: 1, runtimeWorkbook: 1, updatedAt: 1, runtimeUpdatedAt: 1 } },
         );
-        const latestPersistedWorkbook = decodeWorkbookDocument(
-          (latestSheetDocument && latestSheetDocument.workbook) || {},
+        const latestPersistedRevision = toWorkbookRevision(
+          latestSheetDocument && latestSheetDocument.updatedAt,
         );
-        const mergedPersistWorkbook = mergeWorkbookForCompute(
-          normalizedNextWorkbook,
-          latestPersistedWorkbook,
-        );
+        if (
+          latestPersistedRevision &&
+          documentRevision &&
+          latestPersistedRevision !== documentRevision
+        ) {
+          throw new AppError('conflict', 'Workbook changed during compute', {
+            revision: latestPersistedRevision,
+            documentRevision: latestPersistedRevision,
+            runtimeRevision: getRuntimeRevisionFromSheetDocument(latestSheetDocument),
+          });
+        }
+        const latestPersistedWorkbook =
+          getMergedWorkbookFromSheetDocument(latestSheetDocument);
         const changes = collectChangedDependencySignals(
           latestPersistedWorkbook,
-          mergedPersistWorkbook,
+          normalizedNextWorkbook,
         );
-        const persistedNextWorkbook = stripWorkbookAttachmentInlineData(
-          mergedPersistWorkbook,
+        const changedRuntimeCellIds = collectChangedRuntimeCellIdsForSheet(
+          latestPersistedWorkbook,
+          normalizedNextWorkbook,
+          activeSheetId,
+        );
+        const persistedNextWorkbook = buildRuntimeWorkbookSnapshot(
+          stripWorkbookAttachmentInlineData(normalizedNextWorkbook),
         );
         if (profiler)
           profiler.step('persist.start', { changes: changes.length });
-        await Sheets.updateAsync(
-          { _id: sheetId },
-          {
-            $set: {
-              workbook: encodeWorkbookForDocument(persistedNextWorkbook),
-              updatedAt: new Date(),
-            },
-            $unset: {
-              storage: '',
-            },
+        const persistedAt = new Date();
+        await updateSheetRuntimeFields(sheetId, {
+          set: {
+            runtimeWorkbook: encodeWorkbookForDocument(persistedNextWorkbook),
+            runtimeUpdatedAt: persistedAt,
           },
-        );
+          unset: {
+            storage: '',
+          },
+        });
+        runtimeRevision = toWorkbookRevision(persistedAt);
         if (changes.length) {
           await notifyQueuedSheetDependenciesChanged(sheetId, changes);
         }
+        publishWorkbookRuntimeUpdatedEvent({
+          sheetDocumentId: sheetId,
+          activeSheetId,
+          revision: runtimeRevision,
+          documentRevision,
+          runtimeRevision,
+          changedCellIds: changedRuntimeCellIds,
+          cellPatchBySheet: buildCellPatchBySheet(
+            normalizedNextWorkbook,
+            activeSheetId,
+            changedRuntimeCellIds,
+          ),
+          channelLabel: changes.some((change) => change && change.kind === 'channel')
+            ? String(
+                (changes.find((change) => change && change.kind === 'channel') || {})
+                  .label || '',
+              )
+            : '',
+        });
         await syncWorkbookSchedulesAfterPersist(
           {
             sheetDocumentId: sheetId,
             previousWorkbook: sourceWorkbook,
-            nextWorkbook: persistedNextWorkbook,
+            nextWorkbook: normalizedNextWorkbook,
           },
           'Failed to sync workbook schedules after compute persist',
         );
@@ -1587,18 +2052,11 @@ registerMethods({
         ? await (async () => {
             const mentionedLabels = [
               ...new Set(
-                Object.values(
-                  (
-                    decodeWorkbookDocument(result.workbook || {}).sheets || {}
-                  ),
+                listWorkbookCellEntries(
+                  decodeWorkbookDocument(result.workbook || {}),
                 )
-                  .flatMap((sheet) =>
-                    Object.values((sheet && sheet.cells) || {}).flatMap(
-                      (cell) =>
-                        extractChannelMentionLabels(
-                          String((cell && cell.source) || ''),
-                        ),
-                    ),
+                  .flatMap(({ cell }) =>
+                    extractChannelMentionLabels(getCellSourceText(cell)),
                   )
                   .map((label) => normalizeChannelLabel(label))
                   .filter(Boolean),
@@ -1622,27 +2080,37 @@ registerMethods({
         result.workbook || {},
       );
       result.workbook = nextWorkbookAfterChannelHistory;
-      await Sheets.updateAsync(
-        { _id: sheetId },
-        {
-          $set: {
-            workbook: encodeWorkbookForDocument(
+      const persistedAt = new Date();
+      await updateSheetRuntimeFields(sheetId, {
+        set: {
+          runtimeWorkbook: encodeWorkbookForDocument(
+            buildRuntimeWorkbookSnapshot(
               stripWorkbookAttachmentInlineData(
-                decodeWorkbookDocument(nextWorkbookAfterChannelHistory),
+                decodeWorkbookDocument(result.workbook),
               ),
             ),
-            updatedAt: new Date(),
-          },
-          $unset: {
-            storage: '',
-          },
+          ),
+          runtimeUpdatedAt: persistedAt,
         },
-      );
+        unset: {
+          storage: '',
+        },
+      });
+      runtimeRevision = toWorkbookRevision(persistedAt);
+      publishWorkbookRuntimeUpdatedEvent({
+        sheetDocumentId: sheetId,
+        activeSheetId,
+        revision: runtimeRevision,
+        documentRevision,
+        runtimeRevision,
+        changedCellIds: [],
+        cellPatchBySheet: null,
+      });
       await syncWorkbookSchedulesAfterPersist(
         {
           sheetDocumentId: sheetId,
           previousWorkbook: previousWorkbookBeforeChannelHistory,
-          nextWorkbook: nextWorkbookAfterChannelHistory,
+          nextWorkbook: result.workbook,
         },
         'Failed to sync workbook schedules after channel history persist',
       );
@@ -1653,11 +2121,78 @@ registerMethods({
           result && result.values ? Object.keys(result.values).length : 0,
       });
 
+    const workbookChangeSignals =
+      result && result.workbook
+        ? collectChangedDependencySignals(sourceWorkbook, result.workbook)
+        : [];
+    const changedCellIds =
+      result && result.workbook
+        ? collectChangedRuntimeCellIdsForSheet(
+            sourceWorkbook,
+            result.workbook,
+            activeSheetId,
+          )
+        : result && result.values
+          ? Object.keys(result.values)
+              .map((cellId) => String(cellId || '').toUpperCase())
+              .filter(Boolean)
+          : [];
+    const runtimePatchBySheet =
+      result && result.workbook && changedCellIds.length
+        ? buildCellPatchBySheet(
+            result.workbook,
+            activeSheetId,
+            changedCellIds,
+          )
+        : null;
+
+    if (result && result.values && changedCellIds.length) {
+      const pendingCellIds = changedCellIds.filter((cellId) => {
+        const value = String(result.values[cellId] == null ? '' : result.values[cellId]);
+        return value === '...' || value === '(manual: click Update)';
+      });
+      publishWorkbookRuntimeUpdatedEvent({
+        sheetDocumentId: sheetId,
+        activeSheetId,
+        revision: String(runtimeRevision || documentRevision || ''),
+        documentRevision,
+        runtimeRevision,
+        pendingCellIds,
+        changedCellIds,
+        cellPatchBySheet: runtimePatchBySheet,
+      });
+    }
+
     if (result && result.workbook) {
       result.workbook = stripWorkbookAttachmentInlineData(result.workbook);
+    }
+    if (result && typeof result === 'object') {
+      result.revision = String(runtimeRevision || documentRevision || '');
+      result.documentRevision = documentRevision;
+      result.runtimeRevision = String(runtimeRevision || '');
+      result.changedCellIds = changedCellIds;
+      result.runtimePatchBySheet = runtimePatchBySheet;
+      if (!includeWorkbookSnapshot && Object.prototype.hasOwnProperty.call(result, 'workbook')) {
+        delete result.workbook;
+      }
     }
     if (profiler) profiler.step('computeGrid.done');
 
     return result;
+  },
+
+  async 'sheets.getSyncState'(sheetId) {
+    check(sheetId, String);
+    const sheetDocument = await Sheets.findOneAsync(
+      { _id: sheetId },
+      { fields: { updatedAt: 1, runtimeUpdatedAt: 1 } },
+    );
+    if (!sheetDocument) {
+      throw new AppError('not-found', 'Workbook not found');
+    }
+    return {
+      documentRevision: getDocumentRevisionFromSheetDocument(sheetDocument),
+      runtimeRevision: getRuntimeRevisionFromSheetDocument(sheetDocument),
+    };
   },
 });

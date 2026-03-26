@@ -68,15 +68,30 @@ export class AIService {
   buildQueueMeta(meta) {
     var source = meta || {};
     var activeSheetId = '';
+    var workbookSnapshot = null;
     try {
       activeSheetId = String(this.getQueueActiveSheetId() || '');
     } catch (e) {}
+    try {
+      workbookSnapshot =
+        this.storageService &&
+        this.storageService.storage &&
+        typeof this.storageService.storage.snapshot === 'function'
+          ? this.storageService.storage.snapshot()
+          : null;
+    } catch (e) {
+      workbookSnapshot = null;
+    }
     return {
       ...source,
       sheetDocumentId: this.sheetDocumentId,
       activeSheetId: activeSheetId,
       sourceCellId: String(source.sourceCellId || ''),
       formulaKind: String(source.formulaKind || ''),
+      workbookSnapshot:
+        workbookSnapshot && typeof workbookSnapshot === 'object'
+          ? workbookSnapshot
+          : source.workbookSnapshot || null,
     };
   }
 
@@ -640,6 +655,7 @@ export class AIService {
         var options = this.parseListOptions(enriched, count);
         this.cache[cacheKey] = options;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(options));
+        SHARED_AI_RESULT_CACHE[cacheKey] = options;
         if (typeof onResult === 'function') onResult(options);
         return done();
       })
@@ -708,6 +724,7 @@ export class AIService {
         var matrix = this.parseTableResponse(String(content || ''), cols, rows);
         this.cache[cacheKey] = matrix;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(matrix));
+        SHARED_AI_RESULT_CACHE[cacheKey] = matrix;
         if (typeof onResult === 'function') onResult(matrix);
         return done().then(() => matrix);
       })

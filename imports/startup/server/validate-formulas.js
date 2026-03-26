@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { getRegisteredFormulaManifest } from '../../ui/metacell/runtime/formulas/index.js';
+import { getRegisteredFormulaManifest } from '../../engine/formulas/index.js';
 
 function getAppRoot() {
   const pwd = process.env.PWD;
@@ -13,9 +13,7 @@ function getFormulaDirectory() {
   return path.join(
     getAppRoot(),
     'imports',
-    'ui',
-    'metacell',
-    'runtime',
+    'engine',
     'formulas'
   );
 }

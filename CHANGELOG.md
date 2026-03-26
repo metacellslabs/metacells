@@ -4,8 +4,8 @@
 
 ### Added
 
-- Electron desktop packaging flow with local desktop preparation, packing, and per-OS distribution scripts.
-- Self-contained desktop runtime support for bundling the backend and local services into the packaged Electron app.
+- Tauri desktop packaging flow with local desktop preparation and per-OS distribution scripts.
+- Self-contained desktop runtime support for bundling the backend and local services into the packaged desktop app.
 - Cell scheduling system:
   - backend schedule persistence and execution
   - schedule detection jobs
@@ -51,7 +51,7 @@
 
 ### Changed
 
-- Desktop packaging and runtime startup flow now supports real backend embedding instead of Electron-only shell packaging.
+- Desktop packaging and runtime startup flow now supports real backend embedding in the Tauri shell.
 - Schedule execution now runs safely in the main server path, with stronger dedupe, stale-job guards, queued-job cleanup, and schedule/workbook lifecycle cleanup.
 - Editing, deleting, sorting, and row/column structure mutations now preserve or clear schedule metadata correctly.
 - Channel feed formulas can now use AI-based per-event filtering/classification and persist decision metadata and extracted attributes.

@@ -2,6 +2,10 @@ import { AppError } from '../../../lib/app-error.js';
 import { defineModel } from '../../../lib/orm.js';
 import { registerMethods } from '../../../lib/rpc.js';
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  cloneCellRecordWithSource,
+  listWorkbookCellEntries,
+} from '../sheets/cell-record-helpers.js';
 
 export const Artifacts = defineModel('artifacts');
 
@@ -153,31 +157,21 @@ export async function hydrateWorkbookAttachmentArtifacts(workbookValue) {
     workbookValue && typeof workbookValue === 'object'
       ? JSON.parse(JSON.stringify(workbookValue))
       : {};
-  const sheets =
-    workbook && workbook.sheets && typeof workbook.sheets === 'object'
-      ? workbook.sheets
-      : {};
-
-  for (const sheetId of Object.keys(sheets)) {
-    const sheet = sheets[sheetId];
-    const cells =
-      sheet && sheet.cells && typeof sheet.cells === 'object'
-        ? sheet.cells
-        : {};
-    for (const cellId of Object.keys(cells)) {
-      const cell = cells[cellId];
-      if (!cell || typeof cell !== 'object') continue;
-      const attachment = parseAttachmentSourceValue(cell.source);
-      if (!attachment) continue;
-      if (attachment.content || !attachment.contentArtifactId) continue;
-      const content = await getArtifactText(
-        String(attachment.contentArtifactId || ''),
-      );
-      cell.source = buildAttachmentSourceValue({
+  for (const entry of listWorkbookCellEntries(workbook)) {
+    const { sheetId, cellId, cell } = entry;
+    const attachment = parseAttachmentSourceValue(cell.source);
+    if (!attachment) continue;
+    if (attachment.content || !attachment.contentArtifactId) continue;
+    const content = await getArtifactText(
+      String(attachment.contentArtifactId || ''),
+    );
+    workbook.sheets[sheetId].cells[cellId] = cloneCellRecordWithSource(
+      cell,
+      buildAttachmentSourceValue({
         ...attachment,
         content: String(content || ''),
-      });
-    }
+      }),
+    );
   }
 
   return workbook;
@@ -188,27 +182,17 @@ export function stripWorkbookAttachmentInlineData(workbookValue) {
     workbookValue && typeof workbookValue === 'object'
       ? JSON.parse(JSON.stringify(workbookValue))
       : {};
-  const sheets =
-    workbook && workbook.sheets && typeof workbook.sheets === 'object'
-      ? workbook.sheets
-      : {};
-
-  for (const sheetId of Object.keys(sheets)) {
-    const sheet = sheets[sheetId];
-    const cells =
-      sheet && sheet.cells && typeof sheet.cells === 'object'
-        ? sheet.cells
-        : {};
-    for (const cellId of Object.keys(cells)) {
-      const cell = cells[cellId];
-      if (!cell || typeof cell !== 'object') continue;
-      const attachment = parseAttachmentSourceValue(cell.source);
-      if (!attachment) continue;
-      cell.source = buildAttachmentSourceValue({
+  for (const entry of listWorkbookCellEntries(workbook)) {
+    const { sheetId, cellId, cell } = entry;
+    const attachment = parseAttachmentSourceValue(cell.source);
+    if (!attachment) continue;
+    workbook.sheets[sheetId].cells[cellId] = cloneCellRecordWithSource(
+      cell,
+      buildAttachmentSourceValue({
         ...attachment,
         content: '',
-      });
-    }
+      }),
+    );
   }
 
   return workbook;

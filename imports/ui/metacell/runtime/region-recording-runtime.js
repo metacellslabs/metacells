@@ -1,3 +1,5 @@
+import { getSelectionRangeState } from './selection-range-facade.js';
+
 var CAPTURE_INTERVAL_MS = 300;
 var RECORDING_PHASE = {
   idle: 'idle',
@@ -30,22 +32,17 @@ function loadRecorderLibs() {
 }
 
 function getRecordingBounds(app) {
+  var selectionRange = getSelectionRangeState(app);
   if (
     !app ||
-    !app.selectionRange ||
-    (app.selectionRange.startCol === app.selectionRange.endCol &&
-      app.selectionRange.startRow === app.selectionRange.endRow)
+    !selectionRange ||
+    (selectionRange.startCol === selectionRange.endCol &&
+      selectionRange.startRow === selectionRange.endRow)
   ) {
     return null;
   }
-  var startId = app.formatCellId(
-    app.selectionRange.startCol,
-    app.selectionRange.startRow,
-  );
-  var endId = app.formatCellId(
-    app.selectionRange.endCol,
-    app.selectionRange.endRow,
-  );
+  var startId = app.formatCellId(selectionRange.startCol, selectionRange.startRow);
+  var endId = app.formatCellId(selectionRange.endCol, selectionRange.endRow);
   var startInput = app.inputById && app.inputById[startId];
   var endInput = app.inputById && app.inputById[endId];
   if (!startInput || !endInput) return null;
@@ -72,10 +69,11 @@ function getRecordingBounds(app) {
 
 function hasVisibleRegionSelection(app) {
   if (!app || !app.table) return false;
-  if (!app.selectionRange) return false;
+  var selectionRange = getSelectionRangeState(app);
+  if (!selectionRange) return false;
   if (
-    app.selectionRange.startCol === app.selectionRange.endCol &&
-    app.selectionRange.startRow === app.selectionRange.endRow
+    selectionRange.startCol === selectionRange.endCol &&
+    selectionRange.startRow === selectionRange.endRow
   ) {
     return false;
   }
@@ -138,20 +136,21 @@ function getRegionRecordingFilename() {
 }
 
 function getSelectionKey(app) {
+  var selectionRange = getSelectionRangeState(app);
   if (
     !app ||
-    !app.selectionRange ||
-    (app.selectionRange.startCol === app.selectionRange.endCol &&
-      app.selectionRange.startRow === app.selectionRange.endRow)
+    !selectionRange ||
+    (selectionRange.startCol === selectionRange.endCol &&
+      selectionRange.startRow === selectionRange.endRow)
   ) {
     return '';
   }
   return [
     String(app.activeSheetId || ''),
-    String(app.selectionRange.startCol || 0),
-    String(app.selectionRange.startRow || 0),
-    String(app.selectionRange.endCol || 0),
-    String(app.selectionRange.endRow || 0),
+    String(selectionRange.startCol || 0),
+    String(selectionRange.startRow || 0),
+    String(selectionRange.endCol || 0),
+    String(selectionRange.endRow || 0),
   ].join(':');
 }
 
@@ -427,6 +426,10 @@ function handleRecordControlClick(app) {
   }
 }
 
+export function toggleRegionRecordingControl(app) {
+  handleRecordControlClick(app);
+}
+
 export function setupRegionRecordingControls(app) {
   ensureRecordingOverlay(app);
   if (!app.regionRecordingRuntimeBound && app.tableWrap) {
@@ -442,6 +445,10 @@ export function setupRegionRecordingControls(app) {
     app.tableWrap.addEventListener('keydown', markInputDirty, true);
     app.tableWrap.addEventListener('keyup', markInputDirty, true);
     app.regionRecordingRuntimeBound = true;
+  }
+  if (app.useReactShellControls) {
+    app.syncRegionRecordingControls();
+    return;
   }
   if (app.recordRegionButton) {
     app.recordRegionButton.addEventListener('click', function () {
