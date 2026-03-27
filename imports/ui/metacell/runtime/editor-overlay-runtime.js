@@ -266,7 +266,7 @@ export function hideEditorOverlay(app) {
 }
 
 export function setupEditorOverlay(app) {
-  if (!app || !app.tableWrap || app.editorOverlay) return;
+  if (!app || !app.tableWrap) return;
   if (getComputedStyle(app.tableWrap).position === 'static') {
     app.tableWrap.style.position = 'relative';
   }
@@ -275,13 +275,27 @@ export function setupEditorOverlay(app) {
   if (!overlay) return;
   var overlayInput = overlay.querySelector('.cell-editor-overlay-input');
   if (!overlayInput) return;
+  var inputChanged = app.editorOverlayInput && app.editorOverlayInput !== overlayInput;
   app.editorOverlay = overlay;
   app.editorOverlayInput = overlayInput;
+  if (inputChanged) {
+    app.editorOverlayInputBound = false;
+  }
   app.editorOverlayPendingFocus = false;
   app.editorOverlayDismissedCellId = '';
   app.editorOverlayReturnTarget = '';
   app.editorOverlayClosing = false;
   updateEditorOverlayUiState(app, null);
+
+  if (
+    typeof app.bindGridInputEvents === 'function' &&
+    app.editorOverlayInput &&
+    app.editorOverlayInputBound !== true
+  ) {
+    app.bindGridInputEvents();
+  }
+
+  if (app.handleEditorOverlayViewportSync) return;
 
   var sync = function () {
     syncEditorOverlay(app);

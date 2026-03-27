@@ -1,29 +1,21 @@
 import { validateAIProviderDefinition } from './definition.js';
 
-import _CUSTOM from './CUSTOM.js';
-import _DEEPSEEK from './DEEPSEEK.js';
-import _FIREWORKS from './FIREWORKS.js';
+import _AWS_BEDROCK from './AWS_BEDROCK.js';
+import _CORPORATE_AI_MODEL from './CORPORATE_AI_MODEL.js';
 import _GEMINI from './GEMINI.js';
-import _GROQ from './GROQ.js';
+import _GOOGLE_VERTEX_AI from './GOOGLE_VERTEX_AI.js';
 import _LM_STUDIO from './LM_STUDIO.js';
 import _OLLAMA from './OLLAMA.js';
 import _OPENAI from './OPENAI.js';
-import _OPENROUTER from './OPENROUTER.js';
-import _TOGETHER from './TOGETHER.js';
-import _XAI from './XAI.js';
 
 const ALL_MODULES = {
-  './CUSTOM.js': { default: _CUSTOM },
-  './DEEPSEEK.js': { default: _DEEPSEEK },
-  './FIREWORKS.js': { default: _FIREWORKS },
+  './AWS_BEDROCK.js': { default: _AWS_BEDROCK },
+  './CORPORATE_AI_MODEL.js': { default: _CORPORATE_AI_MODEL },
   './GEMINI.js': { default: _GEMINI },
-  './GROQ.js': { default: _GROQ },
+  './GOOGLE_VERTEX_AI.js': { default: _GOOGLE_VERTEX_AI },
   './LM_STUDIO.js': { default: _LM_STUDIO },
   './OLLAMA.js': { default: _OLLAMA },
   './OPENAI.js': { default: _OPENAI },
-  './OPENROUTER.js': { default: _OPENROUTER },
-  './TOGETHER.js': { default: _TOGETHER },
-  './XAI.js': { default: _XAI },
 };
 
 function shouldIgnoreProviderFile(key) {

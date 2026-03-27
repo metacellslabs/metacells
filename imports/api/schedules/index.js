@@ -32,6 +32,13 @@ import { hydrateWorkbookAttachmentArtifacts, stripWorkbookAttachmentInlineData }
 import { computeSheetSnapshot } from '../sheets/server/compute.js';
 
 export const CellSchedules = defineModel('cell_schedules');
+const SERVER_SIDE_SCHEDULES_ENABLED = /^(1|true|yes|on)$/i.test(
+  String(process.env.METACELLS_ENABLE_SERVER_SCHEDULES || '').trim(),
+);
+
+export function areServerSideSchedulesEnabled() {
+  return SERVER_SIDE_SCHEDULES_ENABLED;
+}
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -394,6 +401,10 @@ export async function syncWorkbookSchedulesOnSave({
   previousWorkbook,
   nextWorkbook,
 }) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) {
+    await removeWorkbookSchedulesAndJobs(sheetDocumentId);
+    return;
+  }
   const workbook = decodeWorkbookDocument(nextWorkbook || {});
   await syncManualSchedules(sheetDocumentId, workbook);
   const changes = extractChangedCells(previousWorkbook, workbook);
@@ -426,6 +437,7 @@ export async function removeWorkbookSchedulesAndJobs(sheetDocumentId) {
 }
 
 async function runScheduleDetectionJob(job) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
   const payload = job && job.payload ? job.payload : {};
   const sheetDocumentId = String(payload.sheetDocumentId || '');
   const sheetId = String(payload.sheetId || '');
@@ -519,6 +531,7 @@ async function recomputeScheduledCell(scheduleDoc) {
 }
 
 async function runScheduledCellJob(job) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
   const payload = job && job.payload ? job.payload : {};
   const scheduleId = String(payload.scheduleId || '');
   if (!scheduleId) return null;
@@ -591,6 +604,7 @@ registerMethods({
       check(sheetDocumentId, String);
       check(sheetId, String);
       check(cellId, String);
+      if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
       return CellSchedules.findOneAsync(scheduleDocId(sheetDocumentId, sheetId, cellId));
     },
   });

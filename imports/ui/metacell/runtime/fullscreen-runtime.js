@@ -265,6 +265,14 @@ export function setupFullscreenOverlay(app) {
   });
   document.addEventListener('keydown', function (e) {
     if (!app.fullscreenOverlay || app.fullscreenOverlay.hidden) return;
+    if (
+      app.fullscreenIsEditing &&
+      app.fullscreenEditor &&
+      document.activeElement === app.fullscreenEditor &&
+      app.handleMentionAutocompleteKeydown(e, app.fullscreenEditor)
+    ) {
+      return;
+    }
     if (app.fullscreenIsEditing && (e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       saveFullscreenCell(app);
@@ -278,6 +286,14 @@ export function setupFullscreenOverlay(app) {
     app.fullscreenEditor.addEventListener('input', function () {
       updateFullscreenDraft(app);
       syncFullscreenPreview(app);
+      if (app.fullscreenIsEditing && typeof app.updateMentionAutocomplete === 'function') {
+        app.updateMentionAutocomplete(app.fullscreenEditor);
+      }
+    });
+    app.fullscreenEditor.addEventListener('blur', function () {
+      if (typeof app.hideMentionAutocompleteSoon === 'function') {
+        app.hideMentionAutocompleteSoon();
+      }
     });
   }
 }
@@ -344,6 +360,9 @@ export function closeFullscreenCell(app) {
   app.fullscreenIsEditing = false;
   app.fullscreenFormulaDraft = '';
   app.fullscreenValueDraft = '';
+  if (typeof app.hideMentionAutocomplete === 'function') {
+    app.hideMentionAutocomplete();
+  }
   syncFullscreenEditingUi(app);
   publishFullscreenUi(app);
   if (!targetCellId) return;

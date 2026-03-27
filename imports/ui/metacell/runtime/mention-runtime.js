@@ -158,10 +158,12 @@ export function updateMentionAutocomplete(app, input) {
     activeIndex: activeIndex,
   };
   var sourceKind = input === app.editorOverlayInput ? 'overlay' : 'default';
+  var anchorCaret =
+    input === app.editorOverlayInput || input === app.fullscreenEditor;
   syncMentionAutocompleteUiToAnchor(app, {
     visible: true,
     anchorElement: input,
-    anchorCaret: input === app.editorOverlayInput,
+    anchorCaret: anchorCaret,
     sourceKind: sourceKind,
     activeIndex: activeIndex,
     items: items,
@@ -377,7 +379,8 @@ export function positionMentionAutocomplete(app, input) {
   syncMentionAutocompleteUiToAnchor(app, {
     visible: true,
     anchorElement: input,
-    anchorCaret: input === app.editorOverlayInput,
+    anchorCaret:
+      input === app.editorOverlayInput || input === app.fullscreenEditor,
     sourceKind: input === app.editorOverlayInput ? 'overlay' : 'default',
     activeIndex:
       app.mentionAutocompleteState &&
@@ -507,6 +510,27 @@ export function applyMentionAutocompleteSelection(app, index) {
       } else if (typeof input.setSelectionRange === 'function') {
         input.setSelectionRange(caret, caret);
       }
+    }
+  } else if (input === app.fullscreenEditor) {
+    if (typeof app.setFullscreenDraft === 'function') {
+      app.setFullscreenDraft(next);
+    } else {
+      if (app.fullscreenEditMode === 'value') {
+        app.fullscreenValueDraft = next;
+      } else {
+        app.fullscreenFormulaDraft = next;
+      }
+      if (typeof app.publishUiState === 'function') {
+        app.publishUiState();
+      }
+    }
+    if (typeof input.focus === 'function') {
+      input.focus();
+    }
+    if (typeof app.setEditorSelectionRange === 'function') {
+      app.setEditorSelectionRange(caret, caret, input);
+    } else if (typeof input.setSelectionRange === 'function') {
+      input.setSelectionRange(caret, caret);
     }
   } else if (app.activeInput === input && app.formulaInput) {
     app.syncActiveEditorValue(next, { syncOverlay: false });

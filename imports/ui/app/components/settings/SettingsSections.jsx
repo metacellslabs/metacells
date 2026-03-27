@@ -1,4 +1,5 @@
 import { Link } from '../../router.jsx';
+import { ServiceBadge } from '../icons/ServiceBadge.jsx';
 
 export function SettingsTabs({ tabs, activeTab, onSelect }) {
   return (
@@ -79,7 +80,15 @@ export function SettingsAIProvidersSection(props) {
             className={`settings-provider-chip${selectedChipId === provider.id ? ' active' : ''}`}
             onClick={() => setSelectedChipId(provider.id)}
           >
-            <span className="settings-chip-name">{provider.name}</span>
+            <span className="settings-chip-name-wrap">
+              <ServiceBadge
+                kind="provider"
+                id={provider.id}
+                name={provider.name}
+                size="sm"
+              />
+              <span className="settings-chip-name">{provider.name}</span>
+            </span>
             {activeProviderId === provider.id ? (
               <span className="settings-chip-check" aria-label="Active">
                 ✓
@@ -92,7 +101,14 @@ export function SettingsAIProvidersSection(props) {
       {selectedProvider && draft ? (
         <div className="settings-provider-config">
           <div className="settings-provider-config-head">
-            <strong>{selectedProvider.name}</strong>
+            <div className="settings-provider-title">
+              <ServiceBadge
+                kind="provider"
+                id={selectedProvider.id}
+                name={selectedProvider.name}
+              />
+              <strong>{selectedProvider.name}</strong>
+            </div>
             {isActive ? (
               <span className="settings-chip-active-badge">Active provider</span>
             ) : null}
@@ -328,7 +344,17 @@ export function SettingsChannelsSection(props) {
             onClick={() => handleAddChannel(connector.id)}
             disabled={addingChannel === connector.id}
           >
-            {addingChannel === connector.id ? 'Adding...' : `Add ${connector.name}`}
+            <span className="settings-inline-service-label">
+              <ServiceBadge
+                kind="channel"
+                id={connector.id}
+                name={connector.name}
+                size="sm"
+              />
+              <span>
+                {addingChannel === connector.id ? 'Adding...' : connector.name}
+              </span>
+            </span>
           </button>
         ))}
       </div>
@@ -362,7 +388,21 @@ export function SettingsChannelsSection(props) {
             return (
               <div key={channel.id} className="settings-provider-card">
                 <div className="settings-provider-head">
-                  <strong>{draft.label || channel.label}</strong>
+                  <div className="settings-provider-title">
+                    <ServiceBadge
+                      kind="channel"
+                      id={connector?.id || channel.connectorId}
+                      name={connector?.name || channel.connectorId}
+                    />
+                    <div className="settings-provider-title-copy">
+                      <strong>{draft.label || channel.label}</strong>
+                      {connector ? (
+                        <span className="settings-provider-subtitle">
+                          {connector.name}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
                   <span
                     className={`settings-status settings-status-${String(
                       draft.status || channel.status || 'pending',
@@ -752,7 +792,15 @@ export function SettingsAdvancedSection({ registeredProviders, providerDrafts })
           const draft = providerDrafts[provider.id] || provider;
           return (
             <div key={provider.id} className="settings-kv-item">
-              <span className="settings-label">{provider.name}</span>
+              <span className="settings-provider-title settings-provider-title-compact">
+                <ServiceBadge
+                  kind="provider"
+                  id={provider.id}
+                  name={provider.name}
+                  size="sm"
+                />
+                <span className="settings-label">{provider.name}</span>
+              </span>
               <strong>{draft.baseUrl || draft.model || 'Not configured'}</strong>
             </div>
           );

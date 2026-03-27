@@ -3,7 +3,7 @@ import { defineChannelConnector } from './definition.js';
 export default defineChannelConnector({
   id: 'imap-email',
   type: 'imap',
-  name: 'Email (IMAP + SMTP)',
+  name: 'IMAP + SMTP',
   description:
     'Read mailbox events over IMAP and send outbound email over SMTP from the same configured mailbox.',
   packageName: 'imapflow + nodemailer',

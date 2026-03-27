@@ -1,29 +1,35 @@
 import { validateChannelConnectorDefinition } from './definition.js';
 
+import _CLAUDE_CODE from './CLAUDE_CODE.js';
+import _DEEPSEEK from './DEEPSEEK.js';
 import _FACEBOOK from './FACEBOOK.js';
 import _GITHUB from './GITHUB.js';
 import _GMAIL from './GMAIL.js';
 import _GOOGLEDRIVE from './GOOGLEDRIVE.js';
-import _HACKERNEWS from './HACKERNEWS.js';
 import _IMAP from './IMAP.js';
-import _INSTAGRAM from './INSTAGRAM.js';
 import _LINKEDIN from './LINKEDIN.js';
+import _ONEDRIVE from './ONEDRIVE.js';
 import _REDDIT from './REDDIT.js';
+import _SAS_INSTITUTE from './SAS_INSTITUTE.js';
 import _SHELL from './SHELL.js';
+import _SHAREPOINT from './SHAREPOINT.js';
 import _TELEGRAM from './TELEGRAM.js';
 import _TWITTER from './TWITTER.js';
 
 const ALL_MODULES = {
+  './CLAUDE_CODE.js': { default: _CLAUDE_CODE },
+  './DEEPSEEK.js': { default: _DEEPSEEK },
   './FACEBOOK.js': { default: _FACEBOOK },
   './GITHUB.js': { default: _GITHUB },
   './GMAIL.js': { default: _GMAIL },
   './GOOGLEDRIVE.js': { default: _GOOGLEDRIVE },
-  './HACKERNEWS.js': { default: _HACKERNEWS },
   './IMAP.js': { default: _IMAP },
-  './INSTAGRAM.js': { default: _INSTAGRAM },
   './LINKEDIN.js': { default: _LINKEDIN },
+  './ONEDRIVE.js': { default: _ONEDRIVE },
   './REDDIT.js': { default: _REDDIT },
+  './SAS_INSTITUTE.js': { default: _SAS_INSTITUTE },
   './SHELL.js': { default: _SHELL },
+  './SHAREPOINT.js': { default: _SHAREPOINT },
   './TELEGRAM.js': { default: _TELEGRAM },
   './TWITTER.js': { default: _TWITTER },
 };

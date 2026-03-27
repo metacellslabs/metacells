@@ -876,14 +876,18 @@ async function callProviderChat(messages) {
   const model = String(
     provider && provider.model
       ? provider.model
-      : provider && provider.type === 'openai'
-        ? 'gpt-4.1-mini'
-        : 'deepseek-chat',
+      : 'gpt-4.1-mini',
   );
   const requestBaseUrl = String(provider.baseUrl || '').replace(/\/+$/, '');
   const requestHeaders = { 'Content-Type': 'application/json' };
   if (
-    (provider.type === 'deepseek' || provider.type === 'openai') &&
+    (
+      provider.type === 'deepseek' ||
+      provider.type === 'openai' ||
+      provider.type === 'bedrock' ||
+      provider.type === 'vertex' ||
+      provider.type === 'corporate'
+    ) &&
     provider.apiKey
   ) {
     requestHeaders.Authorization = `Bearer ${provider.apiKey}`;

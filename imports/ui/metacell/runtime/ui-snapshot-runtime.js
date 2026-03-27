@@ -209,11 +209,18 @@ function collectSelectionUiState(app, activeCellId) {
         ? String(app.getVisibleSheetId() || '')
         : String(app.activeSheetId || '');
     if (!targetSheetId) return [];
+    var raw = String(app.getRawCellValue(activeCellId) || '');
+    if (
+      raw &&
+      typeof app.parseAttachmentSource === 'function' &&
+      app.parseAttachmentSource(raw)
+    ) {
+      return [];
+    }
     var deps =
       app.storage && typeof app.storage.getCellDependencies === 'function'
         ? app.storage.getCellDependencies(targetSheetId, activeCellId) || {}
         : {};
-    var raw = String(app.getRawCellValue(activeCellId) || '');
     if (
       (!Array.isArray(deps.cells) || !deps.cells.length) &&
       (!Array.isArray(deps.namedRefs) || !deps.namedRefs.length) &&

@@ -114,6 +114,14 @@ function providerSupportsImageInput(provider, model) {
   if (providerType === 'openai') {
     return modelName.includes('gpt-4o') || modelName.includes('gpt-4.1');
   }
+  if (providerType === 'vertex' || providerType === 'bedrock' || providerType === 'corporate') {
+    return (
+      modelName.includes('vision') ||
+      modelName.includes('image') ||
+      modelName.includes('gemini') ||
+      modelName.includes('claude')
+    );
+  }
   if (providerType === 'gemini') {
     return modelName.includes('gemini');
   }
@@ -377,7 +385,7 @@ async function fetchModelFromServer() {
     return model;
   }
 
-  if (provider.type === 'lm_studio' && provider.model) {
+  if (provider.model) {
     const model = String(provider.model);
     cachedModel = { providerKey, model };
     log('model.provider_override', { model, provider: provider.type });
@@ -980,7 +988,13 @@ async function runAIChatJob(job) {
         : `${requestBaseUrl.replace(/\/+$/, '')}/chat/completions`;
     const requestHeaders = { 'Content-Type': 'application/json' };
     if (
-      (provider.type === 'deepseek' || provider.type === 'openai') &&
+      (
+        provider.type === 'deepseek' ||
+        provider.type === 'openai' ||
+        provider.type === 'bedrock' ||
+        provider.type === 'vertex' ||
+        provider.type === 'corporate'
+      ) &&
       provider.apiKey
     ) {
       requestHeaders.Authorization = `Bearer ${provider.apiKey}`;
@@ -1293,7 +1307,16 @@ registerMethods({
 
     const normalizedType = String(providerType || '').trim().toLowerCase();
     const headers = { 'Content-Type': 'application/json' };
-    if ((normalizedType === 'openai' || normalizedType === 'deepseek') && apiKey) {
+    if (
+      (
+        normalizedType === 'openai' ||
+        normalizedType === 'deepseek' ||
+        normalizedType === 'bedrock' ||
+        normalizedType === 'vertex' ||
+        normalizedType === 'corporate'
+      ) &&
+      apiKey
+    ) {
       headers.Authorization = `Bearer ${apiKey}`;
     }
     if (normalizedType === 'gemini' && apiKey) {
@@ -1394,7 +1417,13 @@ registerMethods({
     const normalizedModel = String(model || '').trim();
     const headers = { 'Content-Type': 'application/json' };
     if (
-      (normalizedType === 'openai' || normalizedType === 'deepseek') &&
+      (
+        normalizedType === 'openai' ||
+        normalizedType === 'deepseek' ||
+        normalizedType === 'bedrock' ||
+        normalizedType === 'vertex' ||
+        normalizedType === 'corporate'
+      ) &&
       apiKey
     ) {
       headers.Authorization = `Bearer ${apiKey}`;
@@ -1406,6 +1435,9 @@ registerMethods({
     if (
       (normalizedType === 'openai' ||
         normalizedType === 'deepseek' ||
+        normalizedType === 'bedrock' ||
+        normalizedType === 'vertex' ||
+        normalizedType === 'corporate' ||
         normalizedType === 'gemini' ||
         normalizedType === 'lm_studio') &&
       !normalizedModel

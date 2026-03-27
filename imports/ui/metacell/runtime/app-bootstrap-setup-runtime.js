@@ -14,11 +14,11 @@ export function setupSpreadsheetAppBehavior(app) {
   app.setupAttachmentControls();
   app.setupAssistantPanel();
   app.setupFormulaTrackerPanel();
+  app.setupEditorOverlay();
   app.bindGridInputEvents();
   app.bindHeaderSelectionEvents();
   app.bindFormulaBarEvents();
   app.setupMentionAutocomplete();
-  app.setupEditorOverlay();
   app.setupContextMenu();
   app.setupAttachmentLinkPreview();
   if (typeof app.detachSheetEventSubscription === 'function') {

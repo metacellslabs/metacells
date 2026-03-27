@@ -19,13 +19,13 @@ export { DEFAULT_AI_PROVIDERS, DEFAULT_CHANNEL_CONNECTORS, DEFAULT_JOB_SETTINGS 
 export const AppSettings = defineModel('app_settings');
 
 export const DEFAULT_SETTINGS_ID = 'default';
-export const DEFAULT_DEEPSEEK_PROVIDER =
-  getRegisteredAIProviderById('deepseek');
+export const DEFAULT_ACTIVE_AI_PROVIDER =
+  getRegisteredAIProviderById('openai');
 export const DEFAULT_LM_STUDIO_PROVIDER =
   getRegisteredAIProviderById('lm-studio');
 let cachedJobSettings = { ...DEFAULT_JOB_SETTINGS };
 let cachedActiveAIProviderType = String(
-  DEFAULT_DEEPSEEK_PROVIDER?.type || DEFAULT_AI_PROVIDERS[0]?.type || '',
+  DEFAULT_ACTIVE_AI_PROVIDER?.type || DEFAULT_AI_PROVIDERS[0]?.type || '',
 );
 
 function getContainerHostAlias() {
@@ -111,7 +111,7 @@ function createDefaultSettingsDoc() {
     _id: DEFAULT_SETTINGS_ID,
     aiProviders: normalizeProviders(DEFAULT_AI_PROVIDERS),
     activeAIProviderId: String(
-      DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
+      DEFAULT_ACTIVE_AI_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
     ),
     communicationChannels: [],
     jobSettings: { ...DEFAULT_JOB_SETTINGS },
@@ -265,7 +265,7 @@ function updateCachedActiveAIProviderType(settingsDoc) {
     settingsDoc && typeof settingsDoc === 'object' ? settingsDoc : {};
   const providers = normalizeProviders(settings.aiProviders);
   const fallbackActiveId = String(
-    DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
+    DEFAULT_ACTIVE_AI_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
   );
   const activeId = String(settings.activeAIProviderId || fallbackActiveId);
   const activeProvider =
@@ -327,7 +327,7 @@ export async function resetLMStudioBaseUrlInDb() {
   });
 
   const fallbackActiveId = String(
-    DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
+    DEFAULT_ACTIVE_AI_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
   );
   await AppSettings.updateAsync(
     { _id: DEFAULT_SETTINGS_ID },
@@ -361,7 +361,7 @@ export async function getActiveAIProvider() {
   const settings = await ensureDefaultSettings();
   const providers = normalizeProviders(settings.aiProviders);
   const fallbackActiveId = String(
-    DEFAULT_DEEPSEEK_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
+    DEFAULT_ACTIVE_AI_PROVIDER?.id || DEFAULT_AI_PROVIDERS[0]?.id || '',
   );
   const activeId = String(
     (settings && settings.activeAIProviderId) || fallbackActiveId,

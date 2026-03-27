@@ -1,3 +1,5 @@
+import claudeCodeHandler from './claude-code.js';
+import deepseekHandler from './deepseek.js';
 import imapHandler from './imap.js';
 import telegramHandler from './telegram.js';
 import twitterHandler from './twitter.js';
@@ -5,12 +7,15 @@ import linkedinHandler from './linkedin.js';
 import redditHandler from './reddit.js';
 import githubHandler from './github.js';
 import facebookHandler from './facebook.js';
-import instagramHandler from './instagram.js';
-import hackerNewsHandler from './hackernews.js';
+import onedriveHandler from './onedrive.js';
+import sasInstituteHandler from './sas-institute.js';
 import shellHandler from './shell.js';
 import googleDriveHandler from './googledrive.js';
+import sharePointHandler from './sharepoint.js';
 
 const CHANNEL_HANDLERS = [
+  claudeCodeHandler,
+  deepseekHandler,
   imapHandler,
   telegramHandler,
   twitterHandler,
@@ -18,10 +23,11 @@ const CHANNEL_HANDLERS = [
   redditHandler,
   githubHandler,
   facebookHandler,
-  instagramHandler,
-  hackerNewsHandler,
+  onedriveHandler,
+  sasInstituteHandler,
   shellHandler,
   googleDriveHandler,
+  sharePointHandler,
 ];
 
 const CHANNEL_HANDLER_ALIASES = {

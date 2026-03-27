@@ -12,6 +12,125 @@ describe('metacells', function () {
     it('client is not server', function () {
       assert.strictEqual(isServer, false);
     });
+
+    it('does not infer dependency overlays from attachment cell metadata', async function () {
+      const { collectAppUiStateSnapshot } = await import(
+        '../imports/ui/metacell/runtime/ui-snapshot-runtime.js'
+      );
+
+      const attachmentRaw =
+        '__ATTACHMENT__:{"name":"architecture.png","type":"image/png","content":"D5 E6 F8"}';
+      const makeRect = () => ({
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 24,
+      });
+      const cellShell = {
+        getBoundingClientRect: makeRect,
+      };
+
+      const app = {
+        activeSheetId: 'sheet-1',
+        tableWrap: {
+          scrollLeft: 0,
+          scrollTop: 0,
+          getBoundingClientRect: makeRect,
+        },
+        table: {
+          rows: [
+            { cells: [{ getBoundingClientRect: makeRect }, { getBoundingClientRect: makeRect }] },
+            { cells: [{ getBoundingClientRect: makeRect }, cellShell] },
+          ],
+        },
+        inputById: {
+          D5: { id: 'D5', parentElement: cellShell },
+        },
+        getSelectionActiveCellId() {
+          return 'D5';
+        },
+        getSelectionAnchorCellId() {
+          return 'D5';
+        },
+        getVisibleSheetId() {
+          return 'sheet-1';
+        },
+        getRawCellValue() {
+          return attachmentRaw;
+        },
+        parseAttachmentSource(value) {
+          return String(value || '').startsWith('__ATTACHMENT__:') ? {} : null;
+        },
+        getCellInput(cellId) {
+          return this.inputById[cellId] || null;
+        },
+        storage: {
+          getCellDependencies() {
+            return {};
+          },
+          resolveNamedCell() {
+            return null;
+          },
+        },
+      };
+
+      const snapshot = collectAppUiStateSnapshot(app);
+
+      assert.deepStrictEqual(snapshot.selectionUi.dependencyRects, []);
+    });
+
+    it('applies mention autocomplete selections inside the fullscreen editor', async function () {
+      const { applyMentionAutocompleteSelection } = await import(
+        '../imports/ui/metacell/runtime/mention-runtime.js'
+      );
+
+      const fullscreenEditor = {
+        value: 'Hello @arc',
+        selectionStart: 10,
+        selectionEnd: 10,
+        focused: false,
+        focus() {
+          this.focused = true;
+        },
+        setSelectionRange(start, end) {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+        },
+      };
+
+      const app = {
+        fullscreenEditor,
+        fullscreenEditMode: 'value',
+        fullscreenValueDraft: 'Hello @arc',
+        mentionAutocompleteState: {
+          input: fullscreenEditor,
+          start: 6,
+          end: 10,
+          items: [{ token: "@'Architecture'!A1", label: "@'Architecture'!A1" }],
+          activeIndex: 0,
+        },
+        published: 0,
+        setFullscreenDraft(next) {
+          this.fullscreenValueDraft = next;
+          fullscreenEditor.value = next;
+        },
+        setEditorSelectionRange(start, end, input) {
+          input.setSelectionRange(start, end);
+        },
+        publishUiState() {
+          this.published += 1;
+        },
+      };
+
+      applyMentionAutocompleteSelection(app, 0);
+
+      assert.strictEqual(app.fullscreenValueDraft, "Hello @'Architecture'!A1");
+      assert.strictEqual(fullscreenEditor.value, "Hello @'Architecture'!A1");
+      assert.strictEqual(fullscreenEditor.selectionStart, 24);
+      assert.strictEqual(fullscreenEditor.selectionEnd, 24);
+      assert.strictEqual(fullscreenEditor.focused, true);
+      assert.strictEqual(app.mentionAutocompleteState, null);
+    });
   }
 
   if (isServer) {
@@ -802,9 +921,12 @@ describe('metacells', function () {
 
       assert.ok(Array.isArray(providers));
       assert.ok(Array.isArray(manifest));
-      assert.ok(providers.some((item) => item.id === 'deepseek'));
+      assert.ok(providers.some((item) => item.id === 'openai'));
+      assert.ok(providers.some((item) => item.id === 'aws-bedrock'));
+      assert.ok(providers.some((item) => item.id === 'corporate-ai-model'));
       assert.ok(providers.some((item) => item.id === 'lm-studio'));
-      assert.ok(manifest.some((item) => item.file === 'DEEPSEEK.js'));
+      assert.ok(manifest.some((item) => item.file === 'AWS_BEDROCK.js'));
+      assert.ok(manifest.some((item) => item.file === 'CORPORATE_AI_MODEL.js'));
       assert.ok(manifest.some((item) => item.file === 'LM_STUDIO.js'));
       assert.ok(
         manifest.every((item) =>
@@ -1354,7 +1476,8 @@ describe('metacells', function () {
           settings.aiProviders.length,
           DEFAULT_AI_PROVIDERS.length,
         );
-        assert.ok(settings.aiProviders.some((item) => item.id === 'deepseek'));
+        assert.ok(settings.aiProviders.some((item) => item.id === 'openai'));
+        assert.ok(settings.aiProviders.some((item) => item.id === 'aws-bedrock'));
         assert.ok(settings.aiProviders.some((item) => item.id === 'lm-studio'));
       } finally {
         await AppSettings.removeAsync({ _id: DEFAULT_SETTINGS_ID });

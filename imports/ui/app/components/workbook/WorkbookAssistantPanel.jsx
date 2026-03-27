@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ServiceBadge } from '../icons/ServiceBadge.jsx';
 
 export function WorkbookAssistantPanel({ workbookUiState, appRef }) {
   const assistantUi =
@@ -27,6 +28,10 @@ export function WorkbookAssistantPanel({ workbookUiState, appRef }) {
   const activeProviderId = assistantUi
     ? String(assistantUi.activeProviderId || '')
     : '';
+  const activeProvider =
+    providers.find((provider) => provider.id === activeProviderId) ||
+    providers[0] ||
+    null;
   const isBusy = assistantUi ? assistantUi.busy === true : false;
   const draftValue = assistantUi ? String(assistantUi.draft || '') : '';
   const fileInputRef = useRef(null);
@@ -176,6 +181,15 @@ export function WorkbookAssistantPanel({ workbookUiState, appRef }) {
             className="assistant-chat-provider assistant-chat-provider-compact"
             aria-label="Assistant provider"
           >
+            {activeProvider ? (
+              <ServiceBadge
+                kind="provider"
+                id={activeProvider.id}
+                name={activeProvider.name}
+                size="sm"
+                className="assistant-chat-provider-badge"
+              />
+            ) : null}
             <select
               name="assistant-provider"
               value={activeProviderId}

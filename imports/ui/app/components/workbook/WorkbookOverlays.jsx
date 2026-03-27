@@ -15,6 +15,8 @@ export function WorkbookEditorOverlay({ workbookUiState, appRef }) {
   );
   const inputRef = useRef(null);
   const dragRef = useRef(null);
+  const dragCellIdRef = useRef('');
+  const overlayVisibilityRef = useRef(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const frameStyle =
     overlayUi && overlayUi.visible ? undefined : { display: 'none' };
@@ -56,13 +58,26 @@ export function WorkbookEditorOverlay({ workbookUiState, appRef }) {
   }, [overlayUi && overlayUi.visible, overlayUi && overlayUi.cellId]);
 
   useEffect(() => {
-    if (!(overlayUi && overlayUi.visible)) {
+    const isVisible = !!(overlayUi && overlayUi.visible);
+    const cellId = overlayUi ? String(overlayUi.cellId || '') : '';
+    const wasVisible = overlayVisibilityRef.current;
+    const previousCellId = dragCellIdRef.current;
+
+    if (!isVisible) {
       setDragOffset({ x: 0, y: 0 });
       dragRef.current = null;
+      dragCellIdRef.current = '';
+      overlayVisibilityRef.current = false;
       return;
     }
-    setDragOffset({ x: 0, y: 0 });
-    dragRef.current = null;
+
+    if (!wasVisible || previousCellId !== cellId) {
+      setDragOffset({ x: 0, y: 0 });
+      dragRef.current = null;
+    }
+
+    dragCellIdRef.current = cellId;
+    overlayVisibilityRef.current = true;
   }, [overlayUi && overlayUi.visible, overlayUi && overlayUi.cellId]);
 
   useEffect(() => {
@@ -119,6 +134,9 @@ export function WorkbookEditorOverlay({ workbookUiState, appRef }) {
             <button
               type="button"
               className="app-dialog-button app-dialog-button-primary cell-editor-overlay-save"
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
               onClick={() => {
                 if (appRef?.current?.commitEditorOverlay) {
                   appRef.current.commitEditorOverlay();
@@ -132,6 +150,9 @@ export function WorkbookEditorOverlay({ workbookUiState, appRef }) {
               className="cell-editor-overlay-close"
               title="Close editor"
               aria-label="Close editor"
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
               onClick={() => {
                 if (appRef?.current?.dismissEditorOverlay) {
                   appRef.current.dismissEditorOverlay();

@@ -222,6 +222,7 @@ export function installEditorMethods(SpreadsheetApp) {
         origin: 'formula-bar',
         restoreFocus: true,
       });
+      this.dismissEditorOverlay();
       return;
     }
     this.handleCellEditingBlur(activeInput, {
@@ -229,6 +230,7 @@ export function installEditorMethods(SpreadsheetApp) {
       rawValue: raw,
       origin: 'cell',
     });
+    this.dismissEditorOverlay();
     this.restoreFocusAfterEditingExit({ defer: false });
   };
 
