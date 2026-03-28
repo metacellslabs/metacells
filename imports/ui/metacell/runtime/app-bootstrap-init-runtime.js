@@ -95,6 +95,7 @@ export function initializeSpreadsheetAppState(app, opts) {
   app.suppressFormulaBarBlurCommitOnce = false;
   app.computedValuesBySheet = {};
   app.computeRequestToken = 0;
+  app.refreshVisibleSheetRequest = null;
   app.manualUpdateRequestToken = 0;
   app.isManualAIUpdating = false;
   app.currentServerEditLockKey = '';

@@ -613,8 +613,20 @@ export function refreshVisibleSheetFromServer(app) {
   var forceRefreshAI =
     options.forceRefreshAI === undefined ? true : !!options.forceRefreshAI;
   var hintedChangedCellIds = normalizeChangedCellIds(options.targetCellIds);
+  var requestSignature = JSON.stringify({
+    sheetId: String(activeSheetId || ''),
+    forceRefreshAI: !!forceRefreshAI,
+    targetCellIds: hintedChangedCellIds,
+  });
+  if (
+    app.refreshVisibleSheetRequest &&
+    app.refreshVisibleSheetRequest.promise &&
+    app.refreshVisibleSheetRequest.signature === requestSignature
+  ) {
+    return app.refreshVisibleSheetRequest.promise;
+  }
 
-  return rpc('sheets.computeGrid', app.sheetDocumentId, activeSheetId, {
+  var requestPromise = rpc('sheets.computeGrid', app.sheetDocumentId, activeSheetId, {
     forceRefreshAI: forceRefreshAI,
     manualTriggerAI: false,
     expectedRevision: shouldSendExpectedRevisionForCompute(app, options)
@@ -731,7 +743,20 @@ export function refreshVisibleSheetFromServer(app) {
         });
       }
       return null;
+    })
+    .finally(function () {
+      if (
+        app.refreshVisibleSheetRequest &&
+        app.refreshVisibleSheetRequest.signature === requestSignature
+      ) {
+        app.refreshVisibleSheetRequest = null;
+      }
     });
+  app.refreshVisibleSheetRequest = {
+    signature: requestSignature,
+    promise: requestPromise,
+  };
+  return requestPromise;
 }
 
 export { applyRightOverflowText, measureOutputRequiredWidth };
@@ -794,18 +819,27 @@ export function hasUncomputedCells(app) {
 
 function scheduleUncomputedCheck(app) {
   if (!app || typeof window === 'undefined') return;
-  if (app.uncomputedMonitorId) {
-    window.cancelAnimationFrame(app.uncomputedMonitorId);
+  if (app.uncomputedMonitorId && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(app.uncomputedMonitorId);
     app.uncomputedMonitorId = null;
   }
-  app.uncomputedMonitorId = window.requestAnimationFrame(function () {
+  var delayMs = Math.max(250, Number(app.uncomputedMonitorMs) || 2000);
+  app.uncomputedMonitorId = window.setTimeout(function () {
     app.uncomputedMonitorId = null;
     if (!app.backgroundComputeEnabled) return;
     if (app.hasPendingLocalEdit()) return;
-    if (!app.serverPushEventsEnabled && app.aiService.hasInFlightWork()) return;
-    if (!hasUncomputedCells(app)) return;
-    app.computeAll();
-  });
+    if (!app.serverPushEventsEnabled && app.aiService.hasInFlightWork()) {
+      scheduleUncomputedCheck(app);
+      return;
+    }
+    if (!hasUncomputedCells(app)) {
+      scheduleUncomputedCheck(app);
+      return;
+    }
+    Promise.resolve(app.computeAll()).finally(function () {
+      scheduleUncomputedCheck(app);
+    });
+  }, delayMs);
 }
 
 export function startUncomputedMonitor(app) {

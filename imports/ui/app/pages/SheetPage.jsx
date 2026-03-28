@@ -123,13 +123,10 @@ function loadWorkbookRuntimeDeps() {
       import('../../../api/sheets/workbook-codec.js'),
       import('../../metacell/sheetDocStorage.js'),
       import('../../metacell/runtime/index.js'),
-      import('../../metacell/runtime/sheet-events-runtime.js'),
-    ]).then(([codecModule, storageModule, runtimeModule, sheetEventsModule]) => ({
+    ]).then(([codecModule, storageModule, runtimeModule]) => ({
       decodeWorkbookDocument: codecModule.decodeWorkbookDocument,
       createSheetDocStorage: storageModule.createSheetDocStorage,
       mountSpreadsheetApp: runtimeModule.mountSpreadsheetApp,
-      attachSheetEventSubscription:
-        sheetEventsModule.attachSheetEventSubscription || null,
     }));
   }
   return workbookRuntimeDepsPromise;
@@ -394,7 +391,6 @@ export function SheetPage({
     if (isLoading || !sheet || appRef.current) return;
     let cancelled = false;
     let mountRetryTimer = null;
-    let detachSheetEvents = null;
 
     loadWorkbookRuntimeDeps()
       .then(
@@ -402,7 +398,6 @@ export function SheetPage({
           decodeWorkbookDocument,
           createSheetDocStorage,
           mountSpreadsheetApp,
-          attachSheetEventSubscription,
         }) => {
           if (cancelled || appRef.current) return;
           const tryMountRuntime = () => {
@@ -480,9 +475,6 @@ export function SheetPage({
                 }
               },
             });
-            if (typeof attachSheetEventSubscription === 'function') {
-              detachSheetEvents = attachSheetEventSubscription(appRef.current);
-            }
             if (typeof onAppReady === 'function') {
               onAppReady(appRef.current);
             }
@@ -503,10 +495,6 @@ export function SheetPage({
       if (mountRetryTimer) {
         clearTimeout(mountRetryTimer);
         mountRetryTimer = null;
-      }
-      if (typeof detachSheetEvents === 'function') {
-        detachSheetEvents();
-        detachSheetEvents = null;
       }
       if (appRef.current && typeof appRef.current.destroy === 'function') {
         appRef.current.destroy();

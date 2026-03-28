@@ -83,6 +83,14 @@ export function resolveReportMention(app, token) {
     return { type: 'table', rows: resolved.rows, value: resolved.value };
   if (resolved.type === 'list')
     return { type: 'list', items: resolved.items, value: resolved.value };
+  if (resolved.type === 'attachment') {
+    return {
+      type: 'attachment',
+      sheetId: resolved.sheetId,
+      cellId: resolved.cellId,
+      value: resolved.value,
+    };
+  }
   return { value: resolved.value };
 }
 
@@ -147,6 +155,13 @@ export function resolveNamedMention(app, name, rawMode) {
       value: String(value == null ? '' : value),
     };
   }
+  var attachmentResolved = resolveAttachmentMention(
+    app,
+    ref.sheetId,
+    targetCellId,
+    value,
+  );
+  if (attachmentResolved) return attachmentResolved;
   if (isListShortcutCell(app, ref.sheetId, targetCellId)) {
     return {
       type: 'list',
@@ -189,6 +204,8 @@ export function resolveSheetCellMention(app, token, rawMode) {
       value: String(value == null ? '' : value),
     };
   }
+  var attachmentResolved = resolveAttachmentMention(app, sheetId, cellId, value);
+  if (attachmentResolved) return attachmentResolved;
   if (isListShortcutCell(app, sheetId, cellId)) {
     return {
       type: 'list',

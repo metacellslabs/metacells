@@ -131,6 +131,57 @@ describe('metacells', function () {
       assert.strictEqual(fullscreenEditor.focused, true);
       assert.strictEqual(app.mentionAutocompleteState, null);
     });
+
+    it('resolves attachment-backed report mentions as attachments instead of raw text', async function () {
+      const { resolveReportMention } = await import(
+        '../imports/ui/metacell/runtime/report-mention-runtime.js'
+      );
+
+      const attachmentRaw =
+        '__ATTACHMENT__:{"name":"policy.pdf","type":"application/pdf","content":"policy body"}';
+      const app = {
+        storage: {
+          resolveNamedCell(name) {
+            if (name === 'policy_file') {
+              return { sheetId: 'sheet-1', cellId: 'B3' };
+            }
+            return null;
+          },
+          getCellValue(sheetId, cellId) {
+            if (sheetId === 'sheet-1' && cellId === 'B3') return attachmentRaw;
+            return '';
+          },
+        },
+        parseAttachmentSource(value) {
+          return String(value || '').startsWith('__ATTACHMENT__:')
+            ? { name: 'policy.pdf', type: 'application/pdf', content: 'policy body' }
+            : null;
+        },
+        readCellMentionValue() {
+          return attachmentRaw;
+        },
+        readCellComputedValue() {
+          return attachmentRaw;
+        },
+        formulaEngine: {
+          parseListShortcutPrompt() {
+            return null;
+          },
+          parseTablePromptSpec() {
+            return null;
+          },
+        },
+      };
+
+      const resolved = resolveReportMention(app, '@policy_file');
+
+      assert.deepStrictEqual(resolved, {
+        type: 'attachment',
+        sheetId: 'sheet-1',
+        cellId: 'B3',
+        value: attachmentRaw,
+      });
+    });
   }
 
   if (isServer) {

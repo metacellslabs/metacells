@@ -1,6 +1,7 @@
 import {
   WorkbookAttachmentOverlays,
   WorkbookCellContentLayer,
+  WorkbookDebugConsole,
   WorkbookEditorOverlay,
   WorkbookFullscreenOverlay,
   WorkbookLiveIndicators,
@@ -58,6 +59,7 @@ export function SheetWorkbookViewport({
         onPublishReport={onPublishReport}
         onExportPdf={onExportPdf}
       />
+      <WorkbookDebugConsole workbookUiState={workbookUiState} />
       <WorkbookLiveIndicators />
       {children}
     </>

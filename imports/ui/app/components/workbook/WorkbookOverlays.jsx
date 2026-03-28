@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { subscribeServerEvents } from '../../../../../lib/transport/ws-client.js';
+import {
+  subscribeServerEvents,
+  subscribeWorkbookEvents,
+  subscribeWorkbookSocketStatus,
+} from '../../../../../lib/transport/ws-client.js';
 
 export function WorkbookEditorOverlay({ workbookUiState, appRef }) {
   const overlayUi =
@@ -256,6 +260,283 @@ function buildLiveIndicatorFromEvent(event) {
   return null;
 }
 
+function formatDebugTime(timestamp) {
+  return new Date(Number(timestamp) || Date.now()).toLocaleTimeString();
+}
+
+function buildDebugEntry(kind, label, detail, signature) {
+  return {
+    id: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    kind: String(kind || 'runtime'),
+    label: String(label || ''),
+    detail: String(detail || ''),
+    signature: String(signature || ''),
+    timestamp: Date.now(),
+  };
+}
+
+function summarizeDebugFields(fields) {
+  return fields
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+function summarizeJobEventDetail(event, payload) {
+  const jobType = String(event.jobType || payload.jobType || '').trim();
+  const jobStatus = String(event.jobStatus || payload.status || '')
+    .trim()
+    .toLowerCase();
+  const ownerType = String(payload.ownerType || '').trim();
+  const ownerId = String(payload.ownerId || '').trim();
+  const cellId = String(payload.cellId || '').trim().toUpperCase();
+  const sheetId = String(payload.sheetId || '').trim();
+  const fileName = String(
+    payload.fileName || payload.name || payload.attachmentName || '',
+  ).trim();
+  const text =
+    String(payload.message || payload.reason || payload.error || '').trim() ||
+    (String(event.type || '') === 'jobs.completed'
+      ? 'Completed'
+      : String(event.type || '') === 'jobs.running'
+        ? 'Started running'
+        : String(event.type || '') === 'jobs.queued'
+          ? 'Queued'
+          : String(event.type || '') === 'jobs.retrying'
+            ? `Retrying${payload.delayMs ? ` in ${payload.delayMs}ms` : ''}`
+            : String(event.type || '') === 'jobs.deferred'
+              ? `Deferred${payload.delayMs ? ` for ${payload.delayMs}ms` : ''}`
+              : String(event.type || '') === 'jobs.claimed'
+                ? 'Claimed by worker'
+                : String(event.type || '') === 'jobs.cancelled'
+                  ? 'Cancelled'
+                  : jobStatus || '');
+
+  const location = summarizeDebugFields([
+    sheetId ? `sheet=${sheetId}` : '',
+    cellId ? `cell=${cellId}` : '',
+    ownerType ? `owner=${ownerType}` : '',
+    ownerId && !cellId ? `id=${ownerId}` : '',
+  ]);
+
+  return summarizeDebugFields([
+    fileName ? `file=${fileName}` : '',
+    text,
+    location,
+  ]);
+}
+
+function summarizeServerEventMessage(message) {
+  const event =
+    message &&
+    message.type === 'server.event' &&
+    message.event &&
+    typeof message.event === 'object'
+      ? message.event
+      : null;
+  if (!event) return null;
+  const type = String(event.type || '');
+  const payload =
+    event.payload && typeof event.payload === 'object' ? event.payload : {};
+  if (type.indexOf('jobs.') === 0) {
+    const label = String(event.jobType || type || '').trim();
+    const detail = summarizeJobEventDetail(event, payload);
+    if (!label && !detail) return null;
+    return buildDebugEntry(
+      'job',
+      label,
+      detail,
+      ['job', String(event.jobId || ''), type, label, detail].join('|'),
+    );
+  }
+  if (type === 'jobs.manager.updated') {
+    return null;
+  }
+  if (type.indexOf('channels.') === 0) {
+    return buildDebugEntry(
+      'server',
+      type,
+      summarizeDebugFields([
+        event.channelLabel || payload.channelLabel || '',
+        payload.eventType ? `event=${payload.eventType}` : '',
+        Number.isFinite(Number(payload.attachmentCount))
+          ? `attachments=${Number(payload.attachmentCount)}`
+          : '',
+        payload.status ? `status=${payload.status}` : '',
+      ]),
+    );
+  }
+  if (type.indexOf('sheets.') === 0) {
+    return buildDebugEntry(
+      'server',
+      type,
+      summarizeDebugFields([
+        payload.sheetId ? `sheet=${payload.sheetId}` : '',
+        payload.name ? `"${payload.name}"` : '',
+      ]),
+    );
+  }
+  return buildDebugEntry(
+    'server',
+    type,
+    summarizeDebugFields([
+      payload.message || payload.status || '',
+      payload.fileName ? `file=${payload.fileName}` : '',
+      payload.attachmentName ? `attachment=${payload.attachmentName}` : '',
+      payload.binaryArtifactId ? `binary=${payload.binaryArtifactId}` : '',
+      payload.contentArtifactId ? `content=${payload.contentArtifactId}` : '',
+    ]),
+    ['server', type, payload.message || payload.status || ''].join('|'),
+  );
+}
+
+function summarizeWorkbookEventMessage(message) {
+  if (!message || String(message.type || '') !== 'workbook.event') return null;
+  const event =
+    message.event && typeof message.event === 'object' ? message.event : {};
+  const eventType = String(event.type || 'workbook.event');
+  if (eventType === 'workbook.runtime.updated') return null;
+  const changedCount = Array.isArray(event.changedCellIds)
+    ? event.changedCellIds.length
+    : 0;
+  const pendingCount = Array.isArray(event.pendingCellIds)
+    ? event.pendingCellIds.length
+    : 0;
+  return buildDebugEntry(
+    'ws',
+    eventType,
+    summarizeDebugFields([
+      message.sheetDocumentId ? `doc=${message.sheetDocumentId}` : '',
+      event.sheetId ? `sheet=${event.sheetId}` : '',
+      event.activeSheetId ? `sheet=${event.activeSheetId}` : '',
+      event.cellId || event.sourceCellId
+        ? `cell=${String(event.cellId || event.sourceCellId || '').toUpperCase()}`
+        : '',
+      changedCount ? `changed=${changedCount}` : '',
+      pendingCount ? `pending=${pendingCount}` : '',
+      event.status ? `status=${event.status}` : '',
+      event.formulaKind ? `formula=${event.formulaKind}` : '',
+      message.sequence ? `seq=${message.sequence}` : '',
+    ]),
+    ['ws', eventType, String(message.sheetDocumentId || ''), String(message.sequence || '')].join('|'),
+  );
+}
+
+function buildRuntimeSnapshotSummary(state) {
+  const snapshot = state && typeof state === 'object' ? state : {};
+  return {
+    activeCellId: String(snapshot.activeCellId || ''),
+    reportMode: String(snapshot.reportMode || ''),
+    isReportActive: snapshot.isReportActive === true,
+    surfaceStatus: snapshot.surfaceStatusUi
+      ? String(snapshot.surfaceStatusUi.status || '')
+      : '',
+    surfaceDetail: snapshot.surfaceStatusUi
+      ? String(snapshot.surfaceStatusUi.detail || '')
+      : '',
+    serverPushState: snapshot.serverPushUi
+      ? String(snapshot.serverPushUi.state || '')
+      : '',
+    editorOverlayVisible: !!(snapshot.editorOverlayUi && snapshot.editorOverlayUi.visible),
+    contextMenuOpen: !!(snapshot.contextMenuUi && snapshot.contextMenuUi.open),
+    scheduleDialogOpen: !!(snapshot.scheduleDialogUi && snapshot.scheduleDialogUi.open),
+    fullscreenActive: !!(snapshot.fullscreenUi && snapshot.fullscreenUi.active),
+    assistantBusy: !!(snapshot.assistantUi && snapshot.assistantUi.busy),
+    assistantOpen: !!(snapshot.assistantUi && snapshot.assistantUi.open),
+  };
+}
+
+function buildRuntimeDebugEntries(prevState, nextState) {
+  if (!prevState || !nextState) return [];
+  const prev = buildRuntimeSnapshotSummary(prevState);
+  const next = buildRuntimeSnapshotSummary(nextState);
+  const entries = [];
+
+  if (prev.activeCellId !== next.activeCellId) {
+    entries.push(buildDebugEntry('runtime', 'activeCell', next.activeCellId || '(none)'));
+  }
+  if (prev.serverPushState !== next.serverPushState) {
+    entries.push(buildDebugEntry('runtime', 'serverPush', next.serverPushState || 'disconnected'));
+  }
+  if (
+    prev.surfaceStatus !== next.surfaceStatus ||
+    prev.surfaceDetail !== next.surfaceDetail
+  ) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'surfaceStatus',
+        [next.surfaceStatus, next.surfaceDetail].filter(Boolean).join(' '),
+      ),
+    );
+  }
+  if (prev.reportMode !== next.reportMode || prev.isReportActive !== next.isReportActive) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'reportMode',
+        next.isReportActive ? next.reportMode || 'edit' : 'sheet',
+      ),
+    );
+  }
+  if (prev.editorOverlayVisible !== next.editorOverlayVisible) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'editorOverlay',
+        next.editorOverlayVisible ? 'opened' : 'closed',
+      ),
+    );
+  }
+  if (prev.contextMenuOpen !== next.contextMenuOpen) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'contextMenu',
+        next.contextMenuOpen ? 'opened' : 'closed',
+      ),
+    );
+  }
+  if (prev.scheduleDialogOpen !== next.scheduleDialogOpen) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'scheduleDialog',
+        next.scheduleDialogOpen ? 'opened' : 'closed',
+      ),
+    );
+  }
+  if (prev.fullscreenActive !== next.fullscreenActive) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'fullscreen',
+        next.fullscreenActive ? 'opened' : 'closed',
+      ),
+    );
+  }
+  if (prev.assistantOpen !== next.assistantOpen) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'assistant',
+        next.assistantOpen ? 'opened' : 'closed',
+      ),
+    );
+  }
+  if (prev.assistantBusy !== next.assistantBusy) {
+    entries.push(
+      buildDebugEntry(
+        'runtime',
+        'assistantBusy',
+        next.assistantBusy ? 'busy' : 'idle',
+      ),
+    );
+  }
+
+  return entries;
+}
+
 export function WorkbookLiveIndicators() {
   const [items, setItems] = useState([]);
 
@@ -298,6 +579,179 @@ export function WorkbookLiveIndicators() {
         </div>
       ))}
     </div>
+  );
+}
+
+export function WorkbookDebugConsole({ workbookUiState }) {
+  const [open, setOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [entries, setEntries] = useState([]);
+  const [floatingOffset, setFloatingOffset] = useState({ x: 0, y: 0 });
+  const previousUiStateRef = useRef(null);
+  const previousSocketStateRef = useRef('');
+  const dragRef = useRef(null);
+
+  const floatingStyle =
+    floatingOffset.x || floatingOffset.y
+      ? {
+          transform: `translate(${floatingOffset.x}px, ${floatingOffset.y}px)`,
+        }
+      : undefined;
+
+  const appendEntry = (entry) => {
+    if (!entry || paused) return;
+    setEntries((current) => {
+      const head = Array.isArray(current) && current.length ? current[0] : null;
+      if (
+        head &&
+        String(head.signature || '') &&
+        String(head.signature || '') === String(entry.signature || '') &&
+        Math.abs(Number(entry.timestamp || 0) - Number(head.timestamp || 0)) < 2000
+      ) {
+        return current;
+      }
+      return [entry, ...current].slice(0, 200);
+    });
+  };
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      setFloatingOffset({
+        x: drag.startX + (event.clientX - drag.pointerStartX),
+        y: drag.startY + (event.clientY - drag.pointerStartY),
+      });
+    };
+    const handlePointerUp = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribeStatus = subscribeWorkbookSocketStatus((status) => {
+      const nextState = status && status.state ? String(status.state) : 'disconnected';
+      if (previousSocketStateRef.current === nextState) return;
+      previousSocketStateRef.current = nextState;
+      appendEntry(
+        buildDebugEntry(
+          'ws',
+          'socket',
+          [
+            nextState,
+            status && status.lastServerMessageAt
+              ? `last=${formatDebugTime(status.lastServerMessageAt)}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' '),
+          `socket|${nextState}`,
+        ),
+      );
+    });
+    const unsubscribeWorkbook = subscribeWorkbookEvents((message) => {
+      appendEntry(summarizeWorkbookEventMessage(message));
+    });
+    const unsubscribeServer = subscribeServerEvents((message) => {
+      appendEntry(summarizeServerEventMessage(message));
+    });
+    return () => {
+      unsubscribeStatus();
+      unsubscribeWorkbook();
+      unsubscribeServer();
+    };
+  }, [paused]);
+
+  useEffect(() => {
+    if (!workbookUiState) return;
+    const previous = previousUiStateRef.current;
+    const nextEntries = buildRuntimeDebugEntries(previous, workbookUiState);
+    nextEntries.forEach((entry) => appendEntry(entry));
+    previousUiStateRef.current = workbookUiState;
+  }, [workbookUiState, paused]);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="workbook-debug-console-toggle"
+        style={floatingStyle}
+        onClick={() => setOpen((current) => !current)}
+      >
+        Debug Console
+      </button>
+      {open ? (
+        <div
+          className="workbook-debug-console"
+          style={floatingStyle}
+          role="dialog"
+          aria-label="Debug console"
+        >
+          <div
+            className="workbook-debug-console-head"
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              if (
+                event.target &&
+                event.target.closest &&
+                event.target.closest('button')
+              ) {
+                return;
+              }
+              dragRef.current = {
+                pointerStartX: event.clientX,
+                pointerStartY: event.clientY,
+                startX: floatingOffset.x,
+                startY: floatingOffset.y,
+              };
+              event.preventDefault();
+            }}
+          >
+            <strong>Debug Console</strong>
+            <div className="workbook-debug-console-actions">
+              <button type="button" onClick={() => setPaused((current) => !current)}>
+                {paused ? 'Resume' : 'Pause'}
+              </button>
+              <button type="button" onClick={() => setEntries([])}>
+                Clear
+              </button>
+              <button type="button" onClick={() => setOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="workbook-debug-console-list">
+            {entries.length ? (
+              entries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={`workbook-debug-console-entry workbook-debug-console-entry-${entry.kind}`}
+                >
+                  <div className="workbook-debug-console-entry-meta">
+                    <span>{formatDebugTime(entry.timestamp)}</span>
+                    <span>{entry.kind}</span>
+                    <span>{entry.label}</span>
+                  </div>
+                  <div className="workbook-debug-console-entry-detail">
+                    {entry.detail || '(no detail)'}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="workbook-debug-console-empty">No events yet.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

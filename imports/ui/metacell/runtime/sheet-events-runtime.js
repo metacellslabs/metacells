@@ -104,6 +104,19 @@ function applyWorkbookEventCellPatch(app, event, visibleSheetId, changedCellIds)
   return true;
 }
 
+function hasMatchingRefreshRequest(app, visibleSheetId, changedCellIds, forceRefreshAI) {
+  if (!app || !app.refreshVisibleSheetRequest) return false;
+  const request = app.refreshVisibleSheetRequest;
+  const signature = JSON.stringify({
+    sheetId: String(visibleSheetId || ''),
+    forceRefreshAI: forceRefreshAI === true,
+    targetCellIds: Array.isArray(changedCellIds)
+      ? changedCellIds.map((cellId) => String(cellId || '').toUpperCase()).filter(Boolean)
+      : [],
+  });
+  return request.signature === signature;
+}
+
 export function attachSheetEventSubscription(app) {
   if (!app || !app.sheetDocumentId) return function () {};
   app.serverPushEventsEnabled = false;
@@ -131,6 +144,20 @@ export function attachSheetEventSubscription(app) {
       return;
     }
     if (app.hasPendingLocalEdit && app.hasPendingLocalEdit()) return;
+    const currentVisibleSheetId =
+      typeof app.getVisibleSheetId === 'function'
+        ? String(app.getVisibleSheetId() || '')
+        : String(app.activeSheetId || '');
+    if (
+      hasMatchingRefreshRequest(
+        app,
+        currentVisibleSheetId,
+        changedCellIds,
+        forceRefreshAI,
+      )
+    ) {
+      return;
+    }
     if (refreshTimer || typeof window === 'undefined') return;
     refreshTimer = window.setTimeout(() => {
       refreshTimer = null;
@@ -257,21 +284,10 @@ export function attachSheetEventSubscription(app) {
       app.storage.storage.setDocumentRevision(eventDocumentRevision);
     }
     if (
-      eventType === 'workbook.runtime.updated' &&
-      !appliedPatch &&
-      typeof app.refreshVisibleSheetFromServer === 'function'
-    ) {
-      app.refreshVisibleSheetFromServer({
-        bypassPendingEdit: true,
-        forceRefreshAI: false,
-        targetCellIds: changedCellIds,
-        skipExpectedRevision: true,
-      });
-      return;
-    }
-    if (
       eventType === 'workbook.runtime.updated' ||
-      eventType === 'workbook.document.updated'
+      eventType === 'workbook.document.updated' ||
+      eventType === 'workbook.ai.completed' ||
+      eventType === 'workbook.ai.failed'
     ) {
       if (
         eventType !== 'workbook.document.updated' &&
@@ -289,7 +305,11 @@ export function attachSheetEventSubscription(app) {
       }
       scheduleRefresh(eventRevision, changedCellIds, {
         forceRefreshAI: false,
-        forceFetchIfRevisionSeen: !appliedPatch,
+        forceFetchIfRevisionSeen:
+          eventType === 'workbook.ai.completed' ||
+          eventType === 'workbook.ai.failed'
+            ? true
+            : !appliedPatch,
       });
     }
   });

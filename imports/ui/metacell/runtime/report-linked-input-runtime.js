@@ -10,6 +10,12 @@ import {
   clearAttachmentToPlaceholder,
   startAttachmentSelectionFromSource,
 } from './attachment-selection-facade.js';
+import { resolveCellAttachment } from './attachment-cell-facade.js';
+import {
+  canPreviewAttachmentFile,
+  openAttachmentContentPreview,
+  openAttachmentFilePreview,
+} from './attachment-preview-runtime.js';
 
 export function injectLinkedInputsFromPlaceholders(app, root) {
   if (!root) return;
@@ -78,11 +84,11 @@ export function createLinkedReportFileElement(app, inputResolved) {
   shell.dataset.sheetId = inputResolved.sheetId;
   shell.dataset.cellId = inputResolved.cellId;
 
-  var raw = app.storage.getCellValue(
+  var attachment = resolveCellAttachment(
+    app,
     inputResolved.sheetId,
     inputResolved.cellId,
   );
-  var attachment = app.parseAttachmentSource(raw);
   var isImage =
     !!attachment &&
     !!attachment.previewUrl &&
@@ -104,6 +110,13 @@ export function createLinkedReportFileElement(app, inputResolved) {
     preview.alt = String(attachment.name || 'Attached image');
     imageFrame.appendChild(preview);
     shell.appendChild(imageFrame);
+    var openImage = document.createElement('button');
+    openImage.type = 'button';
+    openImage.className = 'report-file-button report-file-open';
+    openImage.textContent = String(
+      attachment.name || inputResolved.placeholder || 'Open file',
+    );
+    shell.appendChild(openImage);
   } else {
     var choose = document.createElement('button');
     choose.type = 'button';
@@ -141,6 +154,18 @@ export function handleReportFileShellAction(app, shell, removeOnly) {
       renderMode: 'report',
     });
     return;
+  }
+
+  var attachment = resolveCellAttachment(app, sheetId, cellId);
+  if (attachment) {
+    if (canPreviewAttachmentFile(attachment)) {
+      openAttachmentFilePreview(app, sheetId, cellId, shell);
+      return;
+    }
+    if (String(attachment.content || '').trim()) {
+      openAttachmentContentPreview(app, sheetId, cellId);
+      return;
+    }
   }
 
   startAttachmentSelectionFromSource(app, {
