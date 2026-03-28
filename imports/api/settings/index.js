@@ -26,7 +26,7 @@ export const DEFAULT_LM_STUDIO_PROVIDER =
 const DEFAULT_MARKETPLACE_URL = 'https://hub.metacells.dev';
 export const DEFAULT_HUB_PUBLISH_SETTINGS = {
   apiBaseUrl: DEFAULT_MARKETPLACE_URL,
-  email: '',
+  username: '',
   password: '',
   token: '',
 };
@@ -274,7 +274,7 @@ function normalizeHubPublishSettings(hubPublish) {
     apiBaseUrl: String(
       source.apiBaseUrl || DEFAULT_HUB_PUBLISH_SETTINGS.apiBaseUrl || '',
     ).trim(),
-    email: String(source.email || '').trim(),
+    username: String(source.username || source.email || '').trim(),
     password: String(source.password || ''),
     token: String(source.token || '').trim(),
   };
@@ -592,6 +592,7 @@ registerMethods({
   async 'settings.updateHubPublishSettings'(hubPublish) {
     check(hubPublish, {
       apiBaseUrl: String,
+      username: Match.Maybe(String),
       email: Match.Maybe(String),
       password: Match.Maybe(String),
       token: Match.Maybe(String),

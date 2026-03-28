@@ -667,18 +667,18 @@ export function SettingsGeneralSection({
         </div>
         <div className="settings-field-grid">
           <div className="settings-field">
-            <label className="settings-label" htmlFor="hub-publish-email">
-              Hub email
+            <label className="settings-label" htmlFor="hub-publish-username">
+              Hub username
             </label>
             <input
-              id="hub-publish-email"
+              id="hub-publish-username"
               className="settings-input"
               type="text"
-              value={String((hubPublishDraft && hubPublishDraft.email) || '')}
+              value={String((hubPublishDraft && hubPublishDraft.username) || '')}
               onChange={(event) =>
-                onHubPublishDraftChange('email', event.target.value)
+                onHubPublishDraftChange('username', event.target.value)
               }
-              placeholder="creator@hub.local"
+              placeholder="yuriy"
             />
           </div>
           <div className="settings-field">
@@ -709,7 +709,7 @@ export function SettingsGeneralSection({
             onChange={(event) =>
               onHubPublishDraftChange('token', event.target.value)
             }
-            placeholder="Optional. If set, email/password are ignored."
+            placeholder="Optional. If set, username/password are ignored."
           />
         </div>
         <p className="settings-provider-note">

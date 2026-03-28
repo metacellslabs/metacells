@@ -90,7 +90,7 @@ export function SettingsPage() {
   );
   const [hubPublishDraft, setHubPublishDraft] = useState({
     apiBaseUrl: 'https://hub.metacells.dev',
-    email: '',
+    username: '',
     password: '',
     token: '',
   });
@@ -413,13 +413,14 @@ export function SettingsPage() {
     setHubPublishDraft({
       apiBaseUrl: String(
         (settings && settings.hubPublish && settings.hubPublish.apiBaseUrl) ||
-          (window.location.hostname === 'localhost' ||
-          window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:4001'
-            : 'https://hub.metacells.dev'),
+          'https://hub.metacells.dev',
       ),
-      email: String(
-        (settings && settings.hubPublish && settings.hubPublish.email) || '',
+      username: String(
+        (
+          settings &&
+          settings.hubPublish &&
+          (settings.hubPublish.username || settings.hubPublish.email)
+        ) || '',
       ),
       password: String(
         (settings && settings.hubPublish && settings.hubPublish.password) || '',
@@ -690,7 +691,7 @@ export function SettingsPage() {
     setSavingHubPublishSettings(true);
     rpc('settings.updateHubPublishSettings', {
       apiBaseUrl: String(hubPublishDraft.apiBaseUrl || '').trim(),
-      email: String(hubPublishDraft.email || '').trim(),
+      username: String(hubPublishDraft.username || '').trim(),
       password: String(hubPublishDraft.password || ''),
       token: String(hubPublishDraft.token || '').trim(),
     })
@@ -802,13 +803,14 @@ export function SettingsPage() {
   const savedHubPublish = {
     apiBaseUrl: String(
       (settings && settings.hubPublish && settings.hubPublish.apiBaseUrl) ||
-        (window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1'
-          ? 'http://localhost:4001'
-          : 'https://hub.metacells.dev'),
+        'https://hub.metacells.dev',
     ),
-    email: String(
-      (settings && settings.hubPublish && settings.hubPublish.email) || '',
+    username: String(
+      (
+        settings &&
+        settings.hubPublish &&
+        (settings.hubPublish.username || settings.hubPublish.email)
+      ) || '',
     ),
     password: String(
       (settings && settings.hubPublish && settings.hubPublish.password) || '',

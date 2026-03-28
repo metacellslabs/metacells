@@ -167,6 +167,49 @@ body {
   width: min(560px, 100%);
 }
 
+.workbook-publish-result-dialog {
+  width: min(500px, 100%);
+}
+
+.workbook-publish-result-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(46, 140, 108, 0.14);
+  color: #1f6a50;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workbook-publish-result-body {
+  display: grid;
+  gap: 12px;
+}
+
+.workbook-publish-result-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(56, 123, 103, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #2e8c6c 0%, #247557 100%);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.workbook-publish-result-link:hover {
+  background: linear-gradient(180deg, #349777 0%, #267e5d 100%);
+  color: #ffffff;
+}
+
 .workbook-publish-field {
   display: grid;
   gap: 6px;

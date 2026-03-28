@@ -261,6 +261,7 @@ export function SheetPage({
   const [isPublishingWorkbook, setIsPublishingWorkbook] = useState(false);
   const [isPreparingPublishDialog, setIsPreparingPublishDialog] = useState(false);
   const [publishDialogInitialImages, setPublishDialogInitialImages] = useState([]);
+  const [publishSuccessResult, setPublishSuccessResult] = useState(null);
 
   if (!cellContentStoreRef.current) {
     cellContentStoreRef.current = createCellContentStore();
@@ -1007,9 +1008,10 @@ export function SheetPage({
       setIsPublishingWorkbook(false);
       setIsPublishDialogOpen(false);
       const dashboardUrl = String((result && result.dashboardUrl) || '').trim();
-      window.alert(
-        `Workbook submitted to hub review.${dashboardUrl ? `\n\nDashboard: ${dashboardUrl}` : ''}`,
-      );
+      setPublishSuccessResult({
+        title: String(payload && payload.title ? payload.title : '').trim(),
+        dashboardUrl,
+      });
     } catch (error) {
       setIsPublishingWorkbook(false);
       window.alert(
@@ -1112,6 +1114,60 @@ export function SheetPage({
           onClose={() => setIsPublishDialogOpen(false)}
           onSubmit={handleSubmitPublishDialog}
         />
+        {publishSuccessResult ? (
+          <div
+            className="app-dialog-overlay"
+            role="presentation"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setPublishSuccessResult(null);
+              }
+            }}
+          >
+            <div
+              className="app-dialog-modal workbook-publish-result-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="workbook-publish-result-title"
+            >
+              <div className="app-dialog-header">
+                <div className="workbook-publish-result-badge">Submitted</div>
+                <h2
+                  id="workbook-publish-result-title"
+                  className="app-dialog-title"
+                >
+                  Workbook sent to hub review
+                </h2>
+                <p className="app-dialog-description">
+                  {publishSuccessResult.title
+                    ? `"${publishSuccessResult.title}" is now waiting for moderation in the hub.`
+                    : 'Your workbook is now waiting for moderation in the hub.'}
+                </p>
+              </div>
+              <div className="app-dialog-body workbook-publish-result-body">
+                {publishSuccessResult.dashboardUrl ? (
+                  <a
+                    className="workbook-publish-result-link"
+                    href={publishSuccessResult.dashboardUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open hub dashboard
+                  </a>
+                ) : null}
+              </div>
+              <div className="app-dialog-actions">
+                <button
+                  type="button"
+                  className="app-dialog-button"
+                  onClick={() => setPublishSuccessResult(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </Suspense>
   );

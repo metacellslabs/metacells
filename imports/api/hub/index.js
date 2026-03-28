@@ -20,8 +20,20 @@ function createShortDescription(description) {
 function buildAbsoluteHubUrl(apiBaseUrl, rawUrl) {
   const value = String(rawUrl || '').trim();
   if (!value) return '';
-  if (/^https?:\/\//i.test(value)) return value;
-  return `${apiBaseUrl}${value.startsWith('/') ? '' : '/'}${value}`;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.pathname.startsWith('/uploads/')) {
+        parsed.pathname = `/api${parsed.pathname}`;
+        return parsed.toString();
+      }
+    } catch (_error) {
+      return value;
+    }
+    return value;
+  }
+  const normalizedValue = value.startsWith('/uploads/') ? `/api${value}` : value;
+  return `${apiBaseUrl}${normalizedValue.startsWith('/') ? '' : '/'}${normalizedValue}`;
 }
 
 function isLikelyStaticAssetUrl(rawUrl) {
@@ -61,19 +73,23 @@ async function loginToHub(apiBaseUrl, settings) {
   const token = String(settings && settings.token ? settings.token : '').trim();
   if (token) return token;
 
-  const email = String(settings && settings.email ? settings.email : '').trim();
+  const username = String(
+    settings && (settings.username || settings.email)
+      ? settings.username || settings.email
+      : '',
+  ).trim();
   const password = String(settings && settings.password ? settings.password : '');
-  if (!email || !password) {
+  if (!username || !password) {
     throw new AppError(
       'hub-auth-missing',
-      'Hub email/password or bearer token must be configured in Settings',
+      'Hub username/password or bearer token must be configured in Settings',
     );
   }
 
   const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username, password }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !String(payload && payload.token).trim()) {
