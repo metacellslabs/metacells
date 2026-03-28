@@ -3,6 +3,26 @@ import { rpc } from '../../../../lib/rpc-client.js';
 import { subscribeServerEvents } from '../../../../lib/transport/ws-client.js';
 import { Link, useNavigate } from '../router.jsx';
 
+function MarketplaceButtonIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7.5 12 3l9 4.5-9 4.5z" />
+      <path d="M3 12l9 4.5 9-4.5" />
+      <path d="M3 16.5 12 21l9-4.5" />
+    </svg>
+  );
+}
+
 export function HomePage() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -179,26 +199,14 @@ export function HomePage() {
             >
               {isCreating ? 'Creating...' : 'Add metacell'}
             </button>
-            <span
-              className="home-secondary-button-wrap"
-              title="Public marketplace of crafted AI tools for professionals"
+            <Link
+              className="home-secondary-button"
+              to="/marketplace"
+              title="Browse workbooks from the hub marketplace"
             >
-              <button
-                type="button"
-                className="home-secondary-button"
-                disabled
-                aria-describedby="home-templates-soon-badge"
-              >
-                Discover industrial templates
-              </button>
-              <span
-                id="home-templates-soon-badge"
-                className="home-soon-badge"
-                aria-label="Coming soon"
-              >
-                Coming soon
-              </span>
-            </span>
+              <MarketplaceButtonIcon />
+              Marketplace
+            </Link>
             <Link className="home-secondary-link" to="/settings">
               Settings
             </Link>

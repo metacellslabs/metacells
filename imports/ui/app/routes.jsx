@@ -6,6 +6,11 @@ const HomePage = lazy(() =>
     default: module.HomePage,
   })),
 );
+const MarketplacePage = lazy(() =>
+  import('./pages/MarketplacePage.jsx').then((module) => ({
+    default: module.MarketplacePage,
+  })),
+);
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage.jsx').then((module) => ({
     default: module.SettingsPage,
@@ -72,6 +77,7 @@ export function buildAppRoutes(onOpenHelp) {
       />
       <Route path="/sheet/:sheetId" element={<SheetPage onOpenHelp={onOpenHelp} />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/marketplace" element={<MarketplacePage />} />
       <Route path="/stats" element={<StatsPage />} />
       <Route path="/states" element={<StatesPage />} />
       <Route path="/test" element={<TestPage />} />

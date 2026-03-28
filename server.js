@@ -17,6 +17,7 @@ import './imports/api/sheets/index.js';
 import './imports/api/ai/index.js';
 import './imports/api/jobs/index.js';
 import './imports/api/files/index.js';
+import './imports/api/hub/index.js';
 import './imports/api/artifacts/index.js';
 import './imports/api/assistant/index.js';
 import './imports/api/schedules/index.js';

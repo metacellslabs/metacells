@@ -572,6 +572,16 @@ export function SettingsGeneralSection({
   registeredProviders,
   configuredChannelsCount,
   configuredSecretsCount,
+  hubPublishDraft,
+  onHubPublishDraftChange,
+  onSaveHubPublishSettings,
+  savingHubPublishSettings,
+  hubPublishDirty,
+  workbookUiDraft,
+  onWorkbookUiDraftChange,
+  onSaveWorkbookUiSettings,
+  savingWorkbookUiSettings,
+  workbookUiDirty,
 }) {
   return (
     <>
@@ -597,6 +607,122 @@ export function SettingsGeneralSection({
         <div className="settings-kv-item">
           <span className="settings-label">Providers with API keys</span>
           <strong>{configuredSecretsCount}</strong>
+        </div>
+      </div>
+
+      <div className="settings-provider-card">
+        <div className="settings-provider-head">
+          <strong>Workbook UI</strong>
+          <span className="settings-status">local editing tools</span>
+        </div>
+        <div className="settings-checkbox-row">
+          <label
+            className="settings-checkbox-label"
+            htmlFor="workbook-ui-show-debug-console"
+          >
+            <input
+              id="workbook-ui-show-debug-console"
+              type="checkbox"
+              checked={!!(workbookUiDraft && workbookUiDraft.showDebugConsole)}
+              onChange={(event) =>
+                onWorkbookUiDraftChange('showDebugConsole', event.target.checked)
+              }
+            />
+            <span>Show workbook debug console</span>
+          </label>
+        </div>
+        <p className="settings-provider-note">
+          Off by default. Enable only when you need low-level workbook/socket event diagnostics.
+        </p>
+        <div className="settings-actions">
+          <button
+            type="button"
+            onClick={onSaveWorkbookUiSettings}
+            disabled={!!savingWorkbookUiSettings || !workbookUiDirty}
+          >
+            {savingWorkbookUiSettings ? 'Saving...' : 'Save workbook UI settings'}
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-provider-card">
+        <div className="settings-provider-head">
+          <strong>Hub Publishing</strong>
+          <span className="settings-status">used by workbook publish dialog</span>
+        </div>
+        <div className="settings-field">
+          <label className="settings-label" htmlFor="hub-publish-api-base-url">
+            Marketplace URL
+          </label>
+          <input
+            id="hub-publish-api-base-url"
+            className="settings-input"
+            type="text"
+            value={String((hubPublishDraft && hubPublishDraft.apiBaseUrl) || '')}
+            onChange={(event) =>
+              onHubPublishDraftChange('apiBaseUrl', event.target.value)
+            }
+            placeholder="https://hub.metacells.dev or http://localhost:4001"
+          />
+        </div>
+        <div className="settings-field-grid">
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="hub-publish-email">
+              Hub email
+            </label>
+            <input
+              id="hub-publish-email"
+              className="settings-input"
+              type="text"
+              value={String((hubPublishDraft && hubPublishDraft.email) || '')}
+              onChange={(event) =>
+                onHubPublishDraftChange('email', event.target.value)
+              }
+              placeholder="creator@hub.local"
+            />
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="hub-publish-password">
+              Hub password
+            </label>
+            <input
+              id="hub-publish-password"
+              className="settings-input"
+              type="password"
+              value={String((hubPublishDraft && hubPublishDraft.password) || '')}
+              onChange={(event) =>
+                onHubPublishDraftChange('password', event.target.value)
+              }
+              placeholder="Password"
+            />
+          </div>
+        </div>
+        <div className="settings-field">
+          <label className="settings-label" htmlFor="hub-publish-token">
+            Bearer token override
+          </label>
+          <input
+            id="hub-publish-token"
+            className="settings-input"
+            type="password"
+            value={String((hubPublishDraft && hubPublishDraft.token) || '')}
+            onChange={(event) =>
+              onHubPublishDraftChange('token', event.target.value)
+            }
+            placeholder="Optional. If set, email/password are ignored."
+          />
+        </div>
+        <p className="settings-provider-note">
+          Use `https://hub.metacells.dev` normally, or your local hub URL during development.
+        </p>
+        <div className="settings-actions">
+          <button
+            type="button"
+            onClick={onSaveHubPublishSettings}
+            disabled={!!savingHubPublishSettings || !hubPublishDirty}
+          >
+            {savingHubPublishSettings ? 'Saving...' : 'Save hub settings'}
+          </button>
         </div>
       </div>
     </>

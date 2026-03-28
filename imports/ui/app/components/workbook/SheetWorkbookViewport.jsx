@@ -19,6 +19,7 @@ import { WorkbookReportShell } from './WorkbookReportShell.jsx';
 
 export function SheetWorkbookViewport({
   workbookUiState,
+  settings,
   appRef,
   cellContentStore,
   onPublishReport,
@@ -59,7 +60,11 @@ export function SheetWorkbookViewport({
         onPublishReport={onPublishReport}
         onExportPdf={onExportPdf}
       />
-      <WorkbookDebugConsole workbookUiState={workbookUiState} />
+      {settings &&
+      settings.workbookUi &&
+      settings.workbookUi.showDebugConsole === true ? (
+        <WorkbookDebugConsole workbookUiState={workbookUiState} />
+      ) : null}
       <WorkbookLiveIndicators />
       {children}
     </>

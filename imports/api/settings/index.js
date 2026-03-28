@@ -23,6 +23,16 @@ export const DEFAULT_ACTIVE_AI_PROVIDER =
   getRegisteredAIProviderById('openai');
 export const DEFAULT_LM_STUDIO_PROVIDER =
   getRegisteredAIProviderById('lm-studio');
+const DEFAULT_MARKETPLACE_URL = 'https://hub.metacells.dev';
+export const DEFAULT_HUB_PUBLISH_SETTINGS = {
+  apiBaseUrl: DEFAULT_MARKETPLACE_URL,
+  email: '',
+  password: '',
+  token: '',
+};
+export const DEFAULT_WORKBOOK_UI_SETTINGS = {
+  showDebugConsole: false,
+};
 let cachedJobSettings = { ...DEFAULT_JOB_SETTINGS };
 let cachedActiveAIProviderType = String(
   DEFAULT_ACTIVE_AI_PROVIDER?.type || DEFAULT_AI_PROVIDERS[0]?.type || '',
@@ -115,6 +125,8 @@ function createDefaultSettingsDoc() {
     ),
     communicationChannels: [],
     jobSettings: { ...DEFAULT_JOB_SETTINGS },
+    hubPublish: normalizeHubPublishSettings(DEFAULT_HUB_PUBLISH_SETTINGS),
+    workbookUi: normalizeWorkbookUiSettings(DEFAULT_WORKBOOK_UI_SETTINGS),
     createdAt: now,
     updatedAt: now,
   };
@@ -255,6 +267,26 @@ function normalizeJobSettings(jobSettings) {
   };
 }
 
+function normalizeHubPublishSettings(hubPublish) {
+  const source =
+    hubPublish && typeof hubPublish === 'object' ? hubPublish : {};
+  return {
+    apiBaseUrl: String(
+      source.apiBaseUrl || DEFAULT_HUB_PUBLISH_SETTINGS.apiBaseUrl || '',
+    ).trim(),
+    email: String(source.email || '').trim(),
+    password: String(source.password || ''),
+    token: String(source.token || '').trim(),
+  };
+}
+
+function normalizeWorkbookUiSettings(workbookUi) {
+  const source = workbookUi && typeof workbookUi === 'object' ? workbookUi : {};
+  return {
+    showDebugConsole: source.showDebugConsole === true,
+  };
+}
+
 function updateCachedJobSettings(jobSettings) {
   cachedJobSettings = normalizeJobSettings(jobSettings);
   return cachedJobSettings;
@@ -389,6 +421,16 @@ export async function getJobSettings() {
   return normalizeJobSettings(settings && settings.jobSettings);
 }
 
+export async function getHubPublishSettings() {
+  const settings = await ensureDefaultSettings();
+  return normalizeHubPublishSettings(settings && settings.hubPublish);
+}
+
+export async function getWorkbookUiSettings() {
+  const settings = await ensureDefaultSettings();
+  return normalizeWorkbookUiSettings(settings && settings.workbookUi);
+}
+
 export function getJobSettingsSync() {
   return normalizeJobSettings(cachedJobSettings);
 }
@@ -422,6 +464,8 @@ registerMethods({
           activeAIProviderId: 1,
           communicationChannels: 1,
           jobSettings: 1,
+          hubPublish: 1,
+          workbookUi: 1,
           createdAt: 1,
           updatedAt: 1,
         },
@@ -543,6 +587,47 @@ registerMethods({
       })
       .catch(() => {});
     return nextJobSettings;
+  },
+
+  async 'settings.updateHubPublishSettings'(hubPublish) {
+    check(hubPublish, {
+      apiBaseUrl: String,
+      email: Match.Maybe(String),
+      password: Match.Maybe(String),
+      token: Match.Maybe(String),
+    });
+
+    await ensureDefaultSettings();
+    const nextHubPublish = normalizeHubPublishSettings(hubPublish);
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          hubPublish: nextHubPublish,
+          updatedAt: new Date(),
+        },
+      },
+    );
+    return nextHubPublish;
+  },
+
+  async 'settings.updateWorkbookUiSettings'(workbookUi) {
+    check(workbookUi, {
+      showDebugConsole: Boolean,
+    });
+
+    await ensureDefaultSettings();
+    const nextWorkbookUi = normalizeWorkbookUiSettings(workbookUi);
+    await AppSettings.updateAsync(
+      { _id: DEFAULT_SETTINGS_ID },
+      {
+        $set: {
+          workbookUi: nextWorkbookUi,
+          updatedAt: new Date(),
+        },
+      },
+    );
+    return nextWorkbookUi;
   },
 
   async 'settings.addCommunicationChannel'(connectorId) {

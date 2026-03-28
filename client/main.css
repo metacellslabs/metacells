@@ -163,6 +163,50 @@ body {
   border-color: rgba(50, 113, 233, 0.45);
 }
 
+.workbook-publish-dialog {
+  width: min(560px, 100%);
+}
+
+.workbook-publish-field {
+  display: grid;
+  gap: 6px;
+}
+
+.workbook-publish-field > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.workbook-publish-textarea {
+  min-height: 120px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+.workbook-publish-image-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workbook-publish-image-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.workbook-publish-remove {
+  min-width: 72px;
+}
+
 .app-dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -454,6 +498,19 @@ body {
   font-size: 12px;
   border-radius: 8px;
   margin-top: 0;
+}
+
+.tabs-publish-button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 123, 103, 0.18);
+  background: linear-gradient(180deg, rgba(46, 140, 108, 0.12), rgba(36, 117, 87, 0.18));
+  color: #215842;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .tabs-bar #tabs {
@@ -5778,6 +5835,134 @@ body.route-sheet .formula-bar {
   background: #fff1f1;
   border-color: #d7a5a5;
   color: #a12828;
+}
+
+.marketplace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.marketplace-search-row {
+  margin-bottom: 18px;
+}
+
+.marketplace-search-input {
+  width: 100%;
+  max-width: none;
+}
+
+.marketplace-tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -4px 0 18px;
+}
+
+.marketplace-tag-cloud-item {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(187, 208, 198, 0.92);
+  border-radius: 999px;
+  background: rgba(247, 251, 249, 0.95);
+  color: #335f4d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.marketplace-tag-cloud-item strong {
+  color: #6d8579;
+  font-size: 11px;
+}
+
+.marketplace-tag-cloud-item.is-active {
+  border-color: rgba(56, 123, 103, 0.24);
+  background: linear-gradient(180deg, rgba(46, 140, 108, 0.12), rgba(36, 117, 87, 0.18));
+  color: #1f5842;
+}
+
+.marketplace-tag-cloud-item.is-active strong {
+  color: #1f5842;
+}
+
+.marketplace-card {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border: 1px solid rgba(199, 213, 207, 0.95);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(39, 48, 73, 0.08);
+}
+
+.marketplace-card-image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: linear-gradient(135deg, #dceee6 0%, #f7fbf9 100%);
+}
+
+.marketplace-card-image-placeholder {
+  display: grid;
+  place-items: center;
+  color: #45705f;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.marketplace-card-copy {
+  display: grid;
+  gap: 12px;
+  padding: 18px 18px 12px;
+}
+
+.marketplace-card-copy h3 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.marketplace-card-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.marketplace-card-meta,
+.marketplace-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #547263;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.marketplace-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.marketplace-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #eef7f2;
+  color: #2d6a52;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.marketplace-card-actions {
+  padding: 0 18px 18px;
 }
 
 .settings-page {

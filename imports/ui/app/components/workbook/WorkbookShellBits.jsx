@@ -20,7 +20,13 @@ function TabDocIcon() {
   );
 }
 
-export function WorkbookTabBar({ workbookUiState, appRef }) {
+export function WorkbookTabBar({
+  workbookUiState,
+  appRef,
+  onOpenPublishDialog,
+  publishedMode = false,
+  isPreparingPublishDialog = false,
+}) {
   const ui =
     workbookUiState && typeof workbookUiState === 'object'
       ? workbookUiState
@@ -107,6 +113,21 @@ export function WorkbookTabBar({ workbookUiState, appRef }) {
           );
         })}
       </div>
+      {!publishedMode ? (
+        <button
+          type="button"
+          className="tabs-publish-button"
+          disabled={isPreparingPublishDialog}
+          onClick={() => {
+            if (isPreparingPublishDialog) return;
+            if (typeof onOpenPublishDialog === 'function') {
+              onOpenPublishDialog();
+            }
+          }}
+        >
+          {isPreparingPublishDialog ? 'Preparing preview...' : 'Publish to hub'}
+        </button>
+      ) : null}
       <button
         id="delete-tab"
         type="button"

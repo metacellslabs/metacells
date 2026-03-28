@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { rpc } from '../../../../lib/rpc-client.js';
 import { subscribeServerEvents } from '../../../../lib/transport/ws-client.js';
 import { createCellContentStore } from '../../metacell/runtime/cell-content-store.js';
+import { WorkbookPublishDialog } from '../components/workbook/WorkbookPublishDialog.jsx';
 import { Link, useNavigate, useParams } from '../router.jsx';
 
 const SheetFormulaBarMainRow = lazy(() =>
@@ -26,6 +27,11 @@ const WorkbookTabBar = lazy(() =>
 );
 
 let workbookRuntimeDepsPromise = null;
+let publishPreviewDepsPromise = null;
+const publishPreviewGifWorkerUrl = new URL(
+  '../../../../node_modules/gif.js/dist/gif.worker.js',
+  import.meta.url,
+).toString();
 
 function parseAttachmentSource(rawValue) {
   const raw = String(rawValue || '');
@@ -132,6 +138,89 @@ function loadWorkbookRuntimeDeps() {
   return workbookRuntimeDepsPromise;
 }
 
+function loadPublishPreviewDeps() {
+  if (!publishPreviewDepsPromise) {
+    publishPreviewDepsPromise = Promise.all([
+      import('html2canvas'),
+      import('gif.js'),
+    ]).then(([html2canvasModule, gifModule]) => ({
+      html2canvas:
+        html2canvasModule && html2canvasModule.default
+          ? html2canvasModule.default
+          : html2canvasModule,
+      GIF: gifModule && gifModule.default ? gifModule.default : gifModule,
+    }));
+  }
+  return publishPreviewDepsPromise;
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Failed to read blob'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function createWorkbookPublishPreviewImage(app) {
+  if (
+    !app ||
+    !app.tableWrap ||
+    typeof window === 'undefined' ||
+    (typeof app.isReportActive === 'function' && app.isReportActive())
+  ) {
+    return null;
+  }
+  const width = Math.max(1, Math.round(app.tableWrap.clientWidth || 0));
+  const height = Math.max(1, Math.round(app.tableWrap.clientHeight || 0));
+  if (!(width > 0) || !(height > 0)) {
+    return null;
+  }
+  const bounds = {
+    captureLeft: Math.max(0, Math.round(app.tableWrap.scrollLeft || 0)),
+    captureTop: Math.max(0, Math.round(app.tableWrap.scrollTop || 0)),
+    width,
+    height,
+  };
+  const libs = await loadPublishPreviewDeps();
+  const frameCanvas = await libs.html2canvas(app.tableWrap, {
+    backgroundColor: '#ffffff',
+    logging: false,
+    scale: 1,
+    useCORS: true,
+    x: bounds.captureLeft,
+    y: bounds.captureTop,
+    width: bounds.width,
+    height: bounds.height,
+    scrollX: 0,
+    scrollY: 0,
+  });
+  const blob = await new Promise((resolve, reject) => {
+    const gif = new libs.GIF({
+      workerScript: publishPreviewGifWorkerUrl,
+      workers: 2,
+      quality: 10,
+      width,
+      height,
+      repeat: 0,
+      background: '#ffffff',
+    });
+    gif.on('finished', resolve);
+    gif.on('abort', () => reject(new Error('Preview render aborted')));
+    gif.addFrame(frameCanvas, {
+      delay: 1200,
+      copy: true,
+    });
+    gif.render();
+  });
+  return {
+    name: 'sheet-preview.gif',
+    type: 'image/gif',
+    dataUrl: await readBlobAsDataUrl(blob),
+  };
+}
+
 function isWorkbookHostReady() {
   if (typeof document === 'undefined') return false;
   return !!(
@@ -168,6 +257,10 @@ export function SheetPage({
   const [isLoading, setIsLoading] = useState(true);
   const [sheet, setSheet] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isPublishingWorkbook, setIsPublishingWorkbook] = useState(false);
+  const [isPreparingPublishDialog, setIsPreparingPublishDialog] = useState(false);
+  const [publishDialogInitialImages, setPublishDialogInitialImages] = useState([]);
 
   if (!cellContentStoreRef.current) {
     cellContentStoreRef.current = createCellContentStore();
@@ -898,6 +991,50 @@ export function SheetPage({
     appRef.current.downloadRegionRecording();
   };
 
+  const handleSubmitPublishDialog = async (payload) => {
+    if (isPublishingWorkbook) return;
+    setIsPublishingWorkbook(true);
+    try {
+      const result = await rpc('hub.publishWorkbook', {
+        sheetId,
+        title: String(payload && payload.title ? payload.title : '').trim(),
+        description: String(
+          payload && payload.description ? payload.description : '',
+        ).trim(),
+        tags: Array.isArray(payload && payload.tags) ? payload.tags : [],
+        images: Array.isArray(payload && payload.images) ? payload.images : [],
+      });
+      setIsPublishingWorkbook(false);
+      setIsPublishDialogOpen(false);
+      const dashboardUrl = String((result && result.dashboardUrl) || '').trim();
+      window.alert(
+        `Workbook submitted to hub review.${dashboardUrl ? `\n\nDashboard: ${dashboardUrl}` : ''}`,
+      );
+    } catch (error) {
+      setIsPublishingWorkbook(false);
+      window.alert(
+        error.reason || error.message || 'Failed to publish workbook to hub',
+      );
+    }
+  };
+
+  const handleOpenPublishDialog = async () => {
+    if (isPreparingPublishDialog || isPublishingWorkbook) return;
+    setIsPreparingPublishDialog(true);
+    try {
+      const previewImage = await createWorkbookPublishPreviewImage(appRef.current);
+      setPublishDialogInitialImages(previewImage ? [previewImage] : []);
+    } catch (error) {
+      setPublishDialogInitialImages([]);
+      window.alert(
+        error.message || 'Failed to generate the current sheet preview GIF',
+      );
+    } finally {
+      setIsPreparingPublishDialog(false);
+      setIsPublishDialogOpen(true);
+    }
+  };
+
   return (
     <Suspense
       fallback={
@@ -954,12 +1091,27 @@ export function SheetPage({
         </div>
         <SheetWorkbookViewport
           workbookUiState={workbookUiState}
+          settings={settings}
           appRef={appRef}
           cellContentStore={cellContentStoreRef.current}
           onPublishReport={handlePublishReport}
           onExportPdf={handleExportPdf}
         />
-        <WorkbookTabBar workbookUiState={workbookUiState} appRef={appRef} />
+        <WorkbookTabBar
+          workbookUiState={workbookUiState}
+          appRef={appRef}
+          publishedMode={publishedMode}
+          isPreparingPublishDialog={isPreparingPublishDialog}
+          onOpenPublishDialog={handleOpenPublishDialog}
+        />
+        <WorkbookPublishDialog
+          isOpen={isPublishDialogOpen}
+          initialTitle={workbookName || (sheet && sheet.name) || ''}
+          initialImages={publishDialogInitialImages}
+          submitting={isPublishingWorkbook}
+          onClose={() => setIsPublishDialogOpen(false)}
+          onSubmit={handleSubmitPublishDialog}
+        />
       </div>
     </Suspense>
   );

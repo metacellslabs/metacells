@@ -88,6 +88,17 @@ export function SettingsPage() {
   const [jobSettingsDraft, setJobSettingsDraft] = useState(() =>
     buildJobSettingsDraft(DEFAULT_JOB_SETTINGS, DEFAULT_JOB_SETTINGS),
   );
+  const [hubPublishDraft, setHubPublishDraft] = useState({
+    apiBaseUrl: 'https://hub.metacells.dev',
+    email: '',
+    password: '',
+    token: '',
+  });
+  const [workbookUiDraft, setWorkbookUiDraft] = useState({
+    showDebugConsole: false,
+  });
+  const [savingHubPublishSettings, setSavingHubPublishSettings] = useState(false);
+  const [savingWorkbookUiSettings, setSavingWorkbookUiSettings] = useState(false);
   const [savingJobSettings, setSavingJobSettings] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(null);
@@ -399,6 +410,32 @@ export function SettingsPage() {
     setJobSettingsDraft(
       buildJobSettingsDraft(settings && settings.jobSettings, DEFAULT_JOB_SETTINGS),
     );
+    setHubPublishDraft({
+      apiBaseUrl: String(
+        (settings && settings.hubPublish && settings.hubPublish.apiBaseUrl) ||
+          (window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:4001'
+            : 'https://hub.metacells.dev'),
+      ),
+      email: String(
+        (settings && settings.hubPublish && settings.hubPublish.email) || '',
+      ),
+      password: String(
+        (settings && settings.hubPublish && settings.hubPublish.password) || '',
+      ),
+      token: String(
+        (settings && settings.hubPublish && settings.hubPublish.token) || '',
+      ),
+    });
+    setWorkbookUiDraft({
+      showDebugConsole:
+        !!(
+          settings &&
+          settings.workbookUi &&
+          settings.workbookUi.showDebugConsole
+        ),
+    });
   }, [settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() : 0]);
 
   const handleProviderDraftChange = (providerId, fieldKey, value) => {
@@ -641,6 +678,67 @@ export function SettingsPage() {
     }));
   };
 
+  const handleHubPublishDraftChange = (fieldKey, value) => {
+    setHubPublishDraft((current) => ({
+      ...current,
+      [fieldKey]: value,
+    }));
+  };
+
+  const handleSaveHubPublishSettings = () => {
+    if (savingHubPublishSettings) return;
+    setSavingHubPublishSettings(true);
+    rpc('settings.updateHubPublishSettings', {
+      apiBaseUrl: String(hubPublishDraft.apiBaseUrl || '').trim(),
+      email: String(hubPublishDraft.email || '').trim(),
+      password: String(hubPublishDraft.password || ''),
+      token: String(hubPublishDraft.token || '').trim(),
+    })
+      .then((nextHubPublish) => {
+        setSavingHubPublishSettings(false);
+        setSettings((current) => ({
+          ...(current || {}),
+          hubPublish: nextHubPublish,
+          updatedAt: new Date(),
+        }));
+      })
+      .catch((error) => {
+        setSavingHubPublishSettings(false);
+        window.alert(
+          error.reason || error.message || 'Failed to save hub settings',
+        );
+      });
+  };
+
+  const handleWorkbookUiDraftChange = (fieldKey, value) => {
+    setWorkbookUiDraft((current) => ({
+      ...current,
+      [fieldKey]: value,
+    }));
+  };
+
+  const handleSaveWorkbookUiSettings = () => {
+    if (savingWorkbookUiSettings) return;
+    setSavingWorkbookUiSettings(true);
+    rpc('settings.updateWorkbookUiSettings', {
+      showDebugConsole: workbookUiDraft.showDebugConsole === true,
+    })
+      .then((nextWorkbookUi) => {
+        setSavingWorkbookUiSettings(false);
+        setSettings((current) => ({
+          ...(current || {}),
+          workbookUi: nextWorkbookUi,
+          updatedAt: new Date(),
+        }));
+      })
+      .catch((error) => {
+        setSavingWorkbookUiSettings(false);
+        window.alert(
+          error.reason || error.message || 'Failed to save workbook UI settings',
+        );
+      });
+  };
+
   const handleSaveJobSettings = () => {
     if (savingJobSettings) return;
     setSavingJobSettings(true);
@@ -701,6 +799,36 @@ export function SettingsPage() {
   const configuredSecretsCount = Object.values(providerDrafts).filter((provider) =>
     String((provider && provider.apiKey) || '').trim(),
   ).length;
+  const savedHubPublish = {
+    apiBaseUrl: String(
+      (settings && settings.hubPublish && settings.hubPublish.apiBaseUrl) ||
+        (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+          ? 'http://localhost:4001'
+          : 'https://hub.metacells.dev'),
+    ),
+    email: String(
+      (settings && settings.hubPublish && settings.hubPublish.email) || '',
+    ),
+    password: String(
+      (settings && settings.hubPublish && settings.hubPublish.password) || '',
+    ),
+    token: String(
+      (settings && settings.hubPublish && settings.hubPublish.token) || '',
+    ),
+  };
+  const hubPublishDirty =
+    JSON.stringify(savedHubPublish) !== JSON.stringify(hubPublishDraft);
+  const savedWorkbookUi = {
+    showDebugConsole:
+      !!(
+        settings &&
+        settings.workbookUi &&
+        settings.workbookUi.showDebugConsole
+      ),
+  };
+  const workbookUiDirty =
+    JSON.stringify(savedWorkbookUi) !== JSON.stringify(workbookUiDraft);
 
   const renderSettingsPanel = () => {
     if (activeSettingsTab === 'channels') {
@@ -729,6 +857,16 @@ export function SettingsPage() {
           registeredProviders={registeredProviders}
           configuredChannelsCount={configuredChannelsCount}
           configuredSecretsCount={configuredSecretsCount}
+          hubPublishDraft={hubPublishDraft}
+          onHubPublishDraftChange={handleHubPublishDraftChange}
+          onSaveHubPublishSettings={handleSaveHubPublishSettings}
+          savingHubPublishSettings={savingHubPublishSettings}
+          hubPublishDirty={hubPublishDirty}
+          workbookUiDraft={workbookUiDraft}
+          onWorkbookUiDraftChange={handleWorkbookUiDraftChange}
+          onSaveWorkbookUiSettings={handleSaveWorkbookUiSettings}
+          savingWorkbookUiSettings={savingWorkbookUiSettings}
+          workbookUiDirty={workbookUiDirty}
         />
       );
     }
