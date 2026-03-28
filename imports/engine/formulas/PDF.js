@@ -1,5 +1,11 @@
 import { defineFormula } from './definition.js';
-import { buildSimplePdfBase64 } from '../pdf-utils.js';
+
+function normalizePdfFileName(name) {
+  const raw = String(name == null ? '' : name).trim();
+  if (!raw) return '';
+  if (/\.pdf$/i.test(raw)) return raw;
+  return raw.replace(/\.[^./\\]+$/, '') + '.pdf';
+}
 
 function resolveContentValue(value, helpers) {
   if (value == null) return '';
@@ -17,9 +23,9 @@ export default defineFormula({
     'Creates a PDF file attachment from content. Equivalent to FILE(name, content, "PDF").',
   examples: ['`=PDF("invoice.pdf", A1)`', '`=PDF("report.pdf", B2)`'],
   execute: ({ args, helpers }) => {
-    const name = String(
+    const name = normalizePdfFileName(
       helpers.firstScalar(args[0]) == null ? '' : helpers.firstScalar(args[0]),
-    ).trim();
+    );
     const content = resolveContentValue(args[1], helpers);
 
     if (!name) return '';
@@ -29,8 +35,8 @@ export default defineFormula({
       JSON.stringify({
         name,
         type: 'application/pdf',
-        content: buildSimplePdfBase64(content),
-        encoding: 'base64',
+        content: String(content == null ? '' : content),
+        encoding: 'utf8',
         generated: true,
         generatedAs: 'PDF',
       })

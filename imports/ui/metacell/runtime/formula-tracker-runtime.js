@@ -33,6 +33,14 @@ function normalizeRawForCommand(rawValue) {
 function getChannelSpec(app, rawValue) {
   var raw = String(rawValue == null ? '' : rawValue);
   var normalized = normalizeRawForCommand(raw);
+  var bareLogMatch = /^\s*\/([A-Za-z][A-Za-z0-9_-]*)\s*$/.exec(raw);
+  if (bareLogMatch && bareLogMatch[1]) {
+    return {
+      kind: 'feed',
+      label: String(bareLogMatch[1] || '').trim().toLowerCase(),
+      labels: [String(bareLogMatch[1] || '').trim().toLowerCase()],
+    };
+  }
   var sendCommand = parseChannelSendCommand(normalized);
   if (sendCommand && sendCommand.label) {
     return {
@@ -121,111 +129,56 @@ function getTrackerEntries(app) {
 }
 
 function renderTrackerEntries(app) {
-  if (!app.formulaTrackerPanelList) return;
   var entries = getTrackerEntries(app);
   app.formulaTrackerEntries = entries;
-  app.formulaTrackerPanelList.innerHTML = '';
-
-  if (!entries.length) {
-    var empty = document.createElement('div');
-    empty.className = 'formula-tracker-empty';
-    empty.textContent = 'No channel or scheduled cells yet.';
-    app.formulaTrackerPanelList.appendChild(empty);
-    return;
-  }
-
-  for (var i = 0; i < entries.length; i += 1) {
-    var entry = entries[i];
-    var item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'formula-tracker-item';
-    if (
-      String(entry.sheetId || '') === String(app.activeSheetId || '') &&
-      app.activeInput &&
-      String(app.activeInput.id || '').toUpperCase() === entry.cellId
-    ) {
-      item.classList.add('active');
-    }
-    item.dataset.sheetId = entry.sheetId;
-    item.dataset.cellId = entry.cellId;
-
-    var title = document.createElement('div');
-    title.className = 'formula-tracker-item-title';
-    title.textContent = `${entry.sheetName} · ${entry.cellId}`;
-    item.appendChild(title);
-
-    var meta = document.createElement('div');
-    meta.className = 'formula-tracker-item-meta';
-    meta.textContent = entry.tags.join(' · ');
-    item.appendChild(meta);
-
-    var preview = document.createElement('div');
-    preview.className = 'formula-tracker-item-preview';
-    preview.textContent = String(entry.raw || '').trim() || '(empty)';
-    item.appendChild(preview);
-
-    item.addEventListener('click', function (event) {
-      var button = event.currentTarget;
-      var targetSheetId = String(button.dataset.sheetId || '');
-      var targetCellId = String(button.dataset.cellId || '').toUpperCase();
-      if (!targetSheetId || !targetCellId) return;
-      if (targetSheetId !== app.activeSheetId) app.switchToSheet(targetSheetId);
-      window.requestAnimationFrame(function () {
-        var input = app.inputById ? app.inputById[targetCellId] : null;
-        if (!input) return;
-        app.setActiveInput(input);
-        if (typeof input.focus === 'function') input.focus();
-        refreshFormulaTrackerPanel(app);
-      });
-    });
-
-    app.formulaTrackerPanelList.appendChild(item);
-  }
+  if (app && typeof app.publishUiState === 'function') app.publishUiState();
 }
 
 function updatePanelOffset(app) {
-  if (!app.formulaTrackerPanel) return;
-  var assistantVisible = !!(
-    app.assistantPanel && app.assistantPanel.style.display !== 'none'
-  );
-  app.formulaTrackerPanel.classList.toggle(
-    'with-assistant-offset',
-    assistantVisible,
-  );
+  var assistantVisible = !!(app && app.assistantPanelOpen === true);
+  app.formulaTrackerWithAssistantOffset = assistantVisible;
+  if (app && typeof app.publishUiState === 'function') app.publishUiState();
 }
 
 function ensureFormulaTrackerPanel(app) {
   if (app.formulaTrackerPanel) return app.formulaTrackerPanel;
-  var panel = document.createElement('aside');
-  panel.className = 'formula-tracker-panel';
-  panel.style.display = 'none';
-  panel.innerHTML =
-    "<div class='formula-tracker-head'>" +
-    "<div class='formula-tracker-title-wrap'>" +
-    "<div class='formula-tracker-title'>Automation</div>" +
-    "<div class='formula-tracker-subtitle'>Channel and scheduled cells</div>" +
-    '</div>' +
-    "<button type='button' class='formula-tracker-close' aria-label='Close'>×</button>" +
-    '</div>' +
-    "<div class='formula-tracker-list'></div>";
-  document.body.appendChild(panel);
-
-  panel
-    .querySelector('.formula-tracker-close')
-    .addEventListener('click', function () {
-      hideFormulaTrackerPanel(app);
-    });
-
+  var panel = document.querySelector('.formula-tracker-panel');
+  if (!panel) return null;
   app.formulaTrackerPanel = panel;
   app.formulaTrackerPanelList = panel.querySelector('.formula-tracker-list');
   return panel;
 }
 
+export function getFormulaTrackerUiState(app) {
+  var entries = Array.isArray(app && app.formulaTrackerEntries)
+    ? app.formulaTrackerEntries.slice()
+    : [];
+  var activeSheetId =
+    app && typeof app.getVisibleSheetId === 'function'
+      ? String(app.getVisibleSheetId() || '')
+      : String((app && app.activeSheetId) || '');
+  var activeCellId =
+    app && typeof app.getSelectionActiveCellId === 'function'
+      ? String(app.getSelectionActiveCellId() || '')
+      : String((app && app.activeCellId) || '');
+  return {
+    open: !!(app && app.formulaTrackerOpen),
+    withAssistantOffset: !!(app && app.formulaTrackerWithAssistantOffset),
+    entries: entries,
+    activeSheetId: activeSheetId,
+    activeCellId: activeCellId,
+  };
+}
+
 export function setupFormulaTrackerPanel(app) {
   ensureFormulaTrackerPanel(app);
+  app.formulaTrackerOpen = false;
+  app.formulaTrackerEntries = Array.isArray(app.formulaTrackerEntries)
+    ? app.formulaTrackerEntries
+    : [];
+  app.formulaTrackerWithAssistantOffset = false;
   document.addEventListener('click', function (event) {
-    if (!app.formulaTrackerPanel || app.formulaTrackerPanel.style.display === 'none')
-      return;
+    if (!app.formulaTrackerOpen) return;
     if (
       app.formulaTrackerButton &&
       (event.target === app.formulaTrackerButton ||
@@ -235,6 +188,7 @@ export function setupFormulaTrackerPanel(app) {
       return;
     }
     if (
+      app.formulaTrackerPanel &&
       app.formulaTrackerPanel.contains &&
       app.formulaTrackerPanel.contains(event.target)
     ) {
@@ -246,29 +200,24 @@ export function setupFormulaTrackerPanel(app) {
 
 export function toggleFormulaTrackerPanel(app) {
   var panel = ensureFormulaTrackerPanel(app);
-  if (panel.style.display !== 'none') {
+  if (!panel) return;
+  if (app.formulaTrackerOpen) {
     hideFormulaTrackerPanel(app);
     return;
   }
   updatePanelOffset(app);
   renderTrackerEntries(app);
-  panel.style.display = 'flex';
-  if (app.formulaTrackerButton) {
-    app.formulaTrackerButton.classList.add('active');
-  }
+  app.formulaTrackerOpen = true;
+  if (app && typeof app.publishUiState === 'function') app.publishUiState();
 }
 
 export function hideFormulaTrackerPanel(app) {
-  if (!app.formulaTrackerPanel) return;
-  app.formulaTrackerPanel.style.display = 'none';
-  if (app.formulaTrackerButton) {
-    app.formulaTrackerButton.classList.remove('active');
-  }
+  app.formulaTrackerOpen = false;
+  if (app && typeof app.publishUiState === 'function') app.publishUiState();
 }
 
 export function refreshFormulaTrackerPanel(app) {
-  if (!app.formulaTrackerPanel || app.formulaTrackerPanel.style.display === 'none')
-    return;
+  if (!app.formulaTrackerOpen) return;
   updatePanelOffset(app);
   renderTrackerEntries(app);
 }

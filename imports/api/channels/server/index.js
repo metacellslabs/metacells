@@ -1,5 +1,7 @@
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
+import { AppError } from '../../../../lib/app-error.js';
+import { registerStartupHook } from '../../../../lib/startup-hooks.js';
+import { check, Match } from '../../../../lib/check.js';
+import { registerMethods } from '../../../../lib/rpc.js';
 import { getRegisteredChannelConnectorById } from '../connectors/index.js';
 import {
   AppSettings,
@@ -18,6 +20,7 @@ import {
   ChannelEvents,
 } from '../events.js';
 import { getRegisteredChannelHandlerById } from './handlers/index.js';
+import { publishServerEvent } from '../../../../server/ws-events.js';
 
 const activeChannelPolls = new Set();
 const activeChannelSubscriptions = new Map();
@@ -25,6 +28,21 @@ let channelPollingWorkerStarted = false;
 
 function logChannelRuntime(event, payload) {
   console.log(`[channels] ${event}`, payload);
+}
+
+function publishChannelEvent(type, channel, payload = {}) {
+  const source = channel && typeof channel === 'object' ? channel : {};
+  return publishServerEvent({
+    type,
+    scope: 'channels',
+    channelId: String(source.id || payload.channelId || ''),
+    channelLabel: String(source.label || payload.channelLabel || ''),
+    payload: {
+      connectorId: String(source.connectorId || source.type || ''),
+      status: String(source.status || payload.status || ''),
+      ...payload,
+    },
+  });
 }
 
 function normalizeChannelSettings(connector, currentSettings) {
@@ -156,7 +174,7 @@ async function searchChannelEventHistory(channel, query, options) {
 function getChannelHandler(connectorId) {
   const handler = getRegisteredChannelHandlerById(connectorId);
   if (handler) return handler;
-  throw new Meteor.Error(
+  throw new AppError(
     'channel-connector-not-supported',
     `Unsupported channel connector: ${connectorId}`,
   );
@@ -206,6 +224,7 @@ async function saveChannelRuntimeState(channelId, updates) {
       },
     },
   );
+  publishChannelEvent('channels.state', { id: channelId }, source);
 }
 
 async function migrateLegacyChannelEvents() {
@@ -297,6 +316,13 @@ async function applyChannelEvent(channel, payload, nextUid) {
     lastPolledAt: new Date(),
   });
 
+  publishChannelEvent('channels.event.received', channel, {
+    eventId: String((savedEvent && savedEvent._id) || ''),
+    eventType: String(normalizedMessage.event || ''),
+    preview: buildChannelEventPreview(savedEvent),
+    nextUid: Number(nextUid) || 0,
+  });
+
   await triggerChannelMentionRecompute(channel.label);
 }
 
@@ -344,8 +370,30 @@ async function pollSingleChannel(channel) {
         events: 0,
       };
     }
+    if (
+      !connector.capabilities ||
+      connector.capabilities.poll !== true
+    ) {
+      logChannelRuntime('poll.skip', {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        reason: 'poll-disabled',
+      });
+      return {
+        channelId,
+        label: String((channel && channel.label) || ''),
+        skipped: true,
+        reason: 'poll-disabled',
+        events: 0,
+      };
+    }
     const handler = getChannelHandler(connector.id);
-    if (typeof handler.poll !== 'function') {
+    if (
+      !handler ||
+      !handler.capabilities ||
+      handler.capabilities.poll !== true ||
+      typeof handler.poll !== 'function'
+    ) {
       logChannelRuntime('poll.skip', {
         channelId,
         label: String((channel && channel.label) || ''),
@@ -382,6 +430,11 @@ async function pollSingleChannel(channel) {
         lastSeenUid,
         lastPolledAt: new Date(),
       });
+      publishChannelEvent('channels.poll.complete', channel, {
+        ok: true,
+        events: 0,
+        lastSeenUid,
+      });
       return {
         channelId,
         label: String((channel && channel.label) || ''),
@@ -399,6 +452,11 @@ async function pollSingleChannel(channel) {
     logChannelRuntime('poll.channel.complete', {
       channelId,
       label: String((channel && channel.label) || ''),
+      events: events.length,
+      lastSeenUid,
+    });
+    publishChannelEvent('channels.poll.complete', channel, {
+      ok: true,
       events: events.length,
       lastSeenUid,
     });
@@ -424,6 +482,10 @@ async function pollSingleChannel(channel) {
       status: 'error',
       watchError: message,
       lastPolledAt: new Date(),
+    });
+    publishChannelEvent('channels.poll.failed', channel, {
+      ok: false,
+      message,
     });
     return {
       channelId,
@@ -472,6 +534,11 @@ async function pollEnabledChannels() {
     results,
   };
   logChannelRuntime('poll.scan.complete', summary);
+  publishServerEvent({
+    type: 'channels.poll.summary',
+    scope: 'channels',
+    payload: summary,
+  });
   return summary;
 }
 
@@ -556,10 +623,16 @@ async function ensureChannelSubscription(channel) {
       label: String((channel && channel.label) || ''),
       connectorId: String((channel && channel.connectorId) || ''),
     });
+    publishChannelEvent('channels.subscription.started', channel, {
+      connectorId: String((channel && channel.connectorId) || ''),
+    });
   } catch (error) {
     logChannelRuntime('subscribe.start_failed', {
       channelId,
       label: String((channel && channel.label) || ''),
+      message: error && error.message ? error.message : String(error),
+    });
+    publishChannelEvent('channels.subscription.failed', channel, {
       message: error && error.message ? error.message : String(error),
     });
   }
@@ -589,11 +662,11 @@ async function reconcileChannelSubscriptions() {
 }
 
 export function startChannelPollingWorker() {
-  if (!Meteor.isServer || channelPollingWorkerStarted) return;
+  if (channelPollingWorkerStarted) return;
   channelPollingWorkerStarted = true;
   logChannelRuntime('worker.started', { intervalMs: CHANNEL_POLL_INTERVAL_MS });
-  Meteor.startup(() => {
-    Meteor.setTimeout(() => {
+  setTimeout(() => {
+    setTimeout(() => {
       reconcileChannelSubscriptions().catch((error) => {
         logChannelRuntime('subscribe.startup.failed', {
           message: error && error.message ? error.message : String(error),
@@ -605,7 +678,7 @@ export function startChannelPollingWorker() {
         });
       });
     }, 5000);
-    Meteor.setInterval(() => {
+    setInterval(() => {
       reconcileChannelSubscriptions().catch((error) => {
         logChannelRuntime('subscribe.interval.failed', {
           message: error && error.message ? error.message : String(error),
@@ -624,12 +697,11 @@ export function isChannelPollingWorkerStarted() {
   return channelPollingWorkerStarted;
 }
 
-if (Meteor.isServer) {
-  registerAIQueueSheetRuntimeHooks({
+registerAIQueueSheetRuntimeHooks({
     loadChannelPayloads: async () => getActiveChannelPayloadMap(),
   });
 
-  Meteor.startup(() => {
+  registerStartupHook(() => {
     migrateLegacyChannelEvents().catch((error) => {
       logChannelRuntime('legacy.events.migration_failed', {
         message: error && error.message ? error.message : String(error),
@@ -637,7 +709,7 @@ if (Meteor.isServer) {
     });
   });
 
-  Meteor.methods({
+  registerMethods({
     async 'settings.upsertCommunicationChannel'(channel) {
       check(channel, {
         id: String,
@@ -651,7 +723,7 @@ if (Meteor.isServer) {
 
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -746,7 +818,7 @@ if (Meteor.isServer) {
         : [];
       const channel = channels.find((item) => item && item.id === channelId);
       if (!channel) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-not-found',
           'Communication channel not found',
         );
@@ -754,7 +826,7 @@ if (Meteor.isServer) {
 
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -801,7 +873,7 @@ if (Meteor.isServer) {
           },
         );
 
-        throw new Meteor.Error('channel-test-failed', message);
+        throw new AppError('channel-test-failed', message);
       }
     },
 
@@ -822,7 +894,7 @@ if (Meteor.isServer) {
         : [];
       const channel = findConfiguredChannelById(channels, channelId);
       if (!channel) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-not-found',
           'Communication channel not found',
         );
@@ -830,7 +902,7 @@ if (Meteor.isServer) {
 
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -838,7 +910,7 @@ if (Meteor.isServer) {
 
       const handler = getChannelHandler(channel.connectorId);
       if (typeof handler.send !== 'function') {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-send-not-supported',
           `Channel ${String(channel.connectorId || '')} does not support send actions`,
         );
@@ -875,7 +947,7 @@ if (Meteor.isServer) {
         : [];
       const channel = findConfiguredChannelByLabel(channels, label);
       if (!channel) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-not-found',
           `Communication channel "/${normalizeChannelLabel(label)}" not found`,
         );
@@ -883,7 +955,7 @@ if (Meteor.isServer) {
 
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -891,7 +963,7 @@ if (Meteor.isServer) {
 
       const handler = getChannelHandler(channel.connectorId);
       if (typeof handler.send !== 'function') {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-send-not-supported',
           `Channel ${String(channel.connectorId || '')} does not support send actions`,
         );
@@ -923,14 +995,14 @@ if (Meteor.isServer) {
         : [];
       const channel = findConfiguredChannelById(channels, channelId);
       if (!channel) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-not-found',
           'Communication channel not found',
         );
       }
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -971,14 +1043,14 @@ if (Meteor.isServer) {
         : [];
       const channel = findConfiguredChannelByLabel(channels, label);
       if (!channel) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-not-found',
           `Communication channel "/${normalizeChannelLabel(label)}" not found`,
         );
       }
       const connector = getRegisteredChannelConnectorById(channel.connectorId);
       if (!connector) {
-        throw new Meteor.Error(
+        throw new AppError(
           'channel-connector-not-found',
           'Channel connector not found',
         );
@@ -1007,4 +1079,3 @@ if (Meteor.isServer) {
       };
     },
   });
-}

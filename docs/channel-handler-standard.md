@@ -154,7 +154,6 @@ Popular methods:
 
 Primary library reference:
 
-- https://baileys.wiki/
 
 Popular methods:
 

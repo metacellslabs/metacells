@@ -1,11 +1,17 @@
-import { Meteor } from 'meteor/meteor';
-import { check, Match } from 'meteor/check';
-import { Mongo } from 'meteor/mongo';
+import { AppError } from '../../../lib/app-error.js';
+import { check, Match } from '../../../lib/check.js';
+import { defineModel } from '../../../lib/orm.js';
+import { registerMethods, getMethodHandler } from '../../../lib/rpc.js';
 import { Sheets } from '../sheets/index.js';
 import {
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
 } from '../sheets/workbook-codec.js';
+import {
+  getCellSourceText,
+  getCellRuntimeValueText,
+  listWorkbookCellEntries,
+} from '../sheets/cell-record-helpers.js';
 import { WorkbookStorageAdapter } from '../../engine/workbook-storage-adapter.js';
 import { StorageService } from '../../engine/storage-service.js';
 import { getRegisteredFormulas } from '../../engine/formulas/index.js';
@@ -20,16 +26,20 @@ import {
 } from '../settings/index.js';
 import { getRegisteredAIProviders } from '../settings/providers/index.js';
 import {
-  buildAttachmentSourceValue,
   getArtifactText,
   hydrateWorkbookAttachmentArtifacts,
   parseAttachmentSourceValue,
 } from '../artifacts/index.js';
+import {
+  clearWorkbookCell,
+  setWorkbookCellFromUpload,
+  setWorkbookCellPresentation,
+  setWorkbookCellSchedule,
+  setWorkbookCellSource,
+} from './workbook-mutation-facade.js';
 
 const assistantToolRegistry = [];
-export const AssistantConversations = new Mongo.Collection(
-  'assistant_conversations',
-);
+export const AssistantConversations = defineModel('assistant_conversations');
 
 function normalizeToolSlug(value) {
   return String(value || '')
@@ -206,22 +216,6 @@ async function removeAssistantConversationUpload(sheetDocumentId, uploadId) {
   );
   await saveAssistantConversationUploads(sheetDocumentId, nextUploads);
   return nextUploads;
-}
-
-function buildAttachmentSourceFromAssistantUpload(upload) {
-  if (!upload) {
-    throw new Error('Assistant upload not found');
-  }
-  return buildAttachmentSourceValue({
-    name: String(upload.name || 'Attached file'),
-    type: String(upload.type || ''),
-    content: '',
-    contentArtifactId: String(upload.contentArtifactId || ''),
-    binaryArtifactId: String(upload.binaryArtifactId || ''),
-    downloadUrl: String(upload.downloadUrl || ''),
-    previewUrl: String(upload.previewUrl || ''),
-    pending: false,
-  });
 }
 
 async function getAssistantUploadById(sheetDocumentId, uploadId) {
@@ -797,18 +791,21 @@ function buildChannelPromptContext(manifest) {
 function buildWorkbookPromptContext(workbook) {
   const normalized = decodeWorkbookDocument(workbook || {});
   const tabs = Array.isArray(normalized.tabs) ? normalized.tabs : [];
-  const sheets = isPlainObject(normalized.sheets) ? normalized.sheets : {};
   const fileCells = [];
   const populatedCells = [];
+  const entriesBySheetId = new Map();
+
+  listWorkbookCellEntries(normalized).forEach((entry) => {
+    const list = entriesBySheetId.get(entry.sheetId) || [];
+    list.push(entry);
+    entriesBySheetId.set(entry.sheetId, list);
+  });
 
   tabs.forEach((tab) => {
-    const sheet = sheets[tab.id] || {};
-    const cells = isPlainObject(sheet.cells) ? sheet.cells : {};
-    Object.keys(cells).forEach((cellId) => {
-      const cell = cells[cellId];
-      if (!isPlainObject(cell)) return;
-      const source = String(cell.source || '');
-      const value = String(cell.value || '');
+    const entries = entriesBySheetId.get(String(tab.id || '')) || [];
+    entries.forEach(({ cellId, cell }) => {
+      const source = getCellSourceText(cell);
+      const value = getCellRuntimeValueText(cell);
       const attachment = parseAttachmentSourceValue(source);
       if (attachment) {
         fileCells.push({
@@ -879,14 +876,18 @@ async function callProviderChat(messages) {
   const model = String(
     provider && provider.model
       ? provider.model
-      : provider && provider.type === 'openai'
-        ? 'gpt-4.1-mini'
-        : 'deepseek-chat',
+      : 'gpt-4.1-mini',
   );
   const requestBaseUrl = String(provider.baseUrl || '').replace(/\/+$/, '');
   const requestHeaders = { 'Content-Type': 'application/json' };
   if (
-    (provider.type === 'deepseek' || provider.type === 'openai') &&
+    (
+      provider.type === 'deepseek' ||
+      provider.type === 'openai' ||
+      provider.type === 'bedrock' ||
+      provider.type === 'vertex' ||
+      provider.type === 'corporate'
+    ) &&
     provider.apiKey
   ) {
     requestHeaders.Authorization = `Bearer ${provider.apiKey}`;
@@ -943,69 +944,56 @@ function makeTabId(kind) {
 }
 
 async function persistAssistantWorkbook(sheetDocumentId, workbook) {
-  const saveWorkbook =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['sheets.saveWorkbook'];
-  const computeGrid =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['sheets.computeGrid'];
+  const saveWorkbook = getMethodHandler('sheets.saveWorkbook');
+  const computeGrid = getMethodHandler('sheets.computeGrid');
   if (typeof saveWorkbook !== 'function' || typeof computeGrid !== 'function') {
     throw new Error('Workbook persistence methods are unavailable');
   }
-  await saveWorkbook.apply({}, [sheetDocumentId, workbook]);
+  await saveWorkbook(sheetDocumentId, workbook);
   const activeTabId = String(workbook.activeTabId || '') || 'sheet-1';
-  const result = await computeGrid.apply({}, [
+  const result = await computeGrid(
     sheetDocumentId,
     activeTabId,
-    { workbookSnapshot: workbook, forceRefreshAI: false, manualTriggerAI: false },
-  ]);
+    {
+      workbookSnapshot: workbook,
+      forceRefreshAI: false,
+      manualTriggerAI: false,
+      includeWorkbookSnapshot: true,
+    },
+  );
   return result && result.workbook ? decodeWorkbookDocument(result.workbook) : decodeWorkbookDocument(workbook);
 }
 
 async function sendAssistantChannelMessage(channelLabel, payload, channelId) {
-  const sendByLabel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.sendByLabel'];
+  const sendByLabel = getMethodHandler('channels.sendByLabel');
   if (typeof sendByLabel === 'function') {
-    return sendByLabel.apply({}, [channelLabel, payload]);
+    return sendByLabel(channelLabel, payload);
   }
-  const sendChannel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.send'];
+  const sendChannel = getMethodHandler('channels.send');
   if (typeof sendChannel !== 'function') {
     throw new Error('Channel send method is unavailable');
   }
-  return sendChannel.apply({}, [channelId, payload]);
+  return sendChannel(channelId, payload);
 }
 
 async function searchAssistantChannel(channelLabel, payload, channelId) {
-  const searchByLabel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.searchByLabel'];
+  const searchByLabel = getMethodHandler('channels.searchByLabel');
   if (typeof searchByLabel === 'function') {
-    return searchByLabel.apply({}, [
+    return searchByLabel(
       channelLabel,
       String((payload && payload.query) || ''),
       payload,
-    ]);
+    );
   }
-  const searchChannel =
-    Meteor.server &&
-    Meteor.server.method_handlers &&
-    Meteor.server.method_handlers['channels.search'];
+  const searchChannel = getMethodHandler('channels.search');
   if (typeof searchChannel !== 'function') {
     throw new Error('Channel search method is unavailable');
   }
-  return searchChannel.apply({}, [
+  return searchChannel(
     channelId,
     String((payload && payload.query) || ''),
     payload,
-  ]);
+  );
 }
 
 function normalizeChannelPayloadValue(key, value) {
@@ -1093,13 +1081,12 @@ function registerBuiltInAssistantTools() {
         const sheetId = String(update.sheetId || '');
         const cellId = String(update.cellId || '').toUpperCase();
         if (update.clear === true) {
-          context.storage.setCellSchedule(sheetId, cellId, null);
-          context.storage.setCellValue(sheetId, cellId, '');
+          clearWorkbookCell(context, sheetId, cellId);
           changed.push({ kind: 'clear_cell', sheetId, cellId });
           continue;
         }
         if (Object.prototype.hasOwnProperty.call(update, 'source')) {
-          context.storage.setCellValue(sheetId, cellId, String(update.source || ''));
+          setWorkbookCellSource(context, sheetId, cellId, update.source);
           changed.push({ kind: 'set_cell_source', sheetId, cellId });
         }
         if (Object.prototype.hasOwnProperty.call(update, 'attachmentUploadId')) {
@@ -1110,11 +1097,7 @@ function registerBuiltInAssistantTools() {
               `Assistant upload not found: ${String(update.attachmentUploadId || '')}`,
             );
           }
-          context.storage.setCellValue(
-            sheetId,
-            cellId,
-            buildAttachmentSourceFromAssistantUpload(upload),
-          );
+          setWorkbookCellFromUpload(context, sheetId, cellId, upload);
           changed.push({
             kind: 'set_file_cell',
             sheetId,
@@ -1124,15 +1107,11 @@ function registerBuiltInAssistantTools() {
         }
         if (Object.prototype.hasOwnProperty.call(update, 'presentation')) {
           check(update.presentation, Match.Where(isPlainObject));
-          context.storage.setCellPresentation(sheetId, cellId, update.presentation);
+          setWorkbookCellPresentation(context, sheetId, cellId, update.presentation);
           changed.push({ kind: 'set_cell_presentation', sheetId, cellId });
         }
         if (Object.prototype.hasOwnProperty.call(update, 'schedule')) {
-          context.storage.setCellSchedule(
-            sheetId,
-            cellId,
-            update.schedule == null ? null : update.schedule,
-          );
+          setWorkbookCellSchedule(context, sheetId, cellId, update.schedule);
           changed.push({ kind: 'set_cell_schedule', sheetId, cellId });
         }
       }
@@ -1223,11 +1202,7 @@ function registerBuiltInAssistantTools() {
       if (!upload) {
         throw new Error(`Assistant upload not found: ${String(args.uploadId || '')}`);
       }
-      context.storage.setCellValue(
-        args.sheetId,
-        args.cellId,
-        buildAttachmentSourceFromAssistantUpload(upload),
-      );
+      setWorkbookCellFromUpload(context, args.sheetId, args.cellId, upload);
       context.markMutated('set_file_cell_from_upload', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1264,7 +1239,7 @@ function registerBuiltInAssistantTools() {
       check(args.sheetId, String);
       check(args.cellId, String);
       check(args.source, String);
-      context.storage.setCellValue(args.sheetId, args.cellId, args.source);
+      setWorkbookCellSource(context, args.sheetId, args.cellId, args.source);
       context.markMutated('set_cell_source', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1284,8 +1259,7 @@ function registerBuiltInAssistantTools() {
     run: async (args, context) => {
       check(args.sheetId, String);
       check(args.cellId, String);
-      context.storage.setCellSchedule(args.sheetId, args.cellId, null);
-      context.storage.setCellValue(args.sheetId, args.cellId, '');
+      clearWorkbookCell(context, args.sheetId, args.cellId);
       context.markMutated('clear_cell', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1307,11 +1281,7 @@ function registerBuiltInAssistantTools() {
       check(args.sheetId, String);
       check(args.cellId, String);
       check(args.presentation, Match.Where(isPlainObject));
-      context.storage.setCellPresentation(
-        args.sheetId,
-        args.cellId,
-        args.presentation,
-      );
+      setWorkbookCellPresentation(context, args.sheetId, args.cellId, args.presentation);
       context.markMutated('set_cell_presentation', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1332,11 +1302,7 @@ function registerBuiltInAssistantTools() {
     run: async (args, context) => {
       check(args.sheetId, String);
       check(args.cellId, String);
-      context.storage.setCellSchedule(
-        args.sheetId,
-        args.cellId,
-        args.schedule == null ? null : args.schedule,
-      );
+      setWorkbookCellSchedule(context, args.sheetId, args.cellId, args.schedule);
       context.markMutated('set_cell_schedule', {
         sheetId: args.sheetId,
         cellId: String(args.cellId || '').toUpperCase(),
@@ -1450,7 +1416,7 @@ async function handleAssistantChat({
   const sheetId = String(sheetDocumentId || '').trim();
   if (!sheetId) throw new Error('Assistant chat requires sheetDocumentId');
   const sheetDoc = await Sheets.findOneAsync({ _id: sheetId }, { fields: { workbook: 1 } });
-  if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
+  if (!sheetDoc) throw new AppError('not-found', 'Workbook not found');
   let workbook = await hydrateWorkbookAttachmentArtifacts(
     decodeWorkbookDocument(workbookSnapshot || sheetDoc.workbook || {}),
   );
@@ -1568,117 +1534,112 @@ async function handleAssistantChat({
 
 registerBuiltInAssistantTools();
 
-if (Meteor.isServer) {
-  Meteor.methods({
-    async 'assistant.chat'(payload) {
-      check(payload, Match.Where(isPlainObject));
-      check(payload.sheetDocumentId, String);
-      check(payload.message, String);
-      const result = await handleAssistantChat(payload);
-      await saveAssistantConversationMessages(
-        payload.sheetDocumentId,
-        Array.isArray(result && result.conversation) ? result.conversation : [],
-        {
-          lastMessageAt: new Date(),
-        },
+registerMethods({
+  async 'assistant.chat'(payload) {
+    check(payload, Match.Where(isPlainObject));
+    check(payload.sheetDocumentId, String);
+    check(payload.message, String);
+    const result = await handleAssistantChat(payload);
+    await saveAssistantConversationMessages(
+      payload.sheetDocumentId,
+      Array.isArray(result && result.conversation) ? result.conversation : [],
+      {
+        lastMessageAt: new Date(),
+      },
+    );
+    return result;
+  },
+  async 'assistant.getManifest'(sheetDocumentId, workbookSnapshot) {
+    check(sheetDocumentId, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { workbook: 1 } },
+    );
+    if (!sheetDoc) throw new AppError('not-found', 'Workbook not found');
+    return buildAssistantManifest(
+      sheetDocumentId,
+      workbookSnapshot || sheetDoc.workbook || {},
+    );
+  },
+  async 'assistant.getConversation'(sheetDocumentId) {
+    check(sheetDocumentId, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { _id: 1 } },
+    );
+    if (!sheetDoc) throw new AppError('not-found', 'Workbook not found');
+    const doc = await loadAssistantConversationDoc(sheetDocumentId);
+    return {
+      messages:
+        Array.isArray(doc && doc.messages) ? doc.messages.slice() : [],
+      uploads: Array.isArray(doc && doc.uploads)
+        ? doc.uploads.map((item) => serializeAssistantUpload(item, false))
+        : [],
+      updatedAt:
+        doc && doc.updatedAt instanceof Date
+          ? doc.updatedAt.toISOString()
+          : String((doc && doc.updatedAt) || ''),
+    };
+  },
+  async 'assistant.uploadFile'(sheetDocumentId, fileName, mimeType, base64Data) {
+    check(sheetDocumentId, String);
+    check(fileName, String);
+    check(mimeType, String);
+    check(base64Data, String);
+    const sheetDoc = await Sheets.findOneAsync(
+      { _id: sheetDocumentId },
+      { fields: { _id: 1 } },
+    );
+    if (!sheetDoc) throw new AppError('not-found', 'Workbook not found');
+    const extractContent = getMethodHandler('files.extractContent');
+    if (typeof extractContent !== 'function') {
+      throw new AppError(
+        'files-unavailable',
+        'File extraction method is unavailable',
       );
-      return result;
-    },
-    async 'assistant.getManifest'(sheetDocumentId, workbookSnapshot) {
-      check(sheetDocumentId, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { workbook: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      return buildAssistantManifest(
-        sheetDocumentId,
-        workbookSnapshot || sheetDoc.workbook || {},
-      );
-    },
-    async 'assistant.getConversation'(sheetDocumentId) {
-      check(sheetDocumentId, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { _id: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      const doc = await loadAssistantConversationDoc(sheetDocumentId);
-      return {
-        messages:
-          Array.isArray(doc && doc.messages) ? doc.messages.slice() : [],
-        uploads: Array.isArray(doc && doc.uploads)
-          ? doc.uploads.map((item) => serializeAssistantUpload(item, false))
-          : [],
-        updatedAt:
-          doc && doc.updatedAt instanceof Date
-            ? doc.updatedAt.toISOString()
-            : String((doc && doc.updatedAt) || ''),
-      };
-    },
-    async 'assistant.uploadFile'(sheetDocumentId, fileName, mimeType, base64Data) {
-      check(sheetDocumentId, String);
-      check(fileName, String);
-      check(mimeType, String);
-      check(base64Data, String);
-      const sheetDoc = await Sheets.findOneAsync(
-        { _id: sheetDocumentId },
-        { fields: { _id: 1 } },
-      );
-      if (!sheetDoc) throw new Meteor.Error('not-found', 'Workbook not found');
-      const extractContent =
-        Meteor.server &&
-        Meteor.server.method_handlers &&
-        Meteor.server.method_handlers['files.extractContent'];
-      if (typeof extractContent !== 'function') {
-        throw new Meteor.Error(
-          'files-unavailable',
-          'File extraction method is unavailable',
-        );
-      }
-      const extracted = await extractContent.apply({}, [
-        fileName,
-        mimeType,
-        base64Data,
-      ]);
-      const upload = await appendAssistantConversationUpload(sheetDocumentId, {
-        id:
-          'assistant-upload-' +
-          Date.now() +
-          '-' +
-          Math.random().toString(36).slice(2, 10),
-        name: String((extracted && extracted.name) || fileName || 'Attached file'),
-        type: String((extracted && extracted.type) || mimeType || ''),
-        contentArtifactId: String(
-          (extracted && extracted.contentArtifactId) || '',
-        ),
-        binaryArtifactId: String(
-          (extracted && extracted.binaryArtifactId) || '',
-        ),
-        downloadUrl: String((extracted && extracted.downloadUrl) || ''),
-        previewUrl: String((extracted && extracted.previewUrl) || ''),
-        createdAt: new Date().toISOString(),
-      });
-      return serializeAssistantUpload(upload, false);
-    },
-    async 'assistant.clearConversation'(sheetDocumentId) {
-      check(sheetDocumentId, String);
-      await AssistantConversations.removeAsync({
-        sheetDocumentId: String(sheetDocumentId || ''),
-      });
-      return { ok: true };
-    },
-    async 'assistant.removeUpload'(sheetDocumentId, uploadId) {
-      check(sheetDocumentId, String);
-      check(uploadId, String);
-      const uploads = await removeAssistantConversationUpload(
-        sheetDocumentId,
-        uploadId,
-      );
-      return {
-        ok: true,
-        uploads: uploads.map((item) => serializeAssistantUpload(item, false)),
-      };
-    },
-  });
-}
+    }
+    const extracted = await extractContent(
+      fileName,
+      mimeType,
+      base64Data,
+    );
+    const upload = await appendAssistantConversationUpload(sheetDocumentId, {
+      id:
+        'assistant-upload-' +
+        Date.now() +
+        '-' +
+        Math.random().toString(36).slice(2, 10),
+      name: String((extracted && extracted.name) || fileName || 'Attached file'),
+      type: String((extracted && extracted.type) || mimeType || ''),
+      contentArtifactId: String(
+        (extracted && extracted.contentArtifactId) || '',
+      ),
+      binaryArtifactId: String(
+        (extracted && extracted.binaryArtifactId) || '',
+      ),
+      downloadUrl: String((extracted && extracted.downloadUrl) || ''),
+      previewUrl: String((extracted && extracted.previewUrl) || ''),
+      createdAt: new Date().toISOString(),
+    });
+    return serializeAssistantUpload(upload, false);
+  },
+  async 'assistant.clearConversation'(sheetDocumentId) {
+    check(sheetDocumentId, String);
+    await AssistantConversations.removeAsync({
+      sheetDocumentId: String(sheetDocumentId || ''),
+    });
+    return { ok: true };
+  },
+  async 'assistant.removeUpload'(sheetDocumentId, uploadId) {
+    check(sheetDocumentId, String);
+    check(uploadId, String);
+    const uploads = await removeAssistantConversationUpload(
+      sheetDocumentId,
+      uploadId,
+    );
+    return {
+      ok: true,
+      uploads: uploads.map((item) => serializeAssistantUpload(item, false)),
+    };
+  },
+});

@@ -1,14 +1,14 @@
 import { validateDiscoveredFormulasOnServer } from './validate-formulas.js';
 import { validateDiscoveredAIProvidersOnServer } from './validate-ai-providers.js';
 import { validateDiscoveredChannelConnectorsOnServer } from './validate-channel-connectors.js';
-import { registerArtifactRoute } from '../../api/artifacts/server.js';
-import { registerChannelEventAttachmentRoute } from '../../api/channels/events-server.js';
+import { createArtifactMiddleware } from '../../api/artifacts/server.js';
+import { createChannelEventAttachmentMiddleware } from '../../api/channels/events-server.js';
 import {
   registerJobsRuntimeHooks,
   startJobsWorker,
 } from '../../api/jobs/index.js';
 import { getJobSettingsSync } from '../../api/settings/index.js';
-import { getRuntimeRole, isWorkerRuntime } from './runtime-role.js';
+import { getRuntimeRole, isWebRuntime, isWorkerRuntime } from './runtime-role.js';
 import '../../api/artifacts/index.js';
 import '../../api/ai/index.js';
 import '../../api/assistant/index.js';
@@ -34,17 +34,23 @@ console.log('[channels] registry.validated', {
   count: channelConnectorHashes.length,
   files: channelConnectorHashes,
 });
-registerArtifactRoute();
-registerChannelEventAttachmentRoute();
+createArtifactMiddleware();
+createChannelEventAttachmentMiddleware();
 console.log('[runtime] role', { role: getRuntimeRole() });
-registerJobsRuntimeHooks({
-  isWorkerEnabled: () => getJobSettingsSync().workerEnabled,
+console.log('[runtime] jobs.settings', {
+  workerEnabled: getJobSettingsSync().workerEnabled,
 });
-if (isWorkerRuntime()) {
+registerJobsRuntimeHooks({
+  isWorkerEnabled: () =>
+    isWebRuntime() ? true : getJobSettingsSync().workerEnabled,
+});
+if (isWebRuntime() || getJobSettingsSync().workerEnabled) {
   startJobsWorker();
+}
+if (isWorkerRuntime()) {
   startChannelPollingWorker();
 } else {
   console.log(
-    '[runtime] web mode active; background workers are disabled in this process',
+    '[runtime] web mode active; channel polling worker is disabled in this process',
   );
 }

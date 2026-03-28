@@ -1,5 +1,3 @@
-import { Meteor } from 'meteor/meteor';
-import { WebApp } from 'meteor/webapp';
 import { getArtifactBinary, getArtifactById } from './index.js';
 
 function contentDisposition(fileName) {
@@ -7,10 +5,8 @@ function contentDisposition(fileName) {
   return `inline; filename="${raw}"`;
 }
 
-export function registerArtifactRoute() {
-  if (!Meteor.isServer) return;
-
-  WebApp.rawConnectHandlers.use(async (req, res, next) => {
+export function createArtifactMiddleware() {
+  return async (req, res, next) => {
     const url = String(req.url || '');
     const match = url.match(/^\/artifacts\/([^/?#]+)/);
     if (!match) {
@@ -65,5 +61,5 @@ export function registerArtifactRoute() {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.end('Failed to serve artifact');
     }
-  });
+  };
 }

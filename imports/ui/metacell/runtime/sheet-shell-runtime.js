@@ -1,3 +1,5 @@
+import { runCommandRecompute } from './command-recompute-facade.js';
+
 function createLucideIconMarkup(paths) {
   return (
     "<svg viewBox='0 0 24 24' aria-hidden='true' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
@@ -119,48 +121,8 @@ function showSheetShellDialog(options) {
 }
 
 export function renderTabs(app) {
-  app.tabsContainer.innerHTML = '';
-
-  app.tabs.forEach((tab) => {
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.className =
-      'tab-button' + (tab.id === app.activeSheetId ? ' active' : '');
-    button.innerHTML = '';
-    if (app.isReportTab(tab.id)) {
-      var icon = document.createElement('span');
-      icon.className = 'tab-doc-icon';
-      icon.innerHTML = createLucideIconMarkup([
-        "<path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' />",
-        "<path d='M14 2v6h6' />",
-        "<path d='M8 13h8' />",
-        "<path d='M8 17h8' />",
-        "<path d='M8 9h2' />",
-      ]);
-      button.appendChild(icon);
-    }
-    var label = document.createElement('span');
-    label.textContent = tab.name;
-    button.appendChild(label);
-    button.addEventListener('click', () => app.onTabButtonClick(tab.id));
-    button.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      app.renameTabById(tab.id);
-    });
-    var canDrag = true;
-    button.draggable = canDrag;
-    if (canDrag) {
-      button.addEventListener('dragstart', (e) =>
-        app.onTabDragStart(e, tab.id),
-      );
-      button.addEventListener('dragend', () => app.onTabDragEnd());
-      button.addEventListener('dragover', (e) => app.onTabDragOver(e, tab.id));
-      button.addEventListener('drop', (e) => app.onTabDrop(e, tab.id));
-    }
-    app.tabsContainer.appendChild(button);
-  });
   app.refreshNamedCellJumpOptions();
+  if (typeof app.publishUiState === 'function') app.publishUiState();
 }
 
 export function onTabDragStart(app, event, tabId) {
@@ -231,6 +193,7 @@ export async function addTab(app) {
   if (insertAt < 0) insertAt = app.tabs.length;
   app.tabs.splice(insertAt, 0, tab);
   app.storage.saveTabs(app.tabs);
+  app.tabs = app.storage.readTabs();
   app.switchToSheet(tab.id);
 }
 
@@ -257,6 +220,7 @@ export async function addReportTab(app) {
   app.captureHistorySnapshot('tabs');
   app.tabs.push(tab);
   app.storage.saveTabs(app.tabs);
+  app.tabs = app.storage.readTabs();
   app.switchToSheet(tab.id);
 }
 
@@ -290,11 +254,12 @@ export async function renameTabById(app, tabId) {
   active.name = name;
 
   app.storage.saveTabs(app.tabs);
+  app.tabs = app.storage.readTabs();
   app.storage.rewriteFormulaReferencesOnRename(oldName, name);
 
   app.renderTabs();
   app.refreshNamedCellJumpOptions();
-  app.computeAll();
+  runCommandRecompute(app);
 }
 
 export async function deleteActiveTab(app) {
@@ -330,6 +295,7 @@ export async function deleteActiveTab(app) {
     return tab.id !== active.id;
   });
   app.storage.saveTabs(app.tabs);
+  app.tabs = app.storage.readTabs();
   app.refreshNamedCellJumpOptions();
 
   var fallback =
@@ -339,6 +305,26 @@ export async function deleteActiveTab(app) {
 
 export function switchToSheet(app, sheetId) {
   if (!app.findTabById(sheetId)) return;
+  if (
+    app &&
+    typeof app.isReportActive === 'function' &&
+    app.isReportActive() &&
+    app.reportEditor &&
+    app.storage &&
+    Array.isArray(app.tabs)
+  ) {
+    for (var reportIndex = 0; reportIndex < app.tabs.length; reportIndex++) {
+      var reportTab = app.tabs[reportIndex];
+      if (!reportTab || typeof reportTab !== 'object') continue;
+      if (reportTab.type === 'report' || String(reportTab.id || '') === 'report') {
+        app.storage.setReportContent(
+          String(reportTab.id || ''),
+          app.reportEditor.innerHTML,
+        );
+        break;
+      }
+    }
+  }
   var keepCrossMention = !!(
     app.crossTabMentionContext &&
     sheetId !== app.crossTabMentionContext.sourceSheetId &&
@@ -346,16 +332,25 @@ export function switchToSheet(app, sheetId) {
   );
 
   app.clearActiveInput();
+  app.tabs = app.storage.readTabs();
   app.activeSheetId = sheetId;
   app.storage.setActiveSheetId(sheetId);
   if (app.onActiveSheetChange) app.onActiveSheetChange(sheetId);
 
   app.renderTabs();
   app.applyViewMode();
+  if (typeof app.publishUiState === 'function') app.publishUiState();
   if (app.isReportActive()) {
-    if (app.reportEditor) {
+    if (typeof app.setupReportControls === 'function') {
+      app.setupReportControls();
+    }
+    if (
+      app.reportEditor &&
+      String(app.reportEditorLoadedTabId || '') !== String(app.activeSheetId || '')
+    ) {
       app.reportEditor.innerHTML =
         app.storage.getReportContent(app.activeSheetId) || '<p></p>';
+      app.reportEditorLoadedTabId = String(app.activeSheetId || '');
     }
     app.setReportMode('view');
     app.ensureActiveCell();
@@ -367,9 +362,22 @@ export function switchToSheet(app, sheetId) {
   app.syncCellNameInput();
   app.renderCurrentSheetFromStorage();
   app.ensureActiveCell();
-  setTimeout(function () {
-    if (app.activeSheetId !== sheetId || app.isReportActive()) return;
-    app.computeAll();
-  }, 0);
+  var scheduleSheetRecompute = function (remainingAttempts) {
+    setTimeout(function () {
+      if (app.activeSheetId !== sheetId || app.isReportActive()) return;
+      var hasPendingPersistence = !!(
+        app.storage &&
+        app.storage.storage &&
+        typeof app.storage.storage.hasPendingPersistence === 'function' &&
+        app.storage.storage.hasPendingPersistence()
+      );
+      if (hasPendingPersistence && remainingAttempts > 0) {
+        scheduleSheetRecompute(remainingAttempts - 1);
+        return;
+      }
+      runCommandRecompute(app);
+    }, 0);
+  };
+  scheduleSheetRecompute(20);
   if (keepCrossMention) app.restoreCrossTabMentionEditor();
 }

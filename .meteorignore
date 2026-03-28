@@ -1,5 +1,0 @@
-_build/desktop-bundle/
-dist/
-electron-dist/
-.desktop-runtime/
-.desktop-cache/

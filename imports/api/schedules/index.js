@@ -1,7 +1,8 @@
 import crypto from 'crypto';
-import { Meteor } from 'meteor/meteor';
-import { Mongo } from 'meteor/mongo';
-import { Match, check } from 'meteor/check';
+import { AppError } from '../../../lib/app-error.js';
+import { defineModel } from '../../../lib/orm.js';
+import { Match, check } from '../../../lib/check.js';
+import { registerMethods } from '../../../lib/rpc.js';
 import {
   computeCellScheduleNextRun,
   hasEnabledCellSchedule,
@@ -19,11 +20,25 @@ import {
   decodeWorkbookDocument,
   encodeWorkbookForDocument,
 } from '../sheets/workbook-codec.js';
+import { updateSheetRuntimeFields } from '../sheets/sheet-update-helpers.js';
+import {
+  cloneCellRecordWithSchedule,
+  getCellRuntimeValueText,
+  getCellSourceText,
+  getWorkbookCellRecord,
+} from '../sheets/cell-record-helpers.js';
 import { getActiveChannelPayloadMap } from '../channels/runtime-state.js';
 import { hydrateWorkbookAttachmentArtifacts, stripWorkbookAttachmentInlineData } from '../artifacts/index.js';
 import { computeSheetSnapshot } from '../sheets/server/compute.js';
 
-export const CellSchedules = new Mongo.Collection('cell_schedules');
+export const CellSchedules = defineModel('cell_schedules');
+const SERVER_SIDE_SCHEDULES_ENABLED = /^(1|true|yes|on)$/i.test(
+  String(process.env.METACELLS_ENABLE_SERVER_SCHEDULES || '').trim(),
+);
+
+export function areServerSideSchedulesEnabled() {
+  return SERVER_SIDE_SCHEDULES_ENABLED;
+}
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -131,8 +146,8 @@ function buildScheduleDoc(sheetDocumentId, sheetId, cellId, schedule, cell) {
     updatedAt: new Date(),
     sourceHash: String((normalizedSchedule && normalizedSchedule.sourceHash) || ''),
     sourcePreview: String((normalizedSchedule && normalizedSchedule.sourcePreview) || ''),
-    lastKnownSource: String((cell && cell.source) || ''),
-    lastKnownValue: String((cell && cell.value) || ''),
+    lastKnownSource: getCellSourceText(cell),
+    lastKnownValue: getCellRuntimeValueText(cell),
   };
 }
 
@@ -233,12 +248,14 @@ async function updateWorkbookCellSchedule(
   );
   if (!sheetDoc) return null;
   const workbook = decodeWorkbookDocument(sheetDoc.workbook || {});
-  const sheet =
-    workbook.sheets && workbook.sheets[sheetId] && typeof workbook.sheets[sheetId] === 'object'
-      ? workbook.sheets[sheetId]
-      : null;
-  if (!sheet || !sheet.cells || !isPlainObject(sheet.cells[cellId])) return null;
-  const cell = sheet.cells[cellId];
+  const normalizedSheetId = String(sheetId || '');
+  const normalizedCellId = String(cellId || '').toUpperCase();
+  const cell = getWorkbookCellRecord(
+    workbook,
+    normalizedSheetId,
+    normalizedCellId,
+  );
+  if (!cell) return null;
   const currentSchedule = normalizeCellSchedule(cell.schedule);
   if (currentSchedule && currentSchedule.origin === 'manual') return currentSchedule;
 
@@ -252,18 +269,18 @@ async function updateWorkbookCellSchedule(
         updatedAt: new Date().toISOString(),
       }
     : null;
-  cell.schedule = normalizeCellSchedule(nextSchedule);
-  await Sheets.updateAsync(
-    { _id: sheetDocumentId },
-    {
-      $set: {
-        workbook: encodeWorkbookForDocument(stripWorkbookAttachmentInlineData(workbook)),
-        updatedAt: new Date(),
-      },
-      $unset: { storage: '' },
+  workbook.sheets[normalizedSheetId].cells[normalizedCellId] =
+    cloneCellRecordWithSchedule(cell, normalizeCellSchedule(nextSchedule));
+  await updateSheetRuntimeFields(sheetDocumentId, {
+    set: {
+      workbook: encodeWorkbookForDocument(
+        stripWorkbookAttachmentInlineData(workbook),
+      ),
+      runtimeUpdatedAt: new Date(),
     },
-  );
-  return cell.schedule || null;
+    unset: { storage: '' },
+  });
+  return workbook.sheets[normalizedSheetId].cells[normalizedCellId].schedule || null;
 }
 
 async function syncManualSchedules(sheetDocumentId, workbook) {
@@ -384,6 +401,10 @@ export async function syncWorkbookSchedulesOnSave({
   previousWorkbook,
   nextWorkbook,
 }) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) {
+    await removeWorkbookSchedulesAndJobs(sheetDocumentId);
+    return;
+  }
   const workbook = decodeWorkbookDocument(nextWorkbook || {});
   await syncManualSchedules(sheetDocumentId, workbook);
   const changes = extractChangedCells(previousWorkbook, workbook);
@@ -416,6 +437,7 @@ export async function removeWorkbookSchedulesAndJobs(sheetDocumentId) {
 }
 
 async function runScheduleDetectionJob(job) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
   const payload = job && job.payload ? job.payload : {};
   const sheetDocumentId = String(payload.sheetDocumentId || '');
   const sheetId = String(payload.sheetId || '');
@@ -492,16 +514,13 @@ async function recomputeScheduledCell(scheduleDoc) {
       const persistedNextWorkbook = stripWorkbookAttachmentInlineData(
         decodeWorkbookDocument(nextWorkbook),
       );
-      await Sheets.updateAsync(
-        { _id: sheetDocumentId },
-        {
-          $set: {
-            workbook: encodeWorkbookForDocument(persistedNextWorkbook),
-            updatedAt: new Date(),
-          },
-          $unset: { storage: '' },
+      await updateSheetRuntimeFields(sheetDocumentId, {
+        set: {
+          runtimeWorkbook: encodeWorkbookForDocument(persistedNextWorkbook),
+          runtimeUpdatedAt: new Date(),
         },
-      );
+        unset: { storage: '' },
+      });
       await syncWorkbookSchedulesOnSave({
         sheetDocumentId,
         previousWorkbook: persistedWorkbook,
@@ -512,6 +531,7 @@ async function recomputeScheduledCell(scheduleDoc) {
 }
 
 async function runScheduledCellJob(job) {
+  if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
   const payload = job && job.payload ? job.payload : {};
   const scheduleId = String(payload.scheduleId || '');
   if (!scheduleId) return null;
@@ -579,13 +599,12 @@ registerJobHandler('schedules.run_cell', {
   run: runScheduledCellJob,
 });
 
-if (Meteor.isServer) {
-  Meteor.methods({
+registerMethods({
     async 'schedules.getCell'(sheetDocumentId, sheetId, cellId) {
       check(sheetDocumentId, String);
       check(sheetId, String);
       check(cellId, String);
+      if (!SERVER_SIDE_SCHEDULES_ENABLED) return null;
       return CellSchedules.findOneAsync(scheduleDocId(sheetDocumentId, sheetId, cellId));
     },
   });
-}

@@ -196,6 +196,13 @@ export class StorageService {
     }
   }
 
+  applyServerCellPatch(sheetId, cellId, patch) {
+    if (typeof this.storage.applyServerCellPatch === 'function') {
+      return this.storage.applyServerCellPatch(sheetId, cellId, patch);
+    }
+    return false;
+  }
+
   setCellFormat(sheetId, cellId, format) {
     if (typeof this.storage.setCellFormat === 'function') {
       this.storage.setCellFormat(sheetId, cellId, format);

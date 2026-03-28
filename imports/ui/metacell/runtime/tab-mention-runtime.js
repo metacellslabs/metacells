@@ -9,6 +9,9 @@ export function onTabButtonClick(app, tabId) {
 }
 
 export function shouldStartCrossTabMention(app, tabId) {
+  if (app && typeof app.isReportActive === 'function' && app.isReportActive()) {
+    return false;
+  }
   if (app.isReportTab(tabId)) return false;
   if (tabId === app.activeSheetId) return false;
   if (!app.activeInput) return false;

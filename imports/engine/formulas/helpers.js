@@ -76,6 +76,17 @@ function normalizeScalar(value) {
   return String(value);
 }
 
+function coerceScalar(value) {
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text && Number.isFinite(Number(text))) return Number(text);
+    return value;
+  }
+  return value;
+}
+
 function toMatrix(value) {
   if (Array.isArray(value)) {
     if (!value.length) return [];
@@ -249,6 +260,7 @@ export const formulaHelpers = {
   toMatrix,
   flattenValues,
   firstScalar,
+  coerceScalar,
   isBlank,
   isNumberLike,
   matchesCriteria,

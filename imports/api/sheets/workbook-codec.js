@@ -1,6 +1,7 @@
 import { AI_MODE, STORAGE_KEYS } from '../../engine/constants.js';
-import { decodeStorageMap } from './storage-codec';
+import { decodeStorageMap } from './storage-codec.js';
 import { normalizeCellSchedule } from '../../lib/cell-schedule.js';
+import { cloneCellRecordWithComputedValue } from './cell-record-helpers.js';
 
 const FORMULA_PREFIXES = {
   '=': true,
@@ -126,6 +127,26 @@ function normalizeChannelFeedMeta(metaValue) {
     return null;
   }
   return next;
+}
+
+function hasMeaningfulPresentation(cellValue) {
+  const cell = isPlainObject(cellValue) ? cellValue : {};
+  return !!(
+    String(cell.format || 'text') !== 'text' ||
+    String(cell.align || 'left') !== 'left' ||
+    cell.wrapText === true ||
+    cell.bold === true ||
+    cell.italic === true ||
+    cell.decimalPlaces != null ||
+    String(cell.backgroundColor || '') !== '' ||
+    String(cell.fontFamily || 'default') !== 'default' ||
+    (Number.isFinite(cell.fontSize) && Number(cell.fontSize) !== 14) ||
+    (isPlainObject(cell.borders) &&
+      (cell.borders.top === true ||
+        cell.borders.right === true ||
+        cell.borders.bottom === true ||
+        cell.borders.left === true))
+  );
 }
 
 function createEmptySheetEntry() {
@@ -300,6 +321,54 @@ function ensureSheetEntry(workbook, sheetId) {
   return workbook.sheets[sheetId];
 }
 
+function normalizeWorkbookSheetsShape(workbookValue) {
+  const workbook = isPlainObject(workbookValue) ? workbookValue : {};
+  const tabs = cloneTabs(workbook.tabs);
+  const sheets = isPlainObject(workbook.sheets) ? { ...workbook.sheets } : {};
+
+  if (isPlainObject(workbook.report) && !isPlainObject(sheets.report)) {
+    sheets.report = { ...workbook.report };
+  }
+
+  const sheetTabIds = tabs
+    .filter((tab) => tab && tab.type !== 'report')
+    .map((tab) => String(tab.id || ''))
+    .filter(Boolean);
+
+  if (sheetTabIds.length === 1) {
+    const primarySheetId = sheetTabIds[0];
+    const primarySheet = isPlainObject(sheets[primarySheetId])
+      ? { ...sheets[primarySheetId] }
+      : null;
+    if (primarySheet) {
+      if (
+        isPlainObject(sheets.columnWidths) &&
+        !isPlainObject(primarySheet.columnWidths)
+      ) {
+        primarySheet.columnWidths = { ...sheets.columnWidths };
+        delete sheets.columnWidths;
+      }
+      if (
+        isPlainObject(sheets.rowHeights) &&
+        !isPlainObject(primarySheet.rowHeights)
+      ) {
+        primarySheet.rowHeights = { ...sheets.rowHeights };
+        delete sheets.rowHeights;
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(sheets, 'reportContent') &&
+        typeof primarySheet.reportContent !== 'string'
+      ) {
+        primarySheet.reportContent = String(sheets.reportContent || '');
+        delete sheets.reportContent;
+      }
+      sheets[primarySheetId] = primarySheet;
+    }
+  }
+
+  return sheets;
+}
+
 function inferTabsFromFlatStorage(flatStorage, namedCells) {
   const source = isPlainObject(flatStorage) ? flatStorage : {};
   const tabs = [];
@@ -416,7 +485,7 @@ export function decodeWorkbookDocument(workbookValue) {
     namedCells: isPlainObject(workbook.namedCells)
       ? { ...workbook.namedCells }
       : {},
-    sheets: isPlainObject(workbook.sheets) ? { ...workbook.sheets } : {},
+    sheets: normalizeWorkbookSheetsShape(workbook),
     dependencyGraph: normalizeDependencyGraph(workbook.dependencyGraph),
     caches: decodeDynamicMapKeys(workbook.caches),
     globals: decodeDynamicMapKeys(workbook.globals),
@@ -541,8 +610,10 @@ export function buildWorkbookFromFlatStorage(
       const normalizedCellId = String(cellId).toUpperCase();
       const cell = sheetEntry.cells[normalizedCellId];
       if (!cell) return;
-      cell.value = String(computedValues[cellId] ?? '');
-      cell.state = 'resolved';
+      sheetEntry.cells[normalizedCellId] = cloneCellRecordWithComputedValue(
+        cell,
+        computedValues[cellId],
+      );
     });
   }
 
@@ -561,14 +632,22 @@ export function buildWorkbookFromFlatStorage(
       const generatedBy = String(cell.generatedBy || '');
       const schedule = normalizeCellSchedule(cell.schedule) || null;
       if (!sourceValue && !generatedBy && !schedule) return;
+      const fallbackValue = sourceValue
+        ? String(
+            cell.sourceType === 'formula'
+              ? ''
+              : sourceValue,
+          )
+        : '';
+      const persistedValue = String(cell.value ?? fallbackValue);
+      const persistedDisplayValue = String(
+        cell.displayValue ?? persistedValue,
+      );
       nextCells[cellId] = {
         source: sourceValue,
         sourceType: cell.sourceType === 'formula' ? 'formula' : 'raw',
-        value: sourceValue
-          ? String(
-              cell.value ?? (cell.sourceType === 'formula' ? '' : sourceValue),
-            )
-          : '',
+        value: persistedValue,
+        displayValue: persistedDisplayValue,
         state: String(
           cell.state || (cell.sourceType === 'formula' ? 'stale' : 'resolved'),
         ),
@@ -693,6 +772,85 @@ export function encodeWorkbookForDocument(workbookValue) {
     caches: encodeDynamicMapKeys(workbook.caches),
     globals: encodeDynamicMapKeys(workbook.globals),
   };
+}
+
+export function buildClientWorkbookSnapshot(workbookValue) {
+  const workbook = decodeWorkbookDocument(workbookValue);
+  const nextWorkbook = {
+    version: workbook.version,
+    tabs: cloneTabs(workbook.tabs),
+    activeTabId: workbook.activeTabId,
+    aiMode: workbook.aiMode,
+    namedCells: { ...workbook.namedCells },
+    sheets: {},
+    dependencyGraph: normalizeDependencyGraph({}),
+    caches: decodeDynamicMapKeys(workbook.caches),
+    globals: decodeDynamicMapKeys(workbook.globals),
+  };
+
+  Object.keys(workbook.sheets || {}).forEach((sheetId) => {
+    const sheet = workbook.sheets[sheetId];
+    if (!isPlainObject(sheet)) return;
+    const nextSheet = createEmptySheetEntry();
+    nextSheet.columnWidths = isPlainObject(sheet.columnWidths)
+      ? { ...sheet.columnWidths }
+      : {};
+    nextSheet.rowHeights = isPlainObject(sheet.rowHeights)
+      ? { ...sheet.rowHeights }
+      : {};
+    nextSheet.reportContent = String(sheet.reportContent || '');
+
+    Object.keys(sheet.cells || {}).forEach((cellId) => {
+      const cell = isPlainObject(sheet.cells[cellId]) ? sheet.cells[cellId] : null;
+      if (!cell) return;
+      if (String(cell.generatedBy || '').trim()) return;
+      const source = String(cell.source || '');
+      const schedule = normalizeCellSchedule(cell.schedule) || null;
+      const hasPresentation = hasMeaningfulPresentation(cell);
+      if (!source && !schedule && !hasPresentation) return;
+
+      const nextCell = {
+        source,
+        sourceType: /^[='>#]/.test(source) ? 'formula' : 'raw',
+      };
+      if (hasPresentation) {
+        nextCell.format = String(cell.format || 'text');
+        nextCell.align = String(cell.align || 'left');
+        nextCell.wrapText = cell.wrapText === true;
+        nextCell.bold = cell.bold === true;
+        nextCell.italic = cell.italic === true;
+        nextCell.decimalPlaces = Number.isInteger(cell.decimalPlaces)
+          ? Math.max(0, Math.min(6, cell.decimalPlaces))
+          : null;
+        nextCell.backgroundColor = String(cell.backgroundColor || '');
+        nextCell.fontFamily = String(cell.fontFamily || 'default');
+        nextCell.fontSize = Number.isFinite(cell.fontSize)
+          ? Math.max(10, Math.min(28, Number(cell.fontSize)))
+          : 14;
+        nextCell.borders = isPlainObject(cell.borders)
+          ? {
+              top: cell.borders.top === true,
+              right: cell.borders.right === true,
+              bottom: cell.borders.bottom === true,
+              left: cell.borders.left === true,
+            }
+          : {
+              top: false,
+              right: false,
+              bottom: false,
+              left: false,
+            };
+      }
+      if (schedule) {
+        nextCell.schedule = schedule;
+      }
+      nextSheet.cells[String(cellId).toUpperCase()] = nextCell;
+    });
+
+    nextWorkbook.sheets[sheetId] = nextSheet;
+  });
+
+  return nextWorkbook;
 }
 
 export function decodeSheetDocumentStorage(sheetDocument) {

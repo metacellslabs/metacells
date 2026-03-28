@@ -24,7 +24,7 @@ Each workbook spec describes:
 - mocked AI responses
 - test scenarios with ordered steps
 
-Each scenario runs against a fresh workbook document inside the Meteor test environment.
+Each scenario runs against a fresh workbook document inside the backend test environment.
 
 ## Spec File Format
 
@@ -356,7 +356,7 @@ WORKBOOK_SPEC_DIR=tests/workbook-specs npm run test:workbooks
 
 ## Notes
 
-- The framework runs inside the existing Meteor server test environment.
+- The framework runs inside the existing backend server test environment.
 - Workbook spec tests are integration tests, not snapshot-only parsers.
 - File attachments are loaded from disk at test runtime.
 - AI responses are mocked through `fetch`, so no external provider call is required.

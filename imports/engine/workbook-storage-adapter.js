@@ -9,6 +9,23 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
+function parseAttachmentSource(source) {
+  var raw = String(source == null ? '' : source);
+  if (raw.indexOf('__ATTACHMENT__:') !== 0) return null;
+  try {
+    var parsed = JSON.parse(raw.substring('__ATTACHMENT__:'.length));
+    return isPlainObject(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isPendingAttachmentSource(source) {
+  var attachment = parseAttachmentSource(source);
+  if (!attachment) return false;
+  return attachment.pending === true || attachment.converting === true;
+}
+
 function normalizeChannelFeedMeta(meta) {
   if (!isPlainObject(meta)) return null;
   var next = {
@@ -94,6 +111,7 @@ function normalizeCellRecord(source, previousCell) {
   var prev = isPlainObject(previousCell) ? previousCell : {};
   var sourceType = /^[='>#]/.test(nextSource) ? 'formula' : 'raw';
   var sourceChanged = String(prev.source || '') !== nextSource;
+  var isPendingAttachment = sourceType === 'raw' && isPendingAttachmentSource(nextSource);
   var sourceVersion = Number(prev.sourceVersion) || Number(prev.version) || 0;
   if (sourceChanged) sourceVersion += 1;
   if (sourceVersion < 1) sourceVersion = 1;
@@ -151,7 +169,9 @@ function normalizeCellRecord(source, previousCell) {
         ? String(prev.source || '') !== nextSource
           ? 'stale'
           : String(prev.state || 'stale')
-        : 'resolved',
+        : isPendingAttachment
+          ? 'pending'
+          : 'resolved',
     error: sourceType === 'formula' ? String(prev.error || '') : '',
     generatedBy: String(prev.generatedBy || ''),
     lastProcessedChannelEventIds: isPlainObject(
@@ -315,6 +335,25 @@ export class WorkbookStorageAdapter {
       );
     });
 
+    this.listSheetIds().forEach(
+      function (sheetId) {
+        var ids = this.listCellIds(sheetId);
+        for (var i = 0; i < ids.length; i += 1) {
+          var cellId = String(ids[i] || '').toUpperCase();
+          if (!cellId) continue;
+          var cell = this.getCellRecord(sheetId, cellId);
+          if (!cell) continue;
+          var generatedBy = String(cell.generatedBy || '').toUpperCase();
+          if (!generatedBy) continue;
+          register(
+            dependentsByCell,
+            makeDependencyGraphKey(sheetId, generatedBy),
+            makeDependencyGraphKey(sheetId, cellId),
+          );
+        }
+      }.bind(this),
+    );
+
     graph.dependentsByCell = dependentsByCell;
     graph.dependentsByNamedRef = dependentsByNamedRef;
     graph.dependentsByChannel = dependentsByChannel;
@@ -447,17 +486,23 @@ export class WorkbookStorageAdapter {
     var id = String(cellId || '').toUpperCase();
     var previous = this.getCellRecord(sheetId, id);
     var next = normalizeCellRecord(value, previous);
-    var generatedBy =
-      meta && meta.generatedBy ? String(meta.generatedBy).toUpperCase() : '';
-    next.generatedBy =
-      generatedBy || String((previous && previous.generatedBy) || '');
-    if (
-      !generatedBy &&
-      previous &&
-      previous.generatedBy &&
-      String(value || '') === ''
-    ) {
-      next.generatedBy = '';
+    var hasExplicitGeneratedBy =
+      !!(
+        meta &&
+        typeof meta === 'object' &&
+        Object.prototype.hasOwnProperty.call(meta, 'generatedBy')
+      );
+    var generatedBy = hasExplicitGeneratedBy
+      ? String((meta && meta.generatedBy) || '').toUpperCase()
+      : '';
+    if (hasExplicitGeneratedBy) {
+      next.generatedBy = generatedBy;
+    } else {
+      var previousGeneratedBy = String((previous && previous.generatedBy) || '');
+      var previousSource = String((previous && previous.source) || '');
+      var nextSource = String(next.source || '');
+      next.generatedBy =
+        previousGeneratedBy && previousSource === nextSource ? previousGeneratedBy : '';
     }
     if (
       (!meta || meta.preserveSchedule !== true) &&
@@ -768,6 +813,40 @@ export class WorkbookStorageAdapter {
     sheet.cells[id] = cell;
   }
 
+  applyServerCellPatch(sheetId, cellId, patch) {
+    var sheet = this.ensureSheet(sheetId);
+    if (!sheet) return false;
+    var id = String(cellId || '').toUpperCase();
+    if (!id) return false;
+    var sourcePatch = isPlainObject(patch) ? patch : {};
+    if (sourcePatch.clear === true) return false;
+
+    var existing = this.getCellRecord(sheetId, id);
+    var hasSource = Object.prototype.hasOwnProperty.call(sourcePatch, 'source');
+    var nextSource = hasSource
+      ? String(sourcePatch.source || '')
+      : String((existing && existing.source) || '');
+    var generatedBy = String(sourcePatch.generatedBy || '').toUpperCase();
+    var cell = existing
+      ? existing
+      : normalizeCellRecord(nextSource, null);
+
+    if (hasSource && String(cell.source || '') !== nextSource) {
+      cell = normalizeCellRecord(nextSource, cell);
+    }
+    if (generatedBy || hasSource || existing) {
+      cell.generatedBy = generatedBy;
+    }
+    cell.value = String(sourcePatch.value == null ? '' : sourcePatch.value);
+    cell.displayValue = String(
+      sourcePatch.displayValue == null ? sourcePatch.value || '' : sourcePatch.displayValue,
+    );
+    cell.state = String(sourcePatch.state || '');
+    cell.error = String(sourcePatch.error || '');
+    sheet.cells[id] = cell;
+    return true;
+  }
+
   getCellDependencies(sheetId, cellId) {
     var graph = this.ensureDependencyGraph();
     var key = makeDependencyGraphKey(sheetId, cellId);
@@ -806,6 +885,7 @@ export class WorkbookStorageAdapter {
   }
 
   getDependencyGraph() {
+    this.rebuildReverseDependencyGraph();
     return deepClone(this.ensureDependencyGraph());
   }
 
@@ -834,11 +914,29 @@ export class WorkbookStorageAdapter {
   }
 
   clearGeneratedCellsBySource(sheetId, sourceCellId) {
-    var ids = this.listGeneratedCellsBySource(sheetId, sourceCellId);
-    for (var i = 0; i < ids.length; i++) {
-      this.setCellSource(sheetId, ids[i], '', { generatedBy: '' });
+    var queue = [String(sourceCellId || '').toUpperCase()];
+    var seenSources = Object.create(null);
+    var cleared = Object.create(null);
+    var total = 0;
+
+    while (queue.length) {
+      var source = String(queue.shift() || '').toUpperCase();
+      if (!source || seenSources[source]) continue;
+      seenSources[source] = true;
+
+      var ids = this.listGeneratedCellsBySource(sheetId, source);
+      for (var i = 0; i < ids.length; i++) {
+        var targetId = String(ids[i] || '').toUpperCase();
+        if (!targetId) continue;
+        queue.push(targetId);
+        if (cleared[targetId]) continue;
+        cleared[targetId] = true;
+        this.setCellSource(sheetId, targetId, '', { generatedBy: '' });
+        total += 1;
+      }
     }
-    return ids.length;
+
+    return total;
   }
 
   getColumnWidth(sheetId, colIndex) {

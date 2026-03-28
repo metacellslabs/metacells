@@ -1,3 +1,4 @@
+import { invokeRpc, isClient, isServer, tick } from './runtime-test-helpers.js';
 import assert from 'assert';
 import { registerWorkbookSpecTests } from './workbook-spec-framework.js';
 
@@ -7,15 +8,185 @@ describe('metacells', function () {
     assert.strictEqual(name, 'metacells');
   });
 
-  if (Meteor.isClient) {
+  if (isClient) {
     it('client is not server', function () {
-      assert.strictEqual(Meteor.isServer, false);
+      assert.strictEqual(isServer, false);
+    });
+
+    it('does not infer dependency overlays from attachment cell metadata', async function () {
+      const { collectAppUiStateSnapshot } = await import(
+        '../imports/ui/metacell/runtime/ui-snapshot-runtime.js'
+      );
+
+      const attachmentRaw =
+        '__ATTACHMENT__:{"name":"architecture.png","type":"image/png","content":"D5 E6 F8"}';
+      const makeRect = () => ({
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 24,
+      });
+      const cellShell = {
+        getBoundingClientRect: makeRect,
+      };
+
+      const app = {
+        activeSheetId: 'sheet-1',
+        tableWrap: {
+          scrollLeft: 0,
+          scrollTop: 0,
+          getBoundingClientRect: makeRect,
+        },
+        table: {
+          rows: [
+            { cells: [{ getBoundingClientRect: makeRect }, { getBoundingClientRect: makeRect }] },
+            { cells: [{ getBoundingClientRect: makeRect }, cellShell] },
+          ],
+        },
+        inputById: {
+          D5: { id: 'D5', parentElement: cellShell },
+        },
+        getSelectionActiveCellId() {
+          return 'D5';
+        },
+        getSelectionAnchorCellId() {
+          return 'D5';
+        },
+        getVisibleSheetId() {
+          return 'sheet-1';
+        },
+        getRawCellValue() {
+          return attachmentRaw;
+        },
+        parseAttachmentSource(value) {
+          return String(value || '').startsWith('__ATTACHMENT__:') ? {} : null;
+        },
+        getCellInput(cellId) {
+          return this.inputById[cellId] || null;
+        },
+        storage: {
+          getCellDependencies() {
+            return {};
+          },
+          resolveNamedCell() {
+            return null;
+          },
+        },
+      };
+
+      const snapshot = collectAppUiStateSnapshot(app);
+
+      assert.deepStrictEqual(snapshot.selectionUi.dependencyRects, []);
+    });
+
+    it('applies mention autocomplete selections inside the fullscreen editor', async function () {
+      const { applyMentionAutocompleteSelection } = await import(
+        '../imports/ui/metacell/runtime/mention-runtime.js'
+      );
+
+      const fullscreenEditor = {
+        value: 'Hello @arc',
+        selectionStart: 10,
+        selectionEnd: 10,
+        focused: false,
+        focus() {
+          this.focused = true;
+        },
+        setSelectionRange(start, end) {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+        },
+      };
+
+      const app = {
+        fullscreenEditor,
+        fullscreenEditMode: 'value',
+        fullscreenValueDraft: 'Hello @arc',
+        mentionAutocompleteState: {
+          input: fullscreenEditor,
+          start: 6,
+          end: 10,
+          items: [{ token: "@'Architecture'!A1", label: "@'Architecture'!A1" }],
+          activeIndex: 0,
+        },
+        published: 0,
+        setFullscreenDraft(next) {
+          this.fullscreenValueDraft = next;
+          fullscreenEditor.value = next;
+        },
+        setEditorSelectionRange(start, end, input) {
+          input.setSelectionRange(start, end);
+        },
+        publishUiState() {
+          this.published += 1;
+        },
+      };
+
+      applyMentionAutocompleteSelection(app, 0);
+
+      assert.strictEqual(app.fullscreenValueDraft, "Hello @'Architecture'!A1");
+      assert.strictEqual(fullscreenEditor.value, "Hello @'Architecture'!A1");
+      assert.strictEqual(fullscreenEditor.selectionStart, 24);
+      assert.strictEqual(fullscreenEditor.selectionEnd, 24);
+      assert.strictEqual(fullscreenEditor.focused, true);
+      assert.strictEqual(app.mentionAutocompleteState, null);
+    });
+
+    it('resolves attachment-backed report mentions as attachments instead of raw text', async function () {
+      const { resolveReportMention } = await import(
+        '../imports/ui/metacell/runtime/report-mention-runtime.js'
+      );
+
+      const attachmentRaw =
+        '__ATTACHMENT__:{"name":"policy.pdf","type":"application/pdf","content":"policy body"}';
+      const app = {
+        storage: {
+          resolveNamedCell(name) {
+            if (name === 'policy_file') {
+              return { sheetId: 'sheet-1', cellId: 'B3' };
+            }
+            return null;
+          },
+          getCellValue(sheetId, cellId) {
+            if (sheetId === 'sheet-1' && cellId === 'B3') return attachmentRaw;
+            return '';
+          },
+        },
+        parseAttachmentSource(value) {
+          return String(value || '').startsWith('__ATTACHMENT__:')
+            ? { name: 'policy.pdf', type: 'application/pdf', content: 'policy body' }
+            : null;
+        },
+        readCellMentionValue() {
+          return attachmentRaw;
+        },
+        readCellComputedValue() {
+          return attachmentRaw;
+        },
+        formulaEngine: {
+          parseListShortcutPrompt() {
+            return null;
+          },
+          parseTablePromptSpec() {
+            return null;
+          },
+        },
+      };
+
+      const resolved = resolveReportMention(app, '@policy_file');
+
+      assert.deepStrictEqual(resolved, {
+        type: 'attachment',
+        sheetId: 'sheet-1',
+        cellId: 'B3',
+        value: attachmentRaw,
+      });
     });
   }
 
-  if (Meteor.isServer) {
+  if (isServer) {
     it('server is not client', function () {
-      assert.strictEqual(Meteor.isClient, false);
+      assert.strictEqual(isClient, false);
     });
 
     it('builds a topological evaluation plan for same-sheet dependencies', async function () {
@@ -543,6 +714,39 @@ describe('metacells', function () {
       assert.strictEqual(eqMeta.displayValue, 'Nothing yet');
     });
 
+    it('highlights only empty cells referenced by mention-style formulas', async function () {
+      const { shouldHighlightEmptyMentionedCell } =
+        await import('../imports/ui/metacell/runtime/cell-render-model.js');
+
+      const app = {
+        storage: {
+          getDependencyGraph() {
+            return {
+              dependentsByCell: {
+                'sheet-1:A1': ['sheet-1:B1'],
+                'sheet-1:C5': ['sheet-1:D4'],
+              },
+            };
+          },
+          getCellValue(sheetId, cellId) {
+            if (sheetId === 'sheet-1' && cellId === 'B1') return '=SUM(@A1, 1)';
+            if (sheetId === 'sheet-1' && cellId === 'D4')
+              return '# top 5 countries by gdp';
+            return '';
+          },
+        },
+      };
+
+      assert.strictEqual(
+        shouldHighlightEmptyMentionedCell(app, 'sheet-1', 'A1', ''),
+        true,
+      );
+      assert.strictEqual(
+        shouldHighlightEmptyMentionedCell(app, 'sheet-1', 'C5', ''),
+        false,
+      );
+    });
+
     it('persists display placeholders separately from computed values', async function () {
       const { WorkbookStorageAdapter } =
         await import('../imports/engine/workbook-storage-adapter.js');
@@ -633,6 +837,8 @@ describe('metacells', function () {
           return cells[cellId] || '';
         },
         getCellState(sheetId, cellId) {
+          return states[cellId] || '';
+        },
         getCellDisplayValue() {
           return '';
         },
@@ -766,9 +972,12 @@ describe('metacells', function () {
 
       assert.ok(Array.isArray(providers));
       assert.ok(Array.isArray(manifest));
-      assert.ok(providers.some((item) => item.id === 'deepseek'));
+      assert.ok(providers.some((item) => item.id === 'openai'));
+      assert.ok(providers.some((item) => item.id === 'aws-bedrock'));
+      assert.ok(providers.some((item) => item.id === 'corporate-ai-model'));
       assert.ok(providers.some((item) => item.id === 'lm-studio'));
-      assert.ok(manifest.some((item) => item.file === 'DEEPSEEK.js'));
+      assert.ok(manifest.some((item) => item.file === 'AWS_BEDROCK.js'));
+      assert.ok(manifest.some((item) => item.file === 'CORPORATE_AI_MODEL.js'));
       assert.ok(manifest.some((item) => item.file === 'LM_STUDIO.js'));
       assert.ok(
         manifest.every((item) =>
@@ -943,6 +1152,8 @@ describe('metacells', function () {
         label: 'tg',
         message: 'message',
       });
+      assert.deepStrictEqual(parseChannelSendCommand('/tg:send:hello'), {
+        label: 'tg',
         message: 'hello',
       });
       assert.deepStrictEqual(
@@ -1316,7 +1527,8 @@ describe('metacells', function () {
           settings.aiProviders.length,
           DEFAULT_AI_PROVIDERS.length,
         );
-        assert.ok(settings.aiProviders.some((item) => item.id === 'deepseek'));
+        assert.ok(settings.aiProviders.some((item) => item.id === 'openai'));
+        assert.ok(settings.aiProviders.some((item) => item.id === 'aws-bedrock'));
         assert.ok(settings.aiProviders.some((item) => item.id === 'lm-studio'));
       } finally {
         await AppSettings.removeAsync({ _id: DEFAULT_SETTINGS_ID });
@@ -1378,9 +1590,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Save Workbook']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Save Workbook');
 
       try {
         const workbook = {
@@ -1410,10 +1620,10 @@ describe('metacells', function () {
           globals: {},
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           workbook,
-        ]);
+        );
 
         const saved = await Sheets.findOneAsync(sheetId);
         assert.ok(saved);
@@ -1438,9 +1648,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Compute Workbook']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Compute Workbook');
 
       try {
         const workbook = {
@@ -1478,13 +1686,11 @@ describe('metacells', function () {
           globals: {},
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           workbook,
-        ]);
-        const result = await Meteor.server.method_handlers[
-          'sheets.computeGrid'
-        ].apply({}, [sheetId, 'sheet-1', {}]);
+        );
+        const result = await invokeRpc('sheets.computeGrid', sheetId, 'sheet-1', {});
 
         assert.strictEqual(result.values.B1, 'alpha');
 
@@ -1508,9 +1714,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.createFormulaTestWorkbook'
-      ].apply({}, []);
+      const sheetId = await invokeRpc('sheets.createFormulaTestWorkbook');
 
       try {
         const saved = await Sheets.findOneAsync(sheetId);
@@ -1556,11 +1760,11 @@ describe('metacells', function () {
         assert.strictEqual(workbook.sheets['sheet-1'].cells.D30.value, 'PASS');
         assert.strictEqual(
           workbook.sheets['sheet-3'].cells.A2.source,
-          "'@idea: one-line value proposition",
+          "'@idea: write a one-line value proposition",
         );
         assert.strictEqual(
           workbook.sheets['sheet-3'].cells.A3.source,
-          '>5 потенциальных аудиторий для проекта @idea. по одной ЦА',
+          '>5 target customer segments for @idea, one per row',
         );
         assert.strictEqual(
           workbook.sheets['sheet-3'].cells.A4.source,
@@ -1568,7 +1772,7 @@ describe('metacells', function () {
         );
         assert.strictEqual(
           workbook.sheets['sheet-3'].cells.J2.source,
-          'пломбир для карликов',
+          'AI spreadsheet copilot for finance teams',
         );
       } finally {
         await Sheets.removeAsync({ _id: sheetId });
@@ -1580,9 +1784,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.createFinancialModelWorkbook'
-      ].apply({}, []);
+      const sheetId = await invokeRpc('sheets.createFinancialModelWorkbook');
 
       try {
         const saved = await Sheets.findOneAsync(sheetId);
@@ -1791,9 +1993,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Missing Sheet Ref']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Missing Sheet Ref');
 
       try {
         const workbook = {
@@ -1869,11 +2069,70 @@ describe('metacells', function () {
       service.enrichPromptWithFetchedUrls = (prompt) => Promise.resolve(prompt);
 
       service.requestAsk('hello', 'AI_CACHE:\n---\nhello', false, '', null);
-      await new Promise((resolve) => Meteor.setTimeout(resolve, 0));
+      await tick();
 
       assert.strictEqual(
         service.cache['AI_CACHE:\n---\nhello'],
         '#AI_ERROR: model is wrong',
+      );
+    });
+
+    it('fetches URL markdown and injects it into AI prompts before request', async function () {
+      const { AIService } =
+        await import('../imports/ui/metacell/runtime/ai-service.js');
+
+      const storage = {
+        getAIMode() {
+          return 'auto';
+        },
+        getCacheValue() {
+          return undefined;
+        },
+        setCacheValue() {},
+      };
+
+      const service = new AIService(storage, () => {}, {
+        sheetDocumentId: 'sheet-doc',
+        getActiveSheetId: () => 'sheet-1',
+      });
+
+      let capturedMessages = null;
+      service.fetchUrlAsMarkdown = (url) => {
+        assert.strictEqual(url, 'https://metacells.dev');
+        return Promise.resolve('# MetaCells\n\nAI spreadsheet runtime');
+      };
+      service.requestChat = (messages) => {
+        capturedMessages = messages;
+        return Promise.resolve('ok');
+      };
+
+      service.requestAsk(
+        'summarize https://metacells.dev',
+        'AI_CACHE:\n---\nsummarize https://metacells.dev',
+        false,
+        '',
+        null,
+      );
+      await tick();
+
+      assert.ok(Array.isArray(capturedMessages));
+      assert.strictEqual(capturedMessages.length, 1);
+      assert.strictEqual(capturedMessages[0].role, 'user');
+      assert.ok(
+        String(capturedMessages[0].content || '').includes('summarize'),
+      );
+      assert.ok(
+        String(capturedMessages[0].content || '').includes('<CONTENT START>'),
+      );
+      assert.ok(
+        String(capturedMessages[0].content || '').includes(
+          '# MetaCells\n\nAI spreadsheet runtime',
+        ),
+      );
+      assert.ok(
+        !String(capturedMessages[0].content || '').includes(
+          'https://metacells.dev',
+        ),
       );
     });
 
@@ -2060,9 +2319,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Cross Sheet Named Refs']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Cross Sheet Named Refs');
 
       try {
         const workbook = {
@@ -2145,17 +2402,15 @@ describe('metacells', function () {
           globals: {},
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           workbook,
-        ]);
-        let result = await Meteor.server.method_handlers[
-          'sheets.computeGrid'
-        ].apply({}, [sheetId, 'sheet-1', {}]);
+        );
+        let result = await invokeRpc('sheets.computeGrid', sheetId, 'sheet-1', {});
         assert.strictEqual(result.values.B1, 60);
         assert.strictEqual(result.values.C1, 60);
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           {
             ...workbook,
@@ -2177,11 +2432,9 @@ describe('metacells', function () {
               },
             },
           },
-        ]);
+        );
 
-        result = await Meteor.server.method_handlers[
-          'sheets.computeGrid'
-        ].apply({}, [sheetId, 'sheet-1', {}]);
+        result = await invokeRpc('sheets.computeGrid', sheetId, 'sheet-1', {});
         assert.strictEqual(result.values.B1, 70);
         assert.strictEqual(result.values.C1, 70);
 
@@ -2697,9 +2950,7 @@ describe('metacells', function () {
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
 
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Quoted Prompt Snapshot Recompute']);
+      const sheetId = await invokeRpc('sheets.create', 'Quoted Prompt Snapshot Recompute');
 
       try {
         const persistedWorkbook = {
@@ -2766,10 +3017,10 @@ describe('metacells', function () {
           globals: {},
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           persistedWorkbook,
-        ]);
+        );
 
         const clientWorkbookSnapshot = {
           ...persistedWorkbook,
@@ -2792,15 +3043,14 @@ describe('metacells', function () {
           },
         };
 
-        const result = await Meteor.server.method_handlers[
-          'sheets.computeGrid'
-        ].apply({}, [
+        const result = await invokeRpc(
+          'sheets.computeGrid',
           sheetId,
           'sheet-1',
           {
             workbookSnapshot: clientWorkbookSnapshot,
           },
-        ]);
+        );
 
         const saved = await Sheets.findOneAsync(sheetId);
         const decodedWorkbook = decodeWorkbookDocument(saved.workbook || {});
@@ -2822,9 +3072,7 @@ describe('metacells', function () {
       const { Sheets } = await import('../imports/api/sheets/index.js');
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Dependency Repair Test']);
+      const sheetId = await invokeRpc('sheets.create', 'Dependency Repair Test');
 
       try {
         const workbook = {
@@ -2877,9 +3125,7 @@ describe('metacells', function () {
           },
         );
 
-        await Meteor.server.method_handlers[
-          'sheets.rebuildDependencyGraph'
-        ].apply({}, [sheetId]);
+        await invokeRpc('sheets.rebuildDependencyGraph', sheetId);
 
         const saved = await Sheets.findOneAsync(sheetId);
         const decoded = decodeWorkbookDocument(saved.workbook || {});
@@ -2940,7 +3186,7 @@ describe('metacells', function () {
       assert.strictEqual(workbookMentionsChannel(workbook, 'other'), false);
     });
 
-    it('runs durable jobs through the Mongo-backed worker', async function () {
+    it('runs durable jobs through the SQLite-backed worker', async function () {
       const { Jobs, registerJobHandler, enqueueDurableJobAndWait } =
         await import('../imports/api/jobs/index.js');
       registerJobHandler('test.echo', {
@@ -2988,9 +3234,7 @@ describe('metacells', function () {
 
     it('uses persisted workbook cache/runtime state when client snapshot lags', async function () {
       const { Sheets } = await import('../imports/api/sheets/index.js');
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Persisted Cache Merge']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Persisted Cache Merge');
 
       try {
         const persistedWorkbook = {
@@ -3054,13 +3298,12 @@ describe('metacells', function () {
           caches: {},
         };
 
-        const result = await Meteor.server.method_handlers[
-          'sheets.computeGrid'
-        ].apply({}, [
+        const result = await invokeRpc(
+          'sheets.computeGrid',
           sheetId,
           'sheet-1',
           { workbookSnapshot: laggingClientSnapshot },
-        ]);
+        );
 
         assert.strictEqual(result.values.A1, '7');
         assert.strictEqual(
@@ -3077,9 +3320,7 @@ describe('metacells', function () {
       const { Sheets } = await import('../imports/api/sheets/index.js');
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Save Merge']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Save Merge');
 
       try {
         const persistedWorkbook = {
@@ -3150,10 +3391,10 @@ describe('metacells', function () {
           caches: {},
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           laggingClientWorkbook,
-        ]);
+        );
 
         const saved = await Sheets.findOneAsync(sheetId);
         const decoded = decodeWorkbookDocument(saved.workbook || {});
@@ -3172,9 +3413,7 @@ describe('metacells', function () {
       const { Sheets } = await import('../imports/api/sheets/index.js');
       const { decodeWorkbookDocument } =
         await import('../imports/api/sheets/workbook-codec.js');
-      const sheetId = await Meteor.server.method_handlers[
-        'sheets.create'
-      ].apply({}, ['Test Generated Spill Merge']);
+      const sheetId = await invokeRpc('sheets.create', 'Test Generated Spill Merge');
 
       try {
         const persistedWorkbook = {
@@ -3249,10 +3488,10 @@ describe('metacells', function () {
           },
         };
 
-        await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+        await invokeRpc('sheets.saveWorkbook', 
           sheetId,
           laggingClientWorkbook,
-        ]);
+        );
 
         const saved = await Sheets.findOneAsync(sheetId);
         const decoded = decodeWorkbookDocument(saved.workbook || {});

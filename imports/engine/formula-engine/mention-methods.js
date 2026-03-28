@@ -240,6 +240,11 @@ export const mentionMethods = {
     var targetCellId = String(cellId || '').toUpperCase();
     var raw = this.storageService.getCellValue(sheetId, targetCellId);
     if (!raw) return '';
+    var resolutionOptions = null;
+    if (options && typeof options === 'object') {
+      resolutionOptions = { ...options };
+      delete resolutionOptions.dependencyCollector;
+    }
     if (typeof this.recordDependencyCell === 'function') {
       this.recordDependencyCell(options, sheetId, targetCellId);
     }
@@ -259,7 +264,12 @@ export const mentionMethods = {
     }
 
     if (this.isListShortcutRaw(raw)) {
-      return this.readListShortcutResult(sheetId, targetCellId, stack, options);
+      return this.readListShortcutResult(
+        sheetId,
+        targetCellId,
+        stack,
+        resolutionOptions,
+      );
     }
     if (raw.charAt(0) === '=') {
       var shortcutPrompt = this.parseListShortcutPrompt(raw);
@@ -268,7 +278,7 @@ export const mentionMethods = {
           sheetId,
           targetCellId,
           stack,
-          options,
+          resolutionOptions,
         );
     }
     if (this.isTableShortcutRaw(raw)) {
@@ -276,11 +286,11 @@ export const mentionMethods = {
         sheetId,
         targetCellId,
         stack,
-        options,
+        resolutionOptions,
       );
     }
 
-    if (options && options.aiPromptPreferDisplay) {
+    if (resolutionOptions && resolutionOptions.aiPromptPreferDisplay) {
       var state = String(
         this.storageService.getCellState(sheetId, targetCellId) || '',
       );
@@ -302,7 +312,7 @@ export const mentionMethods = {
       }
     }
 
-    return this.evaluateCell(sheetId, targetCellId, stack, options);
+    return this.evaluateCell(sheetId, targetCellId, stack, resolutionOptions);
   },
 
   getMentionRawValue(sheetId, cellId) {

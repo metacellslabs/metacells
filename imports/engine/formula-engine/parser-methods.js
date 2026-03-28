@@ -173,7 +173,7 @@ export const parserMethods = {
     );
     var withStringMentions =
       this.interpolateMentionsInStringLiterals(withSheetRefs);
-    return withStringMentions.replace(
+    var withPlainMentions = withStringMentions.replace(
       /(_)?@([A-Za-z_][A-Za-z0-9_]*)/g,
       (_, rawPrefix, token) => {
         var rawMode = rawPrefix === '_';
@@ -191,6 +191,38 @@ export const parserMethods = {
               '")';
       },
     );
+    return this.preprocessConcatenationOperators(withPlainMentions);
+  },
+
+  preprocessConcatenationOperators(formula) {
+    var text = String(formula || '');
+    var out = '';
+    var i = 0;
+    var quote = '';
+
+    while (i < text.length) {
+      var ch = text.charAt(i);
+      var prev = i > 0 ? text.charAt(i - 1) : '';
+
+      if (quote) {
+        out += ch;
+        if (ch === quote && prev !== '\\') quote = '';
+        i++;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        out += ch;
+        i++;
+        continue;
+      }
+
+      out += ch === '&' ? '+' : ch;
+      i++;
+    }
+
+    return out;
   },
 
   stripAbsoluteReferenceMarkers(formula) {

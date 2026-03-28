@@ -1,5 +1,3 @@
-import { Meteor } from 'meteor/meteor';
-
 function nowMs() {
   if (
     typeof performance !== 'undefined' &&
@@ -11,7 +9,6 @@ function nowMs() {
 }
 
 export function shouldProfileCellUpdatesClient() {
-  if (!Meteor.isClient) return false;
   try {
     return (
       typeof window !== 'undefined' &&

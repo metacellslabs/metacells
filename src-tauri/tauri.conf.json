@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MetaCells",
+  "version": "0.1.0",
+  "identifier": "com.metacells.desktop",
+  "build": {
+    "beforeBuildCommand": "npm run desktop:prepare:tauri",
+    "frontendDist": "shell"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MetaCells",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "resources": [
+      "../.desktop-runtime/**/*",
+      "../public/logo.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

@@ -1,0 +1,80 @@
+opened_at=2026-03-24T21:38:12.444Z
+saved_at=2026-03-24T21:40:34.330Z
+sheet_id=3e4cd0b96b6fc07ea578b4e3
+overall=FAIL
+total=65
+passed=64
+failed=1
+ready_wait_error=AI cells remained stale after 3 manual update attempts
+
+[results]
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D2	label="Direct mention ref"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D3	label="Named ref"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D4	label="Arithmetic"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D5	label="SUM"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D6	label="AVERAGE"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D7	label="COUNT"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D8	label="COUNTA"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D9	label="TRIM"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D10	label="LEN(TRIM())"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D11	label="IF"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D12	label="COUNTIF"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D13	label="SUMIF"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D14	label="TODAY"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D15	label="DATEDIF days"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D16	label="DATEDIF months"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D17	label="INDEX"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D18	label="VLOOKUP"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D19	label="XLOOKUP"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D20	label="XLOOKUP missing"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D21	label="FILTER"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D22	label="Cross-sheet ref"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D23	label="Nested combo"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D24	label="Mention range SUM"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D25	label="Chained ref"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D26	label="Named range INDEX"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D27	label="Named range VLOOKUP"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D28	label="Conditional combo"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D29	label="Editable direct ref"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D30	label="Editable derived formula"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D31	label="MAX across local inputs"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D32	label="MIN across local inputs"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D33	label="ABS on negative input"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D34	label="ROUND percentage"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D35	label="IFERROR fallback"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D36	label="UPPER text transform"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D37	label="LOWER text transform"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D38	label="LEFT substring"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D39	label="RIGHT substring"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D40	label="Concatenation combo"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D41	label="AND logic"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D42	label="OR logic"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D43	label="Lookup plus text label"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D44	label="Multi-step arithmetic chain"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D45	label="Cross-sheet conditional lookup"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D46	label="Deep nested formula"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D47	label="Editable + fixed input mix"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D48	label="Text and numeric summary"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D49	label="FILE attachment from text"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D50	label="PDF attachment from formula content"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D51	label="DOCX attachment from markdown"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=formula	sheetId=sheet-1	cellId=D52	label="FILE with explicit PDF type"	expected="PASS"	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A2	label="Quoted prompt"	expected="Returns a single text answer in one cell."	actual="PASS"	note=""
+status=FAIL	kind=ai	sheetId=sheet-3	cellId=A3	label="List shortcut"	expected="Returns one list item per row below the source cell."	actual="FAIL"	note="Cell state is pending"
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A4	label="Table shortcut"	expected="Returns a small multi-row structured output."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A5	label="Summary"	expected="Uses @@tone as hidden system-style context."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A6	label="For use in documentation examples without requiring permission."	expected="Fetches and injects URL content before the AI request."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A7	label="Should be avoided in operational or production environments."	expected="Uses earlier AI output as the prompt input for a second step."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A8	label="More details about its intended use are available."	expected="Combines named references with fetched URL context."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A9	label="File-backed prompt"	expected="Injects attached file content into the AI prompt as text context."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A10	label="File analysis prompt"	expected="Uses an attached markdown file as the main source document."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A11	label="Reasoning prompt"	expected="Produces a compact objection-and-response style answer."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A12	label="Structured output"	expected="Returns a small table suitable for downstream references."	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A13	label="Benefit"	expected="Example Use Case"	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A14	label="Saves time and reduces manual errors in report generation"	expected="Generate monthly P&L statements with one click"	actual="PASS"	note=""
+status=PASS	kind=ai	sheetId=sheet-3	cellId=A15	label="Provides instant visibility into budget vs. actuals"	expected="Track departmental spend against budget in real-time dashboards"	actual="PASS"	note=""
+
+[fail_debug]
+FAIL sheet-3!A3 List shortcut
+address=A3	name=	formula=">5 target customer segments for @idea, one per row"	cellState="pending"	errorHint=""	generatedBy=""	displayValue="(manual: click Update)"	value="(manual: click Update)"	computedValue="(manual: click Update)"	shownOutput="(manual: click Update)"	shownHtml="(manual: click Update)"	outputNodes=1	mentionRefs=["@idea"]
+address=J2	name=idea	formula="AI spreadsheet copilot for finance teams"	cellState="resolved"	errorHint=""	generatedBy=""	displayValue="AI spreadsheet copilot for finance teams"	value="AI spreadsheet copilot for finance teams"	computedValue="AI spreadsheet copilot for finance teams"	shownOutput="AI spreadsheet copilot for finance teams"	shownHtml="AI spreadsheet copilot for finance teams"	outputNodes=1	mentionRefs=[]

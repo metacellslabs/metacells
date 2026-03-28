@@ -4,12 +4,12 @@
 
 Goal:
 
-- Keep the browser and Meteor web app focused on editing, rendering, routing, and persistence orchestration only.
+- Keep the browser web app focused on editing, rendering, routing, and persistence orchestration only.
 - Move long-running execution into worker processes that can scale independently.
 
 Requirements:
 
-- Meteor web process must not execute AI calls, file conversion, or channel polling inline.
+- The web process must not execute AI calls, file conversion, or channel polling inline.
 - Worker processes must be able to run independently from the web process.
 - Workbook edits must remain durable even if workers are offline.
 - Execution results must be written back through stable persistence APIs, not direct ad hoc mutations.
@@ -83,7 +83,7 @@ Delivered:
   - heartbeat interval
     for both AI and file-extraction job types.
 
-## 3. Move Workers Out Of The Meteor Web Process
+## 3. Move Workers Out Of The Web Process
 
 Status:
 

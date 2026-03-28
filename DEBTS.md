@@ -276,7 +276,7 @@ Severity:
 
 Problem:
 
-- Meteor/Rspack local dev startup has shown repeated cache corruption and panic issues.
+- The previous Rspack-based local dev startup has shown repeated cache corruption and panic issues.
 
 Impact:
 

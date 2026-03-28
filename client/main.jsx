@@ -1,1 +1,12 @@
-import '/imports/startup/client';
+import { createRoot } from 'react-dom/client';
+import { App } from '../imports/ui/app/App.jsx';
+import { RouterProvider } from '../imports/ui/app/router.jsx';
+import './main.css';
+
+const container = document.getElementById('react-target');
+const root = createRoot(container);
+root.render(
+  <RouterProvider>
+    <App />
+  </RouterProvider>,
+);

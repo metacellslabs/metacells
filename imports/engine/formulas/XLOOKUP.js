@@ -14,7 +14,9 @@ export default defineFormula({
 
     for (let i = 0; i < lookupValues.length; i += 1) {
       if (String(lookupValues[i]) === String(lookupValue)) {
-        return typeof returnValues[i] === 'undefined' ? '' : returnValues[i];
+        return typeof returnValues[i] === 'undefined'
+          ? ''
+          : helpers.coerceScalar(returnValues[i]);
       }
     }
 

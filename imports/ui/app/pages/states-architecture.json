@@ -1,0 +1,354 @@
+{
+  "title": "MetaCells System States",
+  "summary": "Architecture view of workbook storage, dependency propagation, WebSocket transport, server compute, and managed jobs.",
+  "lanes": [
+    {
+      "id": "client",
+      "label": "Client Workbook",
+      "description": "UI, storage, and render loop in the browser."
+    },
+    {
+      "id": "runtime",
+      "label": "Client Runtime",
+      "description": "Dependency planning, local recompute, AI/runtime guards."
+    },
+    {
+      "id": "transport",
+      "label": "WS Transport",
+      "description": "Realtime subscriptions, heartbeat, event fanout."
+    },
+    {
+      "id": "server",
+      "label": "Server Compute",
+      "description": "RPC, compute pipeline, job orchestration, publish."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "grid_ui",
+      "laneId": "client",
+      "title": "Grid UI",
+      "tag": "client",
+      "summary": "GridManager, formula bar, overlays, selection, report shell.",
+      "points": [
+        "Reads active cell source and computed display",
+        "Shows status badges for pending, stale, error",
+        "Commits edits and triggers save or recompute"
+      ]
+    },
+    {
+      "id": "workbook_storage",
+      "laneId": "client",
+      "title": "Workbook Storage",
+      "tag": "state",
+      "summary": "SheetDocStorage + WorkbookStorageAdapter snapshot of tabs, cells, formats, runtime state, and named cells.",
+      "points": [
+        "Persists source, value, displayValue, state, error",
+        "Keeps dependency graph and generated cell ownership",
+        "Flushes workbook snapshot through sheets.saveWorkbook"
+      ]
+    },
+    {
+      "id": "cell_runtime",
+      "laneId": "client",
+      "title": "Cell Runtime State",
+      "tag": "state",
+      "summary": "Per-cell lifecycle visible in the grid.",
+      "points": [
+        "resolved for stable computed output",
+        "pending for async formulas, uploads, manual update placeholders",
+        "stale when downstream server recompute is still expected",
+        "error when formula or AI execution fails"
+      ]
+    },
+    {
+      "id": "dependency_graph",
+      "laneId": "runtime",
+      "title": "Dependency Graph",
+      "tag": "runtime",
+      "summary": "dependentsByCell, dependentsByNamedRef, scan fallback, transitive downstream traversal.",
+      "points": [
+        "Maps source cell or named ref to downstream cells",
+        "Separates local sync targets from server-only async targets",
+        "Drives stale or pending propagation after edits"
+      ]
+    },
+    {
+      "id": "local_compute",
+      "laneId": "runtime",
+      "title": "Local Compute Planner",
+      "tag": "runtime",
+      "summary": "Collects immediate recompute plan in the browser and primes pending UI before server roundtrip.",
+      "points": [
+        "Evaluates sync formulas locally when safe",
+        "Marks async targets pending and server targets stale",
+        "Rerenders changed cells without rebuilding the whole sheet"
+      ]
+    },
+    {
+      "id": "ai_runtime",
+      "laneId": "runtime",
+      "title": "AI Runtime",
+      "tag": "runtime",
+      "summary": "Tracks pending AI work, edit locks, generated result cells, and manual or auto mode.",
+      "points": [
+        "Blocks duplicate async requests for the same source key",
+        "Uses edit locks while the source cell is being edited",
+        "Feeds generated result cleanup when source changes"
+      ]
+    },
+    {
+      "id": "ws_client",
+      "laneId": "transport",
+      "title": "WS Client",
+      "tag": "transport",
+      "summary": "Shared /ws socket with reconnect, heartbeat watchdog, workbook subscriptions, and server-event split.",
+      "points": [
+        "Subscribes active workbook document IDs",
+        "Deduplicates workbook.event sequences per document",
+        "Separately dispatches workbook.event and server.event"
+      ]
+    },
+    {
+      "id": "sheet_events",
+      "laneId": "transport",
+      "title": "Patch Application",
+      "tag": "transport",
+      "summary": "Applies cellPatchBySheet payloads and live server activity into client storage and UI.",
+      "points": [
+        "Consumes workbook.runtime.updated and workbook.document.updated",
+        "Writes server patches into workbook storage",
+        "Refreshes indicators, formulas, reports, and overlays"
+      ]
+    },
+    {
+      "id": "rpc_api",
+      "laneId": "server",
+      "title": "RPC API",
+      "tag": "server",
+      "summary": "sheets.saveWorkbook, server refresh, settings, jobs, and AI lock methods.",
+      "points": [
+        "Receives committed workbook snapshots from the client",
+        "Starts compute and settings workflows",
+        "Acts as synchronous control plane beside WS"
+      ]
+    },
+    {
+      "id": "compute_engine",
+      "laneId": "server",
+      "title": "Server Compute Engine",
+      "tag": "server",
+      "summary": "Formula evaluation, dependency collection, attachment handling, async scheduling, workbook event emission.",
+      "points": [
+        "Classifies result into resolved, pending, or error",
+        "Builds cell patches and pendingCellIds for WS publish",
+        "Stores computed values back into workbook snapshots"
+      ]
+    },
+    {
+      "id": "job_manager",
+      "laneId": "server",
+      "title": "Managed Jobs",
+      "tag": "jobs",
+      "summary": "Live projection of low-level jobs into managed_jobs with workbook-cell ownership.",
+      "points": [
+        "Tracks queued, leased, running, retrying activity",
+        "Maps queueMeta to sheetDocumentId, sheetId, and source cell",
+        "Publishes jobs.manager.updated as server.event"
+      ]
+    },
+    {
+      "id": "ws_server",
+      "laneId": "server",
+      "title": "WS Server",
+      "tag": "transport",
+      "summary": "WebSocket fanout for workbook.event, server.event, ws.ready, and ws.heartbeat.",
+      "points": [
+        "Filters workbook events by subscribed document",
+        "Broadcasts server events globally",
+        "Provides realtime path from compute and jobs back to the browser"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "grid_ui",
+      "to": "workbook_storage",
+      "label": "read and write source"
+    },
+    {
+      "from": "workbook_storage",
+      "to": "cell_runtime",
+      "label": "holds value, displayValue, state, error"
+    },
+    {
+      "from": "workbook_storage",
+      "to": "dependency_graph",
+      "label": "stores graph and named refs"
+    },
+    {
+      "from": "grid_ui",
+      "to": "local_compute",
+      "label": "commit edit"
+    },
+    {
+      "from": "dependency_graph",
+      "to": "local_compute",
+      "label": "derive local and server targets"
+    },
+    {
+      "from": "local_compute",
+      "to": "cell_runtime",
+      "label": "set stale or pending immediately"
+    },
+    {
+      "from": "local_compute",
+      "to": "ai_runtime",
+      "label": "prime async execution rules"
+    },
+    {
+      "from": "grid_ui",
+      "to": "ws_client",
+      "label": "subscribe active workbook"
+    },
+    {
+      "from": "grid_ui",
+      "to": "rpc_api",
+      "label": "saveWorkbook and compute RPC"
+    },
+    {
+      "from": "ws_client",
+      "to": "ws_server",
+      "label": "subscribe, reconnect, heartbeat"
+    },
+    {
+      "from": "ws_server",
+      "to": "sheet_events",
+      "label": "workbook.event and server.event"
+    },
+    {
+      "from": "sheet_events",
+      "to": "workbook_storage",
+      "label": "apply patches"
+    },
+    {
+      "from": "rpc_api",
+      "to": "compute_engine",
+      "label": "start recompute"
+    },
+    {
+      "from": "compute_engine",
+      "to": "job_manager",
+      "label": "enqueue async or file work"
+    },
+    {
+      "from": "compute_engine",
+      "to": "ws_server",
+      "label": "publish workbook patches"
+    },
+    {
+      "from": "job_manager",
+      "to": "ws_server",
+      "label": "publish live job state"
+    }
+  ],
+  "stateMachines": [
+    {
+      "id": "cell_state",
+      "title": "Cell state lifecycle",
+      "items": [
+        {
+          "name": "source edited",
+          "detail": "Raw source changes in the grid or formula bar and the storage snapshot is updated."
+        },
+        {
+          "name": "resolved",
+          "detail": "Sync formulas and stable values render directly from computed state."
+        },
+        {
+          "name": "stale",
+          "detail": "A dependent cell needs authoritative server recompute before the value is trusted."
+        },
+        {
+          "name": "pending",
+          "detail": "Async formula, attachment conversion, or manual AI update is in flight."
+        },
+        {
+          "name": "error",
+          "detail": "Formula, AI, attachment, or reference evaluation failed and the grid shows an error hint."
+        }
+      ]
+    },
+    {
+      "id": "job_state",
+      "title": "Managed job lifecycle",
+      "items": [
+        {
+          "name": "queued",
+          "detail": "Job is registered and waiting for a worker."
+        },
+        {
+          "name": "leased or running",
+          "detail": "Low-level worker owns the lock and is actively executing."
+        },
+        {
+          "name": "retrying",
+          "detail": "A recoverable failure schedules another attempt."
+        },
+        {
+          "name": "completed",
+          "detail": "Managed projection closes the live record and emits a final event."
+        }
+      ]
+    },
+    {
+      "id": "socket_state",
+      "title": "WebSocket lifecycle",
+      "items": [
+        {
+          "name": "disconnected",
+          "detail": "No shared socket exists."
+        },
+        {
+          "name": "connecting",
+          "detail": "The browser opens /ws and waits for ws.ready."
+        },
+        {
+          "name": "connected",
+          "detail": "Heartbeat is healthy and subscriptions are active."
+        },
+        {
+          "name": "reconnecting",
+          "detail": "Watchdog or close event triggers resubscribe flow."
+        }
+      ]
+    }
+  ],
+  "dependencyTree": [
+    {
+      "level": "1",
+      "title": "Source cell",
+      "detail": "Cell source, attachment source, named-cell reference, or channel-driven formula becomes the origin."
+    },
+    {
+      "level": "2",
+      "title": "Collected dependencies",
+      "detail": "Formula engine extracts cell refs, named refs, channel labels, and attachment requirements."
+    },
+    {
+      "level": "3",
+      "title": "Indexed graph",
+      "detail": "Storage keeps dependentsByCell and dependentsByNamedRef, with scan fallback for unresolved formulas."
+    },
+    {
+      "level": "4",
+      "title": "Recompute plan",
+      "detail": "Runtime splits downstream nodes into local sync targets and server-only async targets."
+    },
+    {
+      "level": "5",
+      "title": "Propagation",
+      "detail": "Targets become resolved, stale, pending, or error, then patches flow through WS back into the grid."
+    }
+  ]
+}

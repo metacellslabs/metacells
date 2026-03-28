@@ -1,5 +1,23 @@
 import { validateAIProviderDefinition } from './definition.js';
 
+import _AWS_BEDROCK from './AWS_BEDROCK.js';
+import _CORPORATE_AI_MODEL from './CORPORATE_AI_MODEL.js';
+import _GEMINI from './GEMINI.js';
+import _GOOGLE_VERTEX_AI from './GOOGLE_VERTEX_AI.js';
+import _LM_STUDIO from './LM_STUDIO.js';
+import _OLLAMA from './OLLAMA.js';
+import _OPENAI from './OPENAI.js';
+
+const ALL_MODULES = {
+  './AWS_BEDROCK.js': { default: _AWS_BEDROCK },
+  './CORPORATE_AI_MODEL.js': { default: _CORPORATE_AI_MODEL },
+  './GEMINI.js': { default: _GEMINI },
+  './GOOGLE_VERTEX_AI.js': { default: _GOOGLE_VERTEX_AI },
+  './LM_STUDIO.js': { default: _LM_STUDIO },
+  './OLLAMA.js': { default: _OLLAMA },
+  './OPENAI.js': { default: _OPENAI },
+};
+
 function shouldIgnoreProviderFile(key) {
   return /(?:^|\/)(?:index|definition)\.js$/i.test(String(key || ''));
 }
@@ -26,20 +44,15 @@ function buildDiscoveryHash(key, definition) {
 }
 
 function discoverAIProviders() {
-  const context = import.meta.webpackContext('./', {
-    recursive: false,
-    regExp: /\.js$/,
-  });
   const providers = [];
   const manifest = [];
   const seenIds = {};
 
-  context
-    .keys()
+  Object.keys(ALL_MODULES)
     .sort()
     .forEach((key) => {
       if (shouldIgnoreProviderFile(key)) return;
-      const moduleExports = context(key);
+      const moduleExports = ALL_MODULES[key];
       const definition = validateAIProviderDefinition(
         moduleExports && moduleExports.default,
         key,

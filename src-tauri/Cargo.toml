@@ -1,0 +1,13 @@
+[package]
+name = "metacells_tauri"
+version = "0.1.0"
+description = "MetaCells desktop shell powered by Tauri"
+authors = ["MetaCells Team"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1"
+tauri = { version = "2", features = [] }

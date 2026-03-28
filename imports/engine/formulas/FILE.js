@@ -1,5 +1,19 @@
 import { defineFormula } from './definition.js';
-import { buildSimplePdfBase64 } from '../pdf-utils.js';
+
+function normalizeGeneratedFileName(name, generatedAs) {
+  const raw = String(name == null ? '' : name).trim();
+  if (!raw) return '';
+  const mode = String(generatedAs || '').trim().toUpperCase();
+  if (mode === 'PDF') {
+    if (/\.pdf$/i.test(raw)) return raw;
+    return raw.replace(/\.[^./\\]+$/, '') + '.pdf';
+  }
+  if (mode === 'DOCX_MD') {
+    if (/\.docx$/i.test(raw)) return raw;
+    return raw.replace(/\.[^./\\]+$/, '') + '.docx';
+  }
+  return raw;
+}
 
 const MIME_TYPE_MAP = {
   PDF: 'application/pdf',
@@ -56,13 +70,14 @@ export default defineFormula({
     '`=FILE("report.docx", A1, "DOCX_MD")`',
   ],
   execute: ({ args, helpers }) => {
-    const name = String(
+    const rawName = String(
       helpers.firstScalar(args[0]) == null ? '' : helpers.firstScalar(args[0]),
     ).trim();
     const content = resolveContentValue(args[1], helpers);
     const typeArg = helpers.firstScalar(args[2]);
     const mimeType = resolveMimeType(typeArg);
     const generatedAs = resolveGeneratedAs(typeArg);
+    const name = normalizeGeneratedFileName(rawName, generatedAs);
 
     if (!name) return '';
 
@@ -76,10 +91,6 @@ export default defineFormula({
 
     if (generatedAs) {
       attachment.generatedAs = generatedAs;
-    }
-    if (generatedAs === 'PDF') {
-      attachment.content = buildSimplePdfBase64(content);
-      attachment.encoding = 'base64';
     }
 
     return '__ATTACHMENT__:' + JSON.stringify(attachment);

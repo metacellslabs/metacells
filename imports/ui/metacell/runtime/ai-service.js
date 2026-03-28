@@ -1,6 +1,6 @@
 // Description: LM Studio integration with auto/manual refresh control for askAI and listAI formulas.
 import { AI_MODE } from './constants.js';
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../../lib/rpc-client.js';
 import {
   AI_LIST_DELIMITER,
   buildListSystemPrompt,
@@ -8,7 +8,8 @@ import {
 } from './ai-prompts.js';
 import { buildAttachmentLinksMarkdown } from '../../../api/channels/mentioning.js';
 
-var SHARED_AI_PENDING = {};
+var SHARED_AI_PENDING = {}; // cacheKey → Promise (for requestTable) or true (for requestAsk/List)
+var SHARED_AI_RESULT_CACHE = {}; // cacheKey → answer, shared between concurrent server-side requests
 
 export class AIService {
   constructor(storageService, onInvalidate, queueContext) {
@@ -37,20 +38,60 @@ export class AIService {
     this.autoDebounceActive = false;
     this.queuedAutoRequests = {};
     this.urlContentCacheTTLms = 3 * 24 * 60 * 60 * 1000;
+    this._pendingPromises = [];
+  }
+
+  hasPendingRequests() {
+    return this._pendingPromises.length > 0;
+  }
+
+  waitForPendingRequests() {
+    if (!this._pendingPromises.length) return Promise.resolve();
+    // Use .catch to swallow rejections — we only need to wait for all
+    // requests to settle (succeed or fail), not propagate errors.
+    return Promise.all(
+      this._pendingPromises.slice().map(function (p) {
+        return p.catch(function () {});
+      }),
+    ).then(function () {});
+  }
+
+  _trackPromise(promise) {
+    var self = this;
+    self._pendingPromises.push(promise);
+    promise.finally(function () {
+      var idx = self._pendingPromises.indexOf(promise);
+      if (idx >= 0) self._pendingPromises.splice(idx, 1);
+    });
   }
 
   buildQueueMeta(meta) {
     var source = meta || {};
     var activeSheetId = '';
+    var workbookSnapshot = null;
     try {
       activeSheetId = String(this.getQueueActiveSheetId() || '');
     } catch (e) {}
+    try {
+      workbookSnapshot =
+        this.storageService &&
+        this.storageService.storage &&
+        typeof this.storageService.storage.snapshot === 'function'
+          ? this.storageService.storage.snapshot()
+          : null;
+    } catch (e) {
+      workbookSnapshot = null;
+    }
     return {
       ...source,
       sheetDocumentId: this.sheetDocumentId,
       activeSheetId: activeSheetId,
       sourceCellId: String(source.sourceCellId || ''),
       formulaKind: String(source.formulaKind || ''),
+      workbookSnapshot:
+        workbookSnapshot && typeof workbookSnapshot === 'object'
+          ? workbookSnapshot
+          : source.workbookSnapshot || null,
     };
   }
 
@@ -362,6 +403,13 @@ export class AIService {
       this.cache[cacheKey] = stored;
       return stored;
     }
+    // Check shared result cache: set by concurrent server-side AIService instances
+    // so this instance can pick up answers from parallel computeSheetSnapshot calls.
+    if (Object.prototype.hasOwnProperty.call(SHARED_AI_RESULT_CACHE, cacheKey)) {
+      var sharedResult = SHARED_AI_RESULT_CACHE[cacheKey];
+      this.cache[cacheKey] = sharedResult;
+      return sharedResult;
+    }
   }
 
   loadListCache(cacheKey) {
@@ -488,7 +536,16 @@ export class AIService {
     userContent,
     queueMeta,
   ) {
-    if (this.pending[cacheKey] || SHARED_AI_PENDING[cacheKey]) {
+    if (this.pending[cacheKey]) {
+      return;
+    }
+    if (SHARED_AI_PENDING[cacheKey]) {
+      // Another concurrent compute is already processing this key.
+      // Track the shared Promise so waitForPendingRequests() can wait for it.
+      var sharedP = SHARED_AI_PENDING[cacheKey];
+      if (sharedP && typeof sharedP.then === 'function') {
+        this._trackPromise(sharedP.catch(function () {}));
+      }
       return;
     }
 
@@ -500,7 +557,6 @@ export class AIService {
     }
 
     this.pending[cacheKey] = true;
-    SHARED_AI_PENDING[cacheKey] = true;
 
     var done = () => {
       delete this.pending[cacheKey];
@@ -515,7 +571,7 @@ export class AIService {
       content: this.buildUserMessageContent(prompt, userContent),
     });
 
-    this.enrichPromptWithFetchedUrls(prompt)
+    var requestPromise = this.enrichPromptWithFetchedUrls(prompt)
       .then((finalPrompt) => {
         messages[messages.length - 1] = {
           role: 'user',
@@ -530,12 +586,18 @@ export class AIService {
         );
         this.cache[cacheKey] = answer;
         this.storageService.setCacheValue(cacheKey, answer);
+        // Share the result globally so concurrent server-side computeSheetSnapshot
+        // instances (different RPC requests) can pick up the answer on re-evaluation.
+        SHARED_AI_RESULT_CACHE[cacheKey] = answer;
         return done();
       })
       .catch((err) => {
         this.cache[cacheKey] = '#AI_ERROR: ' + err.message;
         return done();
       });
+    // Store the Promise in SHARED_AI_PENDING so concurrent requests can track it.
+    SHARED_AI_PENDING[cacheKey] = requestPromise;
+    this._trackPromise(requestPromise);
   }
 
   requestList(
@@ -577,7 +639,7 @@ export class AIService {
       content: this.buildUserMessageContent(prompt, userContent),
     });
 
-    this.enrichPromptWithFetchedUrls(prompt)
+    var requestPromise = this.enrichPromptWithFetchedUrls(prompt)
       .then((finalPrompt) => {
         messages[messages.length - 1] = {
           role: 'user',
@@ -593,6 +655,7 @@ export class AIService {
         var options = this.parseListOptions(enriched, count);
         this.cache[cacheKey] = options;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(options));
+        SHARED_AI_RESULT_CACHE[cacheKey] = options;
         if (typeof onResult === 'function') onResult(options);
         return done();
       })
@@ -601,6 +664,7 @@ export class AIService {
         if (typeof onResult === 'function') onResult(this.cache[cacheKey]);
         return done();
       });
+    this._trackPromise(requestPromise);
   }
 
   requestTable(
@@ -660,6 +724,7 @@ export class AIService {
         var matrix = this.parseTableResponse(String(content || ''), cols, rows);
         this.cache[cacheKey] = matrix;
         this.storageService.setCacheValue(cacheKey, JSON.stringify(matrix));
+        SHARED_AI_RESULT_CACHE[cacheKey] = matrix;
         if (typeof onResult === 'function') onResult(matrix);
         return done().then(() => matrix);
       })
@@ -671,6 +736,7 @@ export class AIService {
 
     this.pending[cacheKey] = requestPromise;
     SHARED_AI_PENDING[cacheKey] = requestPromise;
+    this._trackPromise(requestPromise);
     return requestPromise;
   }
 
@@ -714,7 +780,7 @@ export class AIService {
     var cached = this.readUrlMarkdownCache(url);
     if (cached) return Promise.resolve(cached);
 
-    return Meteor.callAsync('ai.fetchUrlMarkdown', url).then((markdown) => {
+    return rpc('ai.fetchUrlMarkdown', url).then((markdown) => {
       markdown = this.htmlToMarkdown(markdown);
       var maxChars = 50000;
       var finalMarkdown =
@@ -895,13 +961,13 @@ export class AIService {
   }
 
   requestChat(messages, queueMeta) {
-    return Meteor.callAsync('ai.requestChat', messages, queueMeta || null);
+    return rpc('ai.requestChat', messages, queueMeta || null);
   }
 
   getModel() {
     if (this.model) return Promise.resolve(this.model);
 
-    return Meteor.callAsync('ai.getModel')
+    return rpc('ai.getModel')
       .then((model) => {
         this.model = model || 'local-model';
         return this.model;

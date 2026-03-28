@@ -1,3 +1,7 @@
+import { getSelectionRangeState } from './selection-range-facade.js';
+import { applyDocumentCellSource } from './document-cell-facade.js';
+import { runCommandRecompute } from './command-recompute-facade.js';
+
 export function setupGridResizing(app) {
   app.grid.installResizeHandles(
     (colIndex, width) =>
@@ -15,19 +19,7 @@ export function setupColumnSort(app) {
     cell.textContent = '';
     var label = document.createElement('span');
     label.textContent = text;
-    var sortBtn = document.createElement('button');
-    sortBtn.type = 'button';
-    sortBtn.className = 'sort-button';
-    sortBtn.textContent = '⇅';
-    sortBtn.dataset.colIndex = String(colIndex);
-    sortBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      var idx = parseInt(e.currentTarget.dataset.colIndex, 10);
-      app.toggleSortByColumn(idx);
-    });
     cell.appendChild(label);
-    cell.appendChild(sortBtn);
   }
 }
 
@@ -81,11 +73,12 @@ function readCellTransferState(app, cellId) {
 function writeCellTransferState(app, cellId, state) {
   var next = state && typeof state === 'object' ? state : null;
   app.setCellSchedule(cellId, next ? next.schedule || null : null);
-  app.setRawCellValue(
-    cellId,
-    next ? next.raw || '' : '',
-    { preserveSchedule: true },
-  );
+  applyDocumentCellSource(app, {
+    sheetId: app.activeSheetId,
+    cellId: cellId,
+    rawValue: next ? next.raw || '' : '',
+    meta: { preserveSchedule: true },
+  });
 }
 
 export function toggleSortByColumn(app, colIndex) {
@@ -156,7 +149,7 @@ export function sortRowsByColumn(app, colIndex, direction, skipCompute) {
     }
   }
 
-  if (!skipCompute) app.computeAll();
+  if (!skipCompute) runCommandRecompute(app);
 }
 
 export function updateSortIcons(app) {
@@ -194,15 +187,16 @@ export function applyAutoResort(app) {
 }
 
 export function getSelectedRowBounds(app) {
+  var selectionRange = getSelectionRangeState(app);
   var maxCol = app.table.rows[0].cells.length - 1;
   if (
-    app.selectionRange &&
-    app.selectionRange.startCol === 1 &&
-    app.selectionRange.endCol === maxCol
+    selectionRange &&
+    selectionRange.startCol === 1 &&
+    selectionRange.endCol === maxCol
   ) {
     return {
-      start: app.selectionRange.startRow,
-      end: app.selectionRange.endRow,
+      start: selectionRange.startRow,
+      end: selectionRange.endRow,
     };
   }
   if (app.contextMenuState && app.contextMenuState.type === 'row') {
@@ -271,7 +265,12 @@ function remapCellIdForStructureEdit(cellId, axis, start, count, mode, app) {
 function moveStructuredCell(app, targetId, sourceId, axis, start, count, mode) {
   if (!app || !targetId) return;
   if (!sourceId) {
-    app.setRawCellValue(targetId, '', { generatedBy: '' });
+    applyDocumentCellSource(app, {
+      sheetId: app.activeSheetId,
+      cellId: targetId,
+      rawValue: '',
+      meta: { generatedBy: '' },
+    });
     return;
   }
   var rawValue = app.getRawCellValue(sourceId);
@@ -293,10 +292,20 @@ function moveStructuredCell(app, targetId, sourceId, axis, start, count, mode) {
     };
   }
   if (meta && meta.generatedBy) {
-    app.setRawCellValue(targetId, rawValue, meta);
+    applyDocumentCellSource(app, {
+      sheetId: app.activeSheetId,
+      cellId: targetId,
+      rawValue: rawValue,
+      meta: meta,
+    });
     return;
   }
-  app.setRawCellValue(targetId, rawValue, { generatedBy: '' });
+  applyDocumentCellSource(app, {
+    sheetId: app.activeSheetId,
+    cellId: targetId,
+    rawValue: rawValue,
+    meta: { generatedBy: '' },
+  });
 }
 
 export function remapNamedCellsForStructureEdit(
@@ -449,15 +458,16 @@ function applyNamedCellRelinkForStructureEdit(app, axis, start, count, mode) {
 }
 
 export function getSelectedColumnBounds(app) {
+  var selectionRange = getSelectionRangeState(app);
   var maxRow = app.table.rows.length - 1;
   if (
-    app.selectionRange &&
-    app.selectionRange.startRow === 1 &&
-    app.selectionRange.endRow === maxRow
+    selectionRange &&
+    selectionRange.startRow === 1 &&
+    selectionRange.endRow === maxRow
   ) {
     return {
-      start: app.selectionRange.startCol,
-      end: app.selectionRange.endCol,
+      start: selectionRange.startCol,
+      end: selectionRange.endCol,
     };
   }
   if (app.contextMenuState && app.contextMenuState.type === 'col') {
@@ -516,7 +526,7 @@ export function insertRowsAtContext(app, position) {
 
   app.selectEntireRow(start, start + count - 1);
   app.aiService.notifyActiveCellChanged();
-  app.computeAll();
+  runCommandRecompute(app);
 }
 
 export function deleteRowsAtContext(app) {
@@ -546,7 +556,7 @@ export function deleteRowsAtContext(app) {
 
   app.selectEntireRow(start, Math.min(maxRow, start + count - 1));
   app.aiService.notifyActiveCellChanged();
-  app.computeAll();
+  runCommandRecompute(app);
 }
 
 export function insertColumnsAtContext(app, position) {
@@ -593,7 +603,7 @@ export function insertColumnsAtContext(app, position) {
 
   app.selectEntireColumn(start, start + count - 1);
   app.aiService.notifyActiveCellChanged();
-  app.computeAll();
+  runCommandRecompute(app);
 }
 
 export function deleteColumnsAtContext(app) {
@@ -623,5 +633,5 @@ export function deleteColumnsAtContext(app) {
 
   app.selectEntireColumn(start, Math.min(maxCol, start + count - 1));
   app.aiService.notifyActiveCellChanged();
-  app.computeAll();
+  runCommandRecompute(app);
 }

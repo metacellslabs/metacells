@@ -1,15 +1,53 @@
-import { Meteor } from 'meteor/meteor';
+import { rpc } from '../../../lib/rpc-client.js';
 import { WorkbookStorageAdapter } from './runtime/workbook-storage-adapter.js';
+import { buildClientWorkbookSnapshot } from '../../api/sheets/workbook-codec.js';
 
 class SheetDocStorageCore extends WorkbookStorageAdapter {
-  constructor(sheetId, initialWorkbook) {
+  constructor(sheetId, initialWorkbook, options) {
     super(initialWorkbook);
+    const opts = options && typeof options === 'object' ? options : {};
     this.sheetId = sheetId;
     this.flushTimer = null;
     this.flushDelayMs = 250;
     this.localRevision = 0;
     this.persistedRevision = 0;
     this.saveInFlight = false;
+    this.documentRevision = String(opts.initialDocumentRevision || '');
+    this.onDocumentRevisionChange =
+      typeof opts.onDocumentRevisionChange === 'function'
+        ? opts.onDocumentRevisionChange
+        : null;
+    this.onRevisionConflict =
+      typeof opts.onRevisionConflict === 'function'
+        ? opts.onRevisionConflict
+        : null;
+  }
+
+  getDocumentRevision() {
+    return String(this.documentRevision || '');
+  }
+
+  shouldAcceptDocumentRevision(revision) {
+    const nextRevision = String(revision || '');
+    const currentRevision = String(this.documentRevision || '');
+    if (!nextRevision) return false;
+    if (!currentRevision) return true;
+    if (nextRevision === currentRevision) return false;
+    const currentTime = Date.parse(currentRevision);
+    const nextTime = Date.parse(nextRevision);
+    if (Number.isFinite(currentTime) && Number.isFinite(nextTime)) {
+      return nextTime >= currentTime;
+    }
+    return nextRevision >= currentRevision;
+  }
+
+  setDocumentRevision(revision) {
+    const nextRevision = String(revision || '');
+    if (!this.shouldAcceptDocumentRevision(nextRevision)) return;
+    this.documentRevision = nextRevision;
+    if (typeof this.onDocumentRevisionChange === 'function') {
+      this.onDocumentRevisionChange(nextRevision);
+    }
   }
 
   scheduleFlush() {
@@ -18,23 +56,72 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
       clearTimeout(this.flushTimer);
     }
 
-    const targetRevision = this.localRevision;
-    this.flushTimer = setTimeout(() => {
+    const runFlush = (targetRevision) => {
       this.flushTimer = null;
+      if (this.saveInFlight) {
+        this.flushTimer = setTimeout(() => {
+          runFlush(this.localRevision);
+        }, this.flushDelayMs);
+        return;
+      }
       this.saveInFlight = true;
-      Meteor.callAsync('sheets.saveWorkbook', this.sheetId, this.snapshot())
-        .then(() => {
+      const documentSnapshot = buildClientWorkbookSnapshot(this.snapshot());
+      documentSnapshot.caches = {};
+      rpc(
+        'sheets.saveWorkbook',
+        this.sheetId,
+        documentSnapshot,
+        {
+          expectedRevision: this.getDocumentRevision(),
+        },
+      )
+        .then((result) => {
           this.persistedRevision = Math.max(
             this.persistedRevision,
             targetRevision,
           );
+          if (result && result.revision) {
+            this.setDocumentRevision(result.revision);
+          }
+          return result;
         })
         .catch((error) => {
+          var isConflict =
+            error &&
+            String(error.error || '').trim().toLowerCase() === 'conflict';
+          if (isConflict) {
+            var nextRevision = String(
+              (error &&
+                error.details &&
+                (error.details.documentRevision || error.details.revision)) ||
+                '',
+            );
+            if (nextRevision) {
+              this.setDocumentRevision(nextRevision);
+            }
+            if (typeof this.onRevisionConflict === 'function') {
+              this.onRevisionConflict(error);
+            }
+            if (this.persistedRevision < this.localRevision) {
+              this.scheduleFlush();
+            }
+            return;
+          }
           console.error('Failed to save workbook', error);
         })
         .finally(() => {
           this.saveInFlight = false;
+          if (!this.flushTimer && this.persistedRevision < this.localRevision) {
+            this.flushTimer = setTimeout(() => {
+              runFlush(this.localRevision);
+            }, this.flushDelayMs);
+          }
         });
+    };
+
+    const targetRevision = this.localRevision;
+    this.flushTimer = setTimeout(() => {
+      runFlush(targetRevision);
     }, this.flushDelayMs);
   }
 
@@ -70,7 +157,6 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
       errorMessage,
       meta,
     );
-    this.scheduleFlush();
   }
 
   setCellRuntimeState(sheetId, cellId, updates) {
@@ -90,12 +176,10 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
 
   setCellDependencies(sheetId, cellId, dependencies) {
     super.setCellDependencies(sheetId, cellId, dependencies);
-    this.scheduleFlush();
   }
 
   clearCellDependencies(sheetId, cellId) {
     super.clearCellDependencies(sheetId, cellId);
-    this.scheduleFlush();
   }
 
   setColumnWidth(sheetId, colIndex, width) {
@@ -140,12 +224,10 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
 
   setCacheValue(key, value) {
     super.setCacheValue(key, value);
-    this.scheduleFlush();
   }
 
   removeCacheValue(key) {
     super.removeCacheValue(key);
-    this.scheduleFlush();
   }
 
   clearSheet(sheetId) {
@@ -154,6 +236,6 @@ class SheetDocStorageCore extends WorkbookStorageAdapter {
   }
 }
 
-export function createSheetDocStorage(sheetId, initialWorkbook) {
-  return new SheetDocStorageCore(sheetId, initialWorkbook);
+export function createSheetDocStorage(sheetId, initialWorkbook, options) {
+  return new SheetDocStorageCore(sheetId, initialWorkbook, options);
 }

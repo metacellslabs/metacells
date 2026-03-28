@@ -1,7 +1,7 @@
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import { Meteor } from 'meteor/meteor';
+import { invokeRpc, isServer } from './runtime-test-helpers.js';
 
 function listSpecFiles(rootDir) {
   if (!fs.existsSync(rootDir)) return [];
@@ -447,13 +447,13 @@ function resolveTargetReference(workbook, target, explicitSheet) {
 
 async function computeWorkbook(sheetId, workbookSnapshot) {
   const activeSheetId = getDefaultActiveSheetId(workbookSnapshot);
-  return Meteor.server.method_handlers['sheets.computeGrid'].apply({}, [
+  return invokeRpc('sheets.computeGrid', 
     sheetId,
     activeSheetId,
     {
       workbookSnapshot,
     },
-  ]);
+  );
 }
 
 async function applySetStep(sheetId, step) {
@@ -600,13 +600,13 @@ async function runScenarioStep(sheetId, step) {
 
 async function createWorkbookForScenario(spec, specFilePath, scenarioName) {
   const workbook = buildWorkbookFromSpec(spec, specFilePath);
-  const sheetId = await Meteor.server.method_handlers['sheets.create'].apply({}, [
+  const sheetId = await invokeRpc('sheets.create', 
     `${String(spec.name || 'Workbook Spec').trim()} :: ${scenarioName}`,
-  ]);
-  await Meteor.server.method_handlers['sheets.saveWorkbook'].apply({}, [
+  );
+  await invokeRpc('sheets.saveWorkbook', 
     sheetId,
     workbook,
-  ]);
+  );
   await computeWorkbook(sheetId, workbook);
   return sheetId;
 }
@@ -618,7 +618,7 @@ function shouldIncludeSpec(filePath) {
 }
 
 export function registerWorkbookSpecTests() {
-  if (!Meteor.isServer) return;
+  if (!isServer) return;
 
   describe('workbook spec framework', function () {
     const specRoots = resolveSpecRoots(process.env.WORKBOOK_SPEC_DIR);

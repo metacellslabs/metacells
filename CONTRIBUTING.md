@@ -13,7 +13,7 @@ npm install
 Run the app:
 
 ```
-meteor
+npm run start
 ```
 
 ## First contributions

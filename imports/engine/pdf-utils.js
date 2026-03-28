@@ -69,6 +69,42 @@ function escapePdfText(value) {
     .replace(/\)/g, '\\)');
 }
 
+function getUtf8Bytes(value) {
+  var text = String(value == null ? '' : value);
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(text);
+  }
+  var encoded = unescape(encodeURIComponent(text));
+  var bytes = new Uint8Array(encoded.length);
+  for (var index = 0; index < encoded.length; index++) {
+    bytes[index] = encoded.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function getUtf8ByteLength(value) {
+  if (typeof Buffer !== 'undefined' && Buffer && typeof Buffer.byteLength === 'function') {
+    return Buffer.byteLength(String(value == null ? '' : value), 'utf8');
+  }
+  return getUtf8Bytes(value).length;
+}
+
+function base64EncodeUtf8(value) {
+  var text = String(value == null ? '' : value);
+  if (typeof Buffer !== 'undefined' && Buffer && typeof Buffer.from === 'function') {
+    return Buffer.from(text, 'utf8').toString('base64');
+  }
+  var bytes = getUtf8Bytes(text);
+  var binary = '';
+  for (var index = 0; index < bytes.length; index++) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  if (typeof btoa === 'function') {
+    return btoa(binary);
+  }
+  throw new Error('Base64 encoding is not available in this environment');
+}
+
 export function buildSimplePdfBase64(content) {
   var normalized = normalizePdfText(content);
   var lines = normalized.split('\n');
@@ -81,7 +117,7 @@ export function buildSimplePdfBase64(content) {
   }
   contentOps.push('ET');
   var streamText = contentOps.join('\n');
-  var streamLength = Buffer.byteLength(streamText, 'utf8');
+  var streamLength = getUtf8ByteLength(streamText);
 
   var objects = [
     '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
@@ -98,11 +134,11 @@ export function buildSimplePdfBase64(content) {
   var pdf = '%PDF-1.4\n';
   var offsets = [0];
   for (var j = 0; j < objects.length; j++) {
-    offsets.push(Buffer.byteLength(pdf, 'utf8'));
+    offsets.push(getUtf8ByteLength(pdf));
     pdf += objects[j];
   }
 
-  var xrefOffset = Buffer.byteLength(pdf, 'utf8');
+  var xrefOffset = getUtf8ByteLength(pdf);
   pdf += 'xref\n0 ' + String(objects.length + 1) + '\n';
   pdf += '0000000000 65535 f \n';
   for (var k = 1; k < offsets.length; k++) {
@@ -115,5 +151,5 @@ export function buildSimplePdfBase64(content) {
     String(xrefOffset) +
     '\n%%EOF';
 
-  return Buffer.from(pdf, 'utf8').toString('base64');
+  return base64EncodeUtf8(pdf);
 }

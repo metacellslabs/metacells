@@ -1,5 +1,3 @@
-import { Meteor } from 'meteor/meteor';
-import { WebApp } from 'meteor/webapp';
 import { ChannelEvents } from './events.js';
 import { getArtifactBinary } from '../artifacts/index.js';
 
@@ -26,10 +24,8 @@ function contentDisposition(fileName) {
   return `inline; filename="${raw}"`;
 }
 
-export function registerChannelEventAttachmentRoute() {
-  if (!Meteor.isServer) return;
-
-  WebApp.rawConnectHandlers.use(async (req, res, next) => {
+export function createChannelEventAttachmentMiddleware() {
+  return async (req, res, next) => {
     const url = String(req.url || '');
     const match = url.match(
       /^\/channel-events\/([^/]+)\/attachments\/([^/?#]+)/,
@@ -86,5 +82,5 @@ export function registerChannelEventAttachmentRoute() {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.end('Failed to serve attachment');
     }
-  });
+  };
 }

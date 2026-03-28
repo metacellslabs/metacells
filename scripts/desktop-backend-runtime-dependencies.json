@@ -1,0 +1,7 @@
+[
+  "express",
+  "imapflow",
+  "nodemailer",
+  "telegraf",
+  "ws"
+]
